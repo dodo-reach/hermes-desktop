@@ -26,7 +26,7 @@ That is the point of the app. Hermes Desktop does not try to replace the real
 Hermes workflow. It makes that workflow feel faster, calmer, and more native on
 macOS without hiding how it actually works.
 
-![Hermes Desktop Sessions view](assets/readme-preview-sessions-safe.png)
+![Hermes Desktop Sessions view](assets/readme-preview-sessions-blurred-safe.png)
 
 Preview of the Sessions view, showing recent Hermes conversations on the active
 host.
