@@ -21,16 +21,16 @@ struct SessionsView: View {
 
                 sessionsPanel
             }
-            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
+            .frame(minWidth: 300, idealWidth: 340, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 20)
 
             SessionDetailView(
                 session: selectedSession,
                 messages: appState.sessionMessages,
                 errorMessage: appState.sessionsError
             )
-            .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(minWidth: 420, idealWidth: 520, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: appState.activeConnectionID) {

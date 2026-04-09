@@ -10,13 +10,7 @@ struct HermesDesktopApp: App {
         WindowGroup("Hermes Desktop") {
             RootView()
                 .environmentObject(appState)
-                .frame(minWidth: 1180, minHeight: 760)
-                .background {
-                    MainWindowAccessor(
-                        title: "Hermes Desktop",
-                        minSize: NSSize(width: 1180, height: 760)
-                    )
-                }
+                .frame(minWidth: 940, minHeight: 520)
         }
         .defaultSize(width: 1360, height: 860)
     }
