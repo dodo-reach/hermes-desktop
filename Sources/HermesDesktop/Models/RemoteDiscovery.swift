@@ -19,25 +19,29 @@ struct RemoteDiscovery: Codable {
 }
 
 struct RemoteHermesPaths: Codable {
-    let memory: String
     let user: String
+    let memory: String
+    let soul: String
     let sessionsDir: String
 
     enum CodingKeys: String, CodingKey {
-        case memory
         case user
+        case memory
+        case soul
         case sessionsDir = "sessions_dir"
     }
 }
 
 struct RemoteHermesPathExistence: Codable {
-    let memory: Bool
     let user: Bool
+    let memory: Bool
+    let soul: Bool
     let sessionsDir: Bool
 
     enum CodingKeys: String, CodingKey {
-        case memory
         case user
+        case memory
+        case soul
         case sessionsDir = "sessions_dir"
     }
 }

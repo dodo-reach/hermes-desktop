@@ -1,8 +1,10 @@
 import Foundation
 
+@MainActor
 final class TerminalSession: ObservableObject, @unchecked Sendable {
     let connection: ConnectionProfile
     let sshArguments: [String]
+    private let viewHost = TerminalViewHost()
 
     @Published var terminalTitle: String
     @Published var currentDirectory: String?
@@ -15,6 +17,11 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
         self.connection = connection
         self.sshArguments = sshTransport.shellArguments(for: connection)
         self.terminalTitle = connection.label
+        viewHost.bind(session: self)
+    }
+
+    deinit {
+        viewHost.terminate()
     }
 
     func markStarted() {
@@ -39,7 +46,16 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
         launchToken = UUID()
     }
 
+    func mount(in container: TerminalMountContainerView, isActive: Bool) {
+        viewHost.mount(in: container, session: self, isActive: isActive)
+    }
+
+    func unmount(from container: TerminalMountContainerView) {
+        viewHost.unmount(from: container)
+    }
+
     func stop() {
+        viewHost.terminate()
         isRunning = false
         currentDirectory = nil
     }

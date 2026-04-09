@@ -130,8 +130,9 @@ final class RemoteHermesService: @unchecked Sendable {
         try:
             home = pathlib.Path.home()
             hermes_home = home / ".hermes"
-            memory_path = hermes_home / "memories" / "MEMORY.md"
             user_path = hermes_home / "memories" / "USER.md"
+            memory_path = hermes_home / "memories" / "MEMORY.md"
+            soul_path = hermes_home / "SOUL.md"
             sessions_dir = hermes_home / "sessions"
 
             result = {
@@ -139,13 +140,15 @@ final class RemoteHermesService: @unchecked Sendable {
                 "remote_home": tilde(home, home),
                 "hermes_home": tilde(hermes_home, home),
                 "paths": {
-                    "memory": tilde(memory_path, home),
                     "user": tilde(user_path, home),
+                    "memory": tilde(memory_path, home),
+                    "soul": tilde(soul_path, home),
                     "sessions_dir": tilde(sessions_dir, home),
                 },
                 "exists": {
-                    "memory": memory_path.exists(),
                     "user": user_path.exists(),
+                    "memory": memory_path.exists(),
+                    "soul": soul_path.exists(),
                     "sessions_dir": sessions_dir.exists(),
                 },
                 "session_store": discover_session_store(hermes_home),

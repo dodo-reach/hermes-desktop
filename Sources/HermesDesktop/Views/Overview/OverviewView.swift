@@ -214,6 +214,13 @@ struct OverviewView: View {
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 OverviewPathRow(
+                    title: "User file",
+                    badge: "USER.md",
+                    value: overview.paths.user,
+                    isReady: overview.exists.user
+                )
+
+                OverviewPathRow(
                     title: "Memory file",
                     badge: "MEMORY.md",
                     value: overview.paths.memory,
@@ -221,10 +228,10 @@ struct OverviewView: View {
                 )
 
                 OverviewPathRow(
-                    title: "User file",
-                    badge: "USER.md",
-                    value: overview.paths.user,
-                    isReady: overview.exists.user
+                    title: "Soul file",
+                    badge: "SOUL.md",
+                    value: overview.paths.soul,
+                    isReady: overview.exists.soul
                 )
 
                 OverviewPathRow(
@@ -434,10 +441,16 @@ struct OverviewView: View {
 
     private func makeStatusItems(for overview: RemoteDiscovery) -> [OverviewStatusItem] {
         [
-            OverviewStatusItem(id: "memory", title: "Memory file", isReady: overview.exists.memory),
-            OverviewStatusItem(id: "user", title: "User file", isReady: overview.exists.user),
-            OverviewStatusItem(id: "sessions", title: "Session transcripts", isReady: overview.exists.sessionsDir),
-            OverviewStatusItem(id: "database", title: "Session database", isReady: overview.sessionStore != nil)
+            OverviewStatusItem(
+                id: "files",
+                title: "Canonical files",
+                isReady: overview.exists.user && overview.exists.memory && overview.exists.soul
+            ),
+            OverviewStatusItem(
+                id: "sessions",
+                title: "Session source",
+                isReady: overview.sessionStore != nil || overview.exists.sessionsDir
+            )
         ]
     }
 

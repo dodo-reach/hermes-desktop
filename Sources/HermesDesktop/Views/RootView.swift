@@ -62,7 +62,7 @@ struct RootView: View {
                 appState.stayOnCurrentSection()
             }
         } message: {
-            Text("MEMORY.md or USER.md has unsaved edits.")
+            Text("USER.md, MEMORY.md, or SOUL.md has unsaved edits.")
         }
     }
 

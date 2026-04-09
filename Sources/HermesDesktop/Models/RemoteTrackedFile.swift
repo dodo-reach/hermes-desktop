@@ -1,17 +1,20 @@
 import Foundation
 
 enum RemoteTrackedFile: String, CaseIterable, Identifiable {
-    case memory
     case user
+    case memory
+    case soul
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .memory:
-            "MEMORY.md"
         case .user:
             "USER.md"
+        case .memory:
+            "MEMORY.md"
+        case .soul:
+            "SOUL.md"
         }
     }
 
@@ -19,10 +22,12 @@ enum RemoteTrackedFile: String, CaseIterable, Identifiable {
 
     var remoteTildePath: String {
         switch self {
-        case .memory:
-            "~/.hermes/memories/MEMORY.md"
         case .user:
             "~/.hermes/memories/USER.md"
+        case .memory:
+            "~/.hermes/memories/MEMORY.md"
+        case .soul:
+            "~/.hermes/SOUL.md"
         }
     }
 }

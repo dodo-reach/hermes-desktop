@@ -28,6 +28,7 @@ host.
 - remote editing for:
   - `~/.hermes/memories/USER.md`
   - `~/.hermes/memories/MEMORY.md`
+  - `~/.hermes/SOUL.md`
 - session browsing from the canonical remote store at `~/.hermes/state.db`
 - fallback to `~/.hermes/sessions/*.jsonl` only if the SQLite store is not
   available
@@ -149,10 +150,10 @@ If `Test` passes, `Use Host` should be on solid ground.
 ## What You Will See In The App
 
 - `Overview`
-  Confirms the remote `HOME`, the Hermes root, the tracked memory files, and
+  Confirms the remote `HOME`, the Hermes root, the tracked Hermes files, and
   the session source.
 - `Files`
-  Lets you edit `USER.md` and `MEMORY.md` on the host.
+  Lets you edit `USER.md`, `MEMORY.md`, and `SOUL.md` on the host.
 - `Sessions`
   Reads the real remote session store from `~/.hermes/state.db`.
 - `Terminal`
@@ -222,9 +223,15 @@ fallback only when the SQLite store is not available.
 
 This is the current direction for the next waves of work:
 
+### Recently Shipped
+
+- [x] richer workflows around the canonical Hermes files: `USER.md`, `MEMORY.md`, and `SOUL.md`
+
+### Next
+
 - skill management views for tracking, inspecting, editing, and organizing agent skills from the app
+- multi-profile support, aligned with Hermes Agent profiles and the app-side connection flow needed to select and use them cleanly
 - UI skins and appearance options to personalize the terminal and the broader chat-like workspace
-- expanded memory tracking, including `SOUL.md` alongside `USER.md` and `MEMORY.md`
 - clearer documentation, setup guides, and troubleshooting for new users
 - easier distribution for non-technical users through signed, notarized builds and, if realistic, App Store or similarly frictionless delivery
 - better first-run onboarding and connection diagnostics so SSH setup problems are easier to understand and fix

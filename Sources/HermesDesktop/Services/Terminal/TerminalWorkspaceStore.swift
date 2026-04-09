@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 final class TerminalWorkspaceStore: ObservableObject {
     @Published private(set) var tabs: [TerminalTabModel] = []
     @Published var selectedTabID: UUID?

@@ -82,8 +82,9 @@ struct FilesView: View {
         }
         .padding(24)
         .task(id: appState.activeConnectionID) {
-            await appState.loadTrackedFile(.memory)
             await appState.loadTrackedFile(.user)
+            await appState.loadTrackedFile(.memory)
+            await appState.loadTrackedFile(.soul)
         }
         .alert("Discard unsaved edits in this file?", isPresented: $showDiscardFileAlert) {
             Button("Discard", role: .destructive) {
@@ -119,10 +120,12 @@ struct FilesView: View {
 
     private func document(for trackedFile: RemoteTrackedFile) -> FileEditorDocument {
         switch trackedFile {
-        case .memory:
-            appState.memoryDocument
         case .user:
             appState.userDocument
+        case .memory:
+            appState.memoryDocument
+        case .soul:
+            appState.soulDocument
         }
     }
 

@@ -20,6 +20,7 @@ final class AppState: ObservableObject {
     @Published var selectedTrackedFile: RemoteTrackedFile = .memory
     @Published var memoryDocument = FileEditorDocument(trackedFile: .memory)
     @Published var userDocument = FileEditorDocument(trackedFile: .user)
+    @Published var soulDocument = FileEditorDocument(trackedFile: .soul)
     @Published var pendingSectionSelection: AppSection?
     @Published var showDiscardChangesAlert = false
 
@@ -66,7 +67,7 @@ final class AppState: ObservableObject {
     }
 
     var hasUnsavedFileChanges: Bool {
-        memoryDocument.isDirty || userDocument.isDirty
+        memoryDocument.isDirty || userDocument.isDirty || soulDocument.isDirty
     }
 
     func requestSectionSelection(_ section: AppSection) {
@@ -89,6 +90,7 @@ final class AppState: ObservableObject {
     func discardChangesAndContinue() {
         memoryDocument.discardChanges()
         userDocument.discardChanges()
+        soulDocument.discardChanges()
         if let pendingSectionSelection {
             selectedSection = pendingSectionSelection
             handleSectionEntry(pendingSectionSelection)
@@ -342,25 +344,30 @@ final class AppState: ObservableObject {
     }
 
     private func ensureInitialFileLoads() async {
-        await loadTrackedFile(.memory, forceReload: true)
         await loadTrackedFile(.user, forceReload: true)
+        await loadTrackedFile(.memory, forceReload: true)
+        await loadTrackedFile(.soul, forceReload: true)
     }
 
     private func document(for trackedFile: RemoteTrackedFile) -> FileEditorDocument {
         switch trackedFile {
-        case .memory:
-            return memoryDocument
         case .user:
             return userDocument
+        case .memory:
+            return memoryDocument
+        case .soul:
+            return soulDocument
         }
     }
 
     private func setDocument(_ document: FileEditorDocument) {
         switch document.trackedFile {
-        case .memory:
-            memoryDocument = document
         case .user:
             userDocument = document
+        case .memory:
+            memoryDocument = document
+        case .soul:
+            soulDocument = document
         }
     }
 
@@ -396,6 +403,7 @@ final class AppState: ObservableObject {
     private func resetDocuments() {
         memoryDocument = FileEditorDocument(trackedFile: .memory)
         userDocument = FileEditorDocument(trackedFile: .user)
+        soulDocument = FileEditorDocument(trackedFile: .soul)
         selectedTrackedFile = .memory
     }
 
