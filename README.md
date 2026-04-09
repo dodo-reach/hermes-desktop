@@ -16,6 +16,11 @@ It stays deliberately simple:
 That is the point of the app. It adds a polished Mac interface around the real
 Hermes workflow instead of replacing it with a heavier or more abstract layer.
 
+![Hermes Desktop Sessions view](assets/readme-preview-sessions-safe.png)
+
+Preview of the Sessions view, with recent Hermes conversations on the active
+host.
+
 ## What You Get
 
 - a native Mac app, not a browser wrapper
