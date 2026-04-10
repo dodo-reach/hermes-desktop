@@ -273,14 +273,7 @@ final class AppState: ObservableObject {
         guard let profile = activeConnection else { return }
         if isLoadingSessions { return }
 
-        if reset {
-            sessionOffset = 0
-            sessions = []
-            hasMoreSessions = false
-            totalSessionsCount = 0
-            selectedSessionID = nil
-            sessionMessages = []
-        }
+        let previousSelectedSessionID = selectedSessionID
 
         isLoadingSessions = true
         sessionsError = nil
@@ -288,23 +281,37 @@ final class AppState: ObservableObject {
         do {
             let page = try await sessionBrowserService.listSessions(
                 connection: profile,
-                offset: sessionOffset,
+                offset: reset ? 0 : sessionOffset,
                 limit: sessionPageSize
             )
 
             if reset {
                 sessions = page.items
+                sessionOffset = page.items.count
             } else {
                 sessions.append(contentsOf: page.items)
+                sessionOffset += page.items.count
             }
 
             totalSessionsCount = page.totalCount
             hasMoreSessions = page.items.count == sessionPageSize
-            sessionOffset += page.items.count
             isLoadingSessions = false
 
-            if reset, let first = sessions.first {
-                await loadSessionDetail(sessionID: first.id)
+            if reset {
+                let preferredSessionID: String?
+                if let previousSelectedSessionID,
+                   sessions.contains(where: { $0.id == previousSelectedSessionID }) {
+                    preferredSessionID = previousSelectedSessionID
+                } else {
+                    preferredSessionID = sessions.first?.id
+                }
+
+                if let preferredSessionID {
+                    await loadSessionDetail(sessionID: preferredSessionID)
+                } else {
+                    selectedSessionID = nil
+                    sessionMessages = []
+                }
             }
         } catch {
             isLoadingSessions = false
@@ -360,12 +367,7 @@ final class AppState: ObservableObject {
         guard let profile = activeConnection else { return }
         if isLoadingSkills { return }
 
-        if reset {
-            skills = []
-            selectedSkillID = nil
-            selectedSkillDetail = nil
-            isLoadingSkillDetail = false
-        }
+        let previousSelectedSkillID = selectedSkillID
 
         isLoadingSkills = true
         skillsError = nil
@@ -375,8 +377,22 @@ final class AppState: ObservableObject {
             skills = items
             isLoadingSkills = false
 
-            if reset, let first = items.first {
-                await loadSkillDetail(relativePath: first.id)
+            if reset {
+                let preferredSkillID: String?
+                if let previousSelectedSkillID,
+                   items.contains(where: { $0.id == previousSelectedSkillID }) {
+                    preferredSkillID = previousSelectedSkillID
+                } else {
+                    preferredSkillID = items.first?.id
+                }
+
+                if let preferredSkillID {
+                    await loadSkillDetail(relativePath: preferredSkillID)
+                } else {
+                    selectedSkillID = nil
+                    selectedSkillDetail = nil
+                    isLoadingSkillDetail = false
+                }
             }
         } catch {
             isLoadingSkills = false
@@ -431,11 +447,11 @@ final class AppState: ObservableObject {
         case .files:
             Task { await ensureInitialFileLoads() }
         case .sessions:
-            Task { await loadSessions(reset: sessions.isEmpty) }
+            Task { await loadSessions(reset: true) }
         case .usage:
-            Task { await loadUsage() }
+            Task { await loadUsage(forceRefresh: true) }
         case .skills:
-            Task { await loadSkills(reset: skills.isEmpty) }
+            Task { await loadSkills(reset: true) }
         case .terminal:
             ensureTerminalSession()
         case .connections:
