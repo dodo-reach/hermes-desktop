@@ -3,6 +3,7 @@ import SwiftUI
 
 struct UsageView: View {
     @EnvironmentObject private var appState: AppState
+    private let topRankingPanelHeight: CGFloat = 490
 
     var body: some View {
         ScrollView {
@@ -11,12 +12,9 @@ struct UsageView: View {
                     title: "Usage",
                     subtitle: "See the total input and output tokens consumed across the Hermes sessions stored on the active host."
                 ) {
-                    Button {
-                        Task { await appState.loadUsage(forceRefresh: true) }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                    HermesRefreshButton(isRefreshing: appState.isRefreshingUsage) {
+                        Task { await appState.refreshUsage() }
                     }
-                    .buttonStyle(.borderedProminent)
                     .disabled(appState.isLoadingUsage)
                 }
 
@@ -36,8 +34,10 @@ struct UsageView: View {
     private var usageContent: some View {
         if appState.isLoadingUsage && appState.usageSummary == nil {
             HermesSurfacePanel {
-                ProgressView("Loading usage totals…")
-                    .frame(maxWidth: .infinity, minHeight: 320)
+                HermesLoadingState(
+                    label: "Loading usage totals…",
+                    minHeight: 320
+                )
             }
         } else if let error = appState.usageError, appState.usageSummary == nil {
             HermesSurfacePanel {
@@ -68,15 +68,17 @@ struct UsageView: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if appState.isLoadingUsage {
-                    ProgressView()
+                if appState.isLoadingUsage && !appState.isRefreshingUsage {
+                    HermesLoadingOverlay()
                         .padding(18)
                 }
             }
         } else {
             HermesSurfacePanel {
-                ProgressView("Loading usage totals…")
-                    .frame(maxWidth: .infinity, minHeight: 320)
+                HermesLoadingState(
+                    label: "Loading usage totals…",
+                    minHeight: 320
+                )
             }
         }
     }
@@ -124,21 +126,19 @@ struct UsageView: View {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 16) {
                     topSessionsPanel(summary: summary)
-                        .frame(maxWidth: .infinity, alignment: .top)
+                        .frame(maxWidth: .infinity, minHeight: topRankingPanelHeight, maxHeight: topRankingPanelHeight, alignment: .top)
 
-                    VStack(alignment: .leading, spacing: 16) {
-                        recentSessionsChartPanel(summary: summary)
-                        sourcePanel(summary: summary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .top)
+                    topModelsPanel(summary: summary)
+                        .frame(maxWidth: .infinity, minHeight: topRankingPanelHeight, maxHeight: topRankingPanelHeight, alignment: .top)
                 }
 
                 VStack(alignment: .leading, spacing: 16) {
                     topSessionsPanel(summary: summary)
-                    recentSessionsChartPanel(summary: summary)
-                    sourcePanel(summary: summary)
+                    topModelsPanel(summary: summary)
                 }
             }
+
+            recentSessionsChartPanel(summary: summary)
         }
     }
 
@@ -251,82 +251,61 @@ struct UsageView: View {
             subtitle: "The stored sessions with the highest combined token consumption."
         ) {
             if summary.topSessions.isEmpty {
-                ContentUnavailableView(
-                    "No sessions available",
-                    systemImage: "list.bullet.rectangle",
-                    description: Text("Top sessions will appear here once Hermes usage data is available.")
-                )
-                .frame(maxWidth: .infinity, minHeight: 220)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(1...5, id: \.self) { rank in
+                        UsageTopSessionPlaceholderRow(
+                            rank: rank,
+                            title: rank == 1 ? topSessionsEmptyTitle(summary: summary) : "No session usage yet"
+                        )
+                    }
+                }
             } else {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(Array(summary.topSessions.enumerated()), id: \.element.id) { index, session in
-                        UsageTopSessionRow(
-                            rank: index + 1,
-                            session: session
-                        )
+                    ForEach(0..<5, id: \.self) { index in
+                        if let session = summary.topSessions[safe: index] {
+                            UsageTopSessionRow(
+                                rank: index + 1,
+                                session: session
+                            )
+                        } else {
+                            UsageTopSessionPlaceholderRow(
+                                rank: index + 1,
+                                title: "No additional session yet"
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
-    private func sourcePanel(summary: UsageSummary) -> some View {
+    private func topModelsPanel(summary: UsageSummary) -> some View {
         HermesSurfacePanel(
-            title: "Source",
-            subtitle: "Usage totals are queried live from the remote Hermes SQLite store."
+            title: "Top 5 Models by Tokens",
+            subtitle: "Ranked by input/output tokens. Cache and reasoning stay secondary."
         ) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 18) {
-                    HermesLabeledValue(
-                        label: "Database path",
-                        value: summary.databasePath ?? "Unavailable",
-                        isMonospaced: true,
-                        emphasizeValue: true
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    HermesLabeledValue(
-                        label: "Sessions table",
-                        value: summary.sessionTable ?? "Unavailable",
-                        isMonospaced: true
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if summary.topModels.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(1...5, id: \.self) { rank in
+                        UsageTopModelPlaceholderRow(
+                            rank: rank,
+                            title: rank == 1 ? topModelsEmptyTitle(summary: summary) : "No model usage yet"
+                        )
+                    }
                 }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    HermesLabeledValue(
-                        label: "Database path",
-                        value: summary.databasePath ?? "Unavailable",
-                        isMonospaced: true,
-                        emphasizeValue: true
-                    )
-
-                    HermesLabeledValue(
-                        label: "Sessions table",
-                        value: summary.sessionTable ?? "Unavailable",
-                        isMonospaced: true
-                    )
-                }
-            }
-
-            if !summary.missingColumns.isEmpty || summary.message != nil {
-                HermesInsetSurface {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .center, spacing: 10) {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundStyle(.orange)
-
-                            Text(summary.message ?? "Missing token columns are treated as 0.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if !summary.missingColumns.isEmpty {
-                            HStack(spacing: 8) {
-                                ForEach(summary.missingColumns, id: \.self) { column in
-                                    HermesBadge(text: column, tint: .orange, isMonospaced: true)
-                                }
-                            }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(0..<5, id: \.self) { index in
+                        if let model = summary.topModels[safe: index] {
+                            UsageTopModelRow(
+                                rank: index + 1,
+                                model: model
+                            )
+                        } else {
+                            UsageTopModelPlaceholderRow(
+                                rank: index + 1,
+                                title: "No additional model yet"
+                            )
                         }
                     }
                 }
@@ -387,10 +366,10 @@ struct UsageView: View {
                         }
                     }
                 }
-                .chartXAxisLabel("Recent sessions", alignment: .trailing)
+                .chartXAxisLabel("Recent sessions", position: .bottom, alignment: .center)
                 .chartYAxisLabel("Tokens", position: .leading)
                 .chartLegend(.hidden)
-                .frame(height: 220)
+                .frame(height: 260)
 
                 HermesInsetSurface {
                     HStack(alignment: .center, spacing: 16) {
@@ -432,6 +411,22 @@ struct UsageView: View {
         default:
             return Color.red.opacity(0.82)
         }
+    }
+
+    private func topModelsEmptyTitle(summary: UsageSummary) -> String {
+        if summary.missingColumns.contains("model") {
+            return "Model data unavailable"
+        }
+
+        return "No tracked models yet"
+    }
+
+    private func topSessionsEmptyTitle(summary: UsageSummary) -> String {
+        if summary.sessionCount == 0 {
+            return "No stored sessions yet"
+        }
+
+        return "No ranked sessions available"
     }
 }
 
@@ -625,7 +620,7 @@ private struct UsageTopSessionRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.secondary.opacity(0.08))
@@ -633,6 +628,176 @@ private struct UsageTopSessionRow: View {
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+    }
+}
+
+private struct UsageTopSessionPlaceholderRow: View {
+    let rank: Int
+    let title: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text("\(rank)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary.opacity(0.8))
+                .frame(width: 24, height: 24)
+                .background(Color.secondary.opacity(0.08), in: Circle())
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("-")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+
+                Text("tokens")
+                    .font(.caption)
+                    .foregroundStyle(.secondary.opacity(0.8))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.secondary.opacity(0.05))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.04), lineWidth: 1)
+        }
+    }
+}
+
+private struct UsageTopModelRow: View {
+    let rank: Int
+    let model: UsageTopModel
+
+    private var providerText: String {
+        model.billingProvider ?? "-"
+    }
+
+    private var accessoryText: String? {
+        if model.cacheAndReasoningTokens > 0 {
+            return "+\(UsageNumberFormatter.shortString(for: model.cacheAndReasoningTokens)) cache"
+        }
+        return nil
+    }
+
+    private var metadataText: String {
+        var parts = [providerText, "\(UsageNumberFormatter.string(for: model.sessionCount)) sessions"]
+        if let accessoryText {
+            parts.append(accessoryText)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var valueDetailText: String {
+        "tokens · \(UsageNumberFormatter.usdString(for: model.estimatedCostUSD))"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text("\(rank)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .background(Color.secondary.opacity(0.10), in: Circle())
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.model)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.leading)
+                    .truncationMode(.middle)
+
+                Text(metadataText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(UsageNumberFormatter.string(for: model.totalTokens))
+                    .font(.headline)
+                    .monospacedDigit()
+
+                Text(valueDetailText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+    }
+}
+
+private struct UsageTopModelPlaceholderRow: View {
+    let rank: Int
+    let title: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text("\(rank)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary.opacity(0.8))
+                .frame(width: 24, height: 24)
+                .background(Color.secondary.opacity(0.08), in: Circle())
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text("- · -")
+                    .font(.caption)
+                    .foregroundStyle(.secondary.opacity(0.8))
+            }
+
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("-")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+
+                Text("tokens · -")
+                    .font(.caption)
+                    .foregroundStyle(.secondary.opacity(0.8))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.secondary.opacity(0.05))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.04), lineWidth: 1)
         }
     }
 }
@@ -676,6 +841,30 @@ private enum UsageNumberFormatter {
         percent.string(from: NSNumber(value: value)) ?? "\(Int((value * 100).rounded()))%"
     }
 
+    static func usdString(for value: Double) -> String {
+        let absolute = abs(value)
+        let digits: Int
+
+        switch absolute {
+        case 0:
+            digits = 2
+        case 0..<0.01:
+            digits = 6
+        case 0..<1:
+            digits = 4
+        default:
+            digits = 2
+        }
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.currencySymbol = "$"
+        formatter.minimumFractionDigits = digits
+        formatter.maximumFractionDigits = digits
+        return formatter.string(from: NSNumber(value: value)) ?? String(format: "$%.2f", value)
+    }
+
     static func shortString(for value: Int64) -> String {
         let absValue = abs(Double(value))
         let sign = value < 0 ? "-" : ""
@@ -694,5 +883,12 @@ private enum UsageNumberFormatter {
 
     private static func compactDecimalString(_ value: Double) -> String {
         String(format: "%.1f", value).replacingOccurrences(of: ".0", with: "")
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard indices.contains(index) else { return nil }
+        return self[index]
     }
 }

@@ -15,6 +15,7 @@ struct SessionListPage: Codable {
 struct SessionSummary: Codable, Identifiable, Hashable {
     let id: String
     let title: String?
+    let model: String?
     let startedAt: JSONValue?
     let lastActive: JSONValue?
     let messageCount: Int?
@@ -23,6 +24,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id
         case title
+        case model
         case startedAt = "started_at"
         case lastActive = "last_active"
         case messageCount = "message_count"
@@ -34,6 +36,20 @@ struct SessionSummary: Codable, Identifiable, Hashable {
             return title
         }
         return id
+    }
+
+    var displayModel: String? {
+        guard let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        if model.count <= 34 {
+            return model
+        }
+
+        let prefix = model.prefix(16)
+        let suffix = model.suffix(12)
+        return "\(prefix)…\(suffix)"
     }
 }
 

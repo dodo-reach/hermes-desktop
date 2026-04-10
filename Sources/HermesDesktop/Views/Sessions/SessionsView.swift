@@ -11,12 +11,9 @@ struct SessionsView: View {
                     title: "Sessions",
                     subtitle: "Browse the recent Hermes conversations discovered on the active host."
                 ) {
-                    Button {
-                        Task { await appState.loadSessions(reset: true, query: searchText) }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                    HermesRefreshButton(isRefreshing: appState.isRefreshingSessions) {
+                        Task { await appState.refreshSessions(query: searchText) }
                     }
-                    .buttonStyle(.borderedProminent)
                     .disabled(appState.isLoadingSessions)
                 }
 
@@ -68,8 +65,10 @@ struct SessionsView: View {
     private var sessionsPanel: some View {
         if appState.isLoadingSessions && appState.sessions.isEmpty {
             HermesSurfacePanel {
-                ProgressView("Loading sessions…")
-                    .frame(maxWidth: .infinity, minHeight: 300)
+                HermesLoadingState(
+                    label: "Loading sessions…",
+                    minHeight: 300
+                )
             }
         } else if let error = appState.sessionsError, appState.sessions.isEmpty {
             HermesSurfacePanel {
@@ -129,8 +128,8 @@ struct SessionsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
             .overlay(alignment: .topTrailing) {
-                if appState.isLoadingSessions && !appState.sessions.isEmpty {
-                    ProgressView()
+                if appState.isLoadingSessions && !appState.isRefreshingSessions && !appState.sessions.isEmpty {
+                    HermesLoadingOverlay()
                         .padding(18)
                 }
             }

@@ -12,15 +12,21 @@ struct OverviewView: View {
                    let overview = appState.overview {
                     overviewLayout(activeConnection: activeConnection, overview: overview)
                 } else if let overviewError = appState.overviewError {
-                    ContentUnavailableView(
-                        "Discovery failed",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text(overviewError)
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 320)
-                } else {
-                    ProgressView("Discovering the active Hermes workspace…")
+                    HermesSurfacePanel {
+                        ContentUnavailableView(
+                            "Discovery failed",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text(overviewError)
+                        )
                         .frame(maxWidth: .infinity, minHeight: 320)
+                    }
+                } else {
+                    HermesSurfacePanel {
+                        HermesLoadingState(
+                            label: "Discovering the active Hermes workspace…",
+                            minHeight: 320
+                        )
+                    }
                 }
             }
             .frame(maxWidth: 1080, alignment: .leading)
@@ -42,7 +48,7 @@ struct OverviewView: View {
                     .font(.largeTitle)
                     .fontWeight(.semibold)
 
-                Text("Connection, workspace and session storage resolved from the active host over SSH.")
+                Text("See which host Hermes is connected to, where its files live, and which source powers Sessions and Usage.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -50,14 +56,12 @@ struct OverviewView: View {
 
             Spacer(minLength: 16)
 
-            Button {
+            HermesRefreshButton(isRefreshing: appState.isRefreshingOverview) {
                 Task {
-                    await appState.refreshOverview()
+                    await appState.refreshOverview(manual: true)
                 }
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.borderedProminent)
+            .disabled(appState.isBusy)
         }
     }
 
@@ -108,7 +112,7 @@ struct OverviewView: View {
     private func currentHostPanel(_ activeConnection: ConnectionProfile) -> some View {
         OverviewPanel(
             title: "Current Host",
-            subtitle: "The SSH target currently driving discovery for this workspace."
+            subtitle: "The active SSH connection for this workspace."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -155,11 +159,11 @@ struct OverviewView: View {
     private func workspacePanel(_ overview: RemoteDiscovery) -> some View {
         OverviewPanel(
             title: "Workspace",
-            subtitle: "Hermes resolves its base directories from the remote home folder."
+            subtitle: "The base folders Hermes uses on the active host."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 OverviewDetailBlock(
-                    label: "Remote home",
+                    label: "Home folder",
                     value: overview.remoteHome,
                     isMonospaced: true
                 )
@@ -184,7 +188,7 @@ struct OverviewView: View {
 
         return OverviewPanel(
             title: "Status",
-            subtitle: "Checks to confirm the workspace is ready for files, sessions and terminal access."
+            subtitle: "Quick checks to confirm the active host is ready for files, sessions, usage, and terminal access."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .center, spacing: 12) {
@@ -210,7 +214,7 @@ struct OverviewView: View {
     private func workspaceFilesPanel(_ overview: RemoteDiscovery) -> some View {
         OverviewPanel(
             title: "Workspace Files",
-            subtitle: "The key files and folders Hermes expects inside the active workspace."
+            subtitle: "Expected Hermes files and folders on the active host."
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 OverviewPathRow(
@@ -235,7 +239,7 @@ struct OverviewView: View {
                 )
 
                 OverviewPathRow(
-                    title: "Session transcripts",
+                    title: "Session artifacts",
                     badge: "Sessions",
                     value: overview.paths.sessionsDir,
                     isReady: overview.exists.sessionsDir
@@ -247,7 +251,7 @@ struct OverviewView: View {
     private func sessionHistoryPanel(_ overview: RemoteDiscovery) -> some View {
         OverviewPanel(
             title: "Session History",
-            subtitle: "Where Hermes reads past sessions from on this host."
+            subtitle: "The source Hermes uses for Sessions and Usage on the active host."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 if let sessionStore = overview.sessionStore {
@@ -330,7 +334,7 @@ struct OverviewView: View {
     private var quickActionsPanel: some View {
         OverviewPanel(
             title: "Quick Actions",
-            subtitle: "Jump directly into the part of the workspace you want to inspect."
+            subtitle: "Open the part of the active host you want to inspect next."
         ) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
@@ -443,12 +447,12 @@ struct OverviewView: View {
         [
             OverviewStatusItem(
                 id: "files",
-                title: "Canonical files",
+                title: "Workspace files",
                 isReady: overview.exists.user && overview.exists.memory && overview.exists.soul
             ),
             OverviewStatusItem(
                 id: "sessions",
-                title: "Session source",
+                title: "Sessions/Usage source",
                 isReady: overview.sessionStore != nil || overview.exists.sessionsDir
             )
         ]

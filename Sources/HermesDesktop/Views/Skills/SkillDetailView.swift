@@ -33,7 +33,7 @@ struct SkillDetailView: View {
 
                     HermesSurfacePanel(
                         title: "SKILL.md",
-                        subtitle: "Full source content loaded from the remote host."
+                        subtitle: "Full source content loaded from the active host."
                     ) {
                         HermesInsetSurface {
                             Text(detail.markdownContent)
@@ -54,8 +54,10 @@ struct SkillDetailView: View {
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
 
-                            ProgressView("Loading skill detail…")
-                                .padding(.top, 8)
+                            HermesLoadingState(
+                                label: "Loading skill detail…",
+                                minHeight: 140
+                            )
                         }
                     }
                 } else if let errorMessage, summary != nil {
@@ -142,36 +144,28 @@ struct SkillDetailView: View {
             title: "Metadata",
             subtitle: "Optional frontmatter fields and companion directories discovered for this skill."
         ) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 if !detail.tags.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Tags")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        AdaptiveBadgeGrid(values: detail.tags, tint: .accentColor)
+                    SkillMetadataSection(title: "Tags") {
+                        SkillMetadataBadgeGroup(values: detail.tags, tint: .accentColor)
                     }
                 }
 
                 if !detail.relatedSkills.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Related skills")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        AdaptiveBadgeGrid(values: detail.relatedSkills, tint: .secondary, monospaced: true)
+                    SkillMetadataSection(title: "Related skills") {
+                        SkillMetadataBadgeGroup(
+                            values: detail.relatedSkills,
+                            tint: .secondary,
+                            monospaced: true
+                        )
                     }
                 }
 
                 if !detail.featureBadges.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Companion directories")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 8) {
+                    SkillMetadataSection(title: "Companion directories") {
+                        WrappingFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
                             ForEach(detail.featureBadges) { badge in
-                                HermesBadge(text: badge.title, tint: badge.color)
+                                SkillMetadataBadge(text: badge.title, tint: badge.color)
                             }
                         }
                     }
@@ -181,21 +175,164 @@ struct SkillDetailView: View {
     }
 }
 
-private struct AdaptiveBadgeGrid: View {
+private struct SkillMetadataSection<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            content
+        }
+    }
+}
+
+private struct SkillMetadataBadgeGroup: View {
     let values: [String]
     let tint: Color
     var monospaced = false
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 90), spacing: 8, alignment: .leading)
-    ]
-
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+        WrappingFlowLayout(horizontalSpacing: 8, verticalSpacing: 8) {
             ForEach(values, id: \.self) { value in
-                HermesBadge(text: value, tint: tint, isMonospaced: monospaced)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                SkillMetadataBadge(
+                    text: value,
+                    tint: tint,
+                    monospaced: monospaced
+                )
             }
         }
     }
+}
+
+private struct SkillMetadataBadge: View {
+    let text: String
+    let tint: Color
+    var monospaced = false
+
+    var body: some View {
+        Text(text)
+            .font(monospaced ? .system(.caption, design: .monospaced).weight(.semibold) : .caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .truncationMode(monospaced ? .middle : .tail)
+            .frame(maxWidth: 220, alignment: .leading)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.12), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(tint.opacity(0.12), lineWidth: 1)
+            }
+            .help(text)
+        }
+}
+
+private struct WrappingFlowLayout: Layout {
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
+
+    init(horizontalSpacing: CGFloat = 8, verticalSpacing: CGFloat = 8) {
+        self.horizontalSpacing = horizontalSpacing
+        self.verticalSpacing = verticalSpacing
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let lines = computeLines(for: sizes, maxWidth: proposal.width)
+        let height = lines.reduce(CGFloat.zero) { partial, line in
+            partial + line.height
+        } + verticalSpacing * CGFloat(max(0, lines.count - 1))
+        let width = proposal.width ?? lines.map(\.width).max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout Void
+    ) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let lines = computeLines(for: sizes, maxWidth: bounds.width)
+        var currentY = bounds.minY
+
+        for line in lines {
+            var currentX = bounds.minX
+            for item in line.items {
+                let size = sizes[item.index]
+                subviews[item.index].place(
+                    at: CGPoint(x: currentX, y: currentY),
+                    proposal: ProposedViewSize(width: size.width, height: size.height)
+                )
+                currentX += size.width + horizontalSpacing
+            }
+            currentY += line.height + verticalSpacing
+        }
+    }
+
+    private func computeLines(for sizes: [CGSize], maxWidth: CGFloat?) -> [FlowLine] {
+        let availableWidth = maxWidth ?? .greatestFiniteMagnitude
+        guard !sizes.isEmpty else { return [] }
+
+        var lines: [FlowLine] = []
+        var currentItems: [FlowLineItem] = []
+        var currentWidth: CGFloat = 0
+        var currentHeight: CGFloat = 0
+
+        for (index, size) in sizes.enumerated() {
+            let proposedWidth = currentItems.isEmpty ? size.width : currentWidth + horizontalSpacing + size.width
+
+            if !currentItems.isEmpty && proposedWidth > availableWidth {
+                lines.append(
+                    FlowLine(
+                        items: currentItems,
+                        width: currentWidth,
+                        height: currentHeight
+                    )
+                )
+                currentItems = [FlowLineItem(index: index)]
+                currentWidth = size.width
+                currentHeight = size.height
+            } else {
+                currentItems.append(FlowLineItem(index: index))
+                currentWidth = proposedWidth
+                currentHeight = max(currentHeight, size.height)
+            }
+        }
+
+        if !currentItems.isEmpty {
+            lines.append(
+                FlowLine(
+                    items: currentItems,
+                    width: currentWidth,
+                    height: currentHeight
+                )
+            )
+        }
+
+        return lines
+    }
+}
+
+private struct FlowLine {
+    let items: [FlowLineItem]
+    let width: CGFloat
+    let height: CGFloat
+}
+
+private struct FlowLineItem {
+    let index: Int
 }

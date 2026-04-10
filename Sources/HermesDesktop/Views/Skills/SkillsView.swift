@@ -11,12 +11,9 @@ struct SkillsView: View {
                     title: "Skills",
                     subtitle: "Browse the Hermes skill library discovered on the active host."
                 ) {
-                    Button {
-                        Task { await appState.loadSkills(reset: true) }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                    HermesRefreshButton(isRefreshing: appState.isRefreshingSkills) {
+                        Task { await appState.refreshSkills() }
                     }
-                    .buttonStyle(.borderedProminent)
                     .disabled(appState.isLoadingSkills)
                 }
 
@@ -59,8 +56,10 @@ struct SkillsView: View {
     private var skillsPanel: some View {
         if appState.isLoadingSkills && appState.skills.isEmpty {
             HermesSurfacePanel {
-                ProgressView("Loading skills…")
-                    .frame(maxWidth: .infinity, minHeight: 300)
+                HermesLoadingState(
+                    label: "Loading skills…",
+                    minHeight: 300
+                )
             }
         } else if let error = appState.skillsError, appState.skills.isEmpty {
             HermesSurfacePanel {
@@ -115,8 +114,8 @@ struct SkillsView: View {
 
     private var skillsSearchToolbar: some View {
         HStack(spacing: 10) {
-            if appState.isLoadingSkills && !appState.skills.isEmpty {
-                ProgressView()
+            if appState.isLoadingSkills && !appState.isRefreshingSkills && !appState.skills.isEmpty {
+                HermesLoadingOverlay()
             }
 
             HermesExpandableSearchField(

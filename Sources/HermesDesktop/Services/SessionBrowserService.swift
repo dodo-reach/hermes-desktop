@@ -137,9 +137,14 @@ final class SessionBrowserService: @unchecked Sendable {
                     if title is None and preview:
                         title = preview[:80]
 
+                    model = None
+                    if context["session_model_column"]:
+                        model = sanitize_model(record.get(context["session_model_column"]))
+
                     items.append({
                         "id": session_id,
                         "title": title,
+                        "model": model,
                         "started_at": normalize_json_value(record.get(context["session_started_column"])),
                         "last_active": normalize_json_value(last_active),
                         "message_count": message_count,
@@ -448,6 +453,29 @@ final class SessionBrowserService: @unchecked Sendable {
                 return None
             return text[:120]
 
+        def sanitize_model(value):
+            text = sanitize_preview(stringify(value))
+            if text is None or not text:
+                return None
+            return text[:160]
+
+        def extract_model_from_record(record):
+            direct = sanitize_model(record.get("model") or record.get("model_name"))
+            if direct:
+                return direct
+
+            metadata = record.get("metadata")
+            if isinstance(metadata, dict):
+                nested = sanitize_model(
+                    metadata.get("model") or
+                    metadata.get("model_name") or
+                    metadata.get("default_model")
+                )
+                if nested:
+                    return nested
+
+            return None
+
         def parse_timestamp_value(value):
             if value is None:
                 return None
@@ -627,6 +655,7 @@ final class SessionBrowserService: @unchecked Sendable {
             session_title_column = choose_column(session_columns, ["title", "summary", "name"])
             session_started_column = choose_column(session_columns, ["started_at", "created_at", "timestamp"])
             session_message_count_column = choose_column(session_columns, ["message_count"])
+            session_model_column = choose_column(session_columns, ["model"])
             session_parent_column = choose_column(session_columns, ["parent_session_id", "parent_id"])
 
             message_id_column = choose_column(message_columns, ["id", "message_id"])
@@ -657,6 +686,7 @@ final class SessionBrowserService: @unchecked Sendable {
                 "session_title_column": session_title_column,
                 "session_started_column": session_started_column,
                 "session_message_count_column": session_message_count_column,
+                "session_model_column": session_model_column,
                 "session_parent_column": session_parent_column,
                 "message_id_column": message_id_column,
                 "message_session_id_column": message_session_id_column,
@@ -674,6 +704,7 @@ final class SessionBrowserService: @unchecked Sendable {
                 message_count = 0
                 preview = None
                 title = None
+                model = None
 
                 try:
                     with path.open("r", encoding="utf-8") as handle:
@@ -691,6 +722,8 @@ final class SessionBrowserService: @unchecked Sendable {
                                 continue
 
                             role = stringify(record.get("role"))
+                            if model is None:
+                                model = extract_model_from_record(record)
                             timestamp = parse_timestamp_value(record.get("timestamp"))
                             if timestamp is not None:
                                 if started_at is None:
@@ -712,6 +745,7 @@ final class SessionBrowserService: @unchecked Sendable {
                 items.append({
                     "id": path.stem,
                     "title": title or path.stem,
+                    "model": model,
                     "started_at": normalize_json_value(started_at),
                     "last_active": normalize_json_value(last_active or path.stat().st_mtime),
                     "message_count": message_count,

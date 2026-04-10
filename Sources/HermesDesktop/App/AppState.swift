@@ -10,12 +10,14 @@ final class AppState: ObservableObject {
     @Published var statusMessage: String?
     @Published var overview: RemoteDiscovery?
     @Published var overviewError: String?
+    @Published var isRefreshingOverview = false
     @Published var activeConnectionID: UUID?
     @Published var selectedSessionID: String?
     @Published var sessions: [SessionSummary] = []
     @Published var sessionMessages: [SessionMessage] = []
     @Published var sessionsError: String?
     @Published var isLoadingSessions = false
+    @Published var isRefreshingSessions = false
     @Published var isDeletingSession = false
     @Published var hasMoreSessions = false
     @Published var totalSessionsCount = 0
@@ -23,11 +25,13 @@ final class AppState: ObservableObject {
     @Published var usageSummary: UsageSummary?
     @Published var usageError: String?
     @Published var isLoadingUsage = false
+    @Published var isRefreshingUsage = false
     @Published var selectedSkillID: String?
     @Published var skills: [SkillSummary] = []
     @Published var selectedSkillDetail: SkillDetail?
     @Published var skillsError: String?
     @Published var isLoadingSkills = false
+    @Published var isRefreshingSkills = false
     @Published var isLoadingSkillDetail = false
     @Published var selectedTrackedFile: RemoteTrackedFile = .memory
     @Published var memoryDocument = FileEditorDocument(trackedFile: .memory)
@@ -194,20 +198,51 @@ final class AppState: ObservableObject {
         }
     }
 
-    func refreshOverview() async {
+    func refreshOverview(manual: Bool = false) async {
         guard let profile = activeConnection else { return }
+        if manual {
+            guard !isRefreshingOverview, !isBusy else { return }
+            isRefreshingOverview = true
+        }
 
         do {
             isBusy = true
             overviewError = nil
             overview = try await remoteHermesService.discover(connection: profile)
             isBusy = false
+            if manual {
+                isRefreshingOverview = false
+            }
         } catch {
             isBusy = false
+            if manual {
+                isRefreshingOverview = false
+            }
             overview = nil
             overviewError = error.localizedDescription
             setStatusMessage("Unable to refresh remote discovery")
         }
+    }
+
+    func refreshSessions(query: String? = nil) async {
+        guard !isLoadingSessions, !isRefreshingSessions else { return }
+        isRefreshingSessions = true
+        await loadSessions(reset: true, query: query)
+        isRefreshingSessions = false
+    }
+
+    func refreshUsage() async {
+        guard !isLoadingUsage, !isRefreshingUsage else { return }
+        isRefreshingUsage = true
+        await loadUsage(forceRefresh: true)
+        isRefreshingUsage = false
+    }
+
+    func refreshSkills() async {
+        guard !isLoadingSkills, !isRefreshingSkills else { return }
+        isRefreshingSkills = true
+        await loadSkills(reset: true)
+        isRefreshingSkills = false
     }
 
     func loadTrackedFile(_ trackedFile: RemoteTrackedFile, forceReload: Bool = false) async {
@@ -223,9 +258,10 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            let content = try await fileEditorService.read(file: trackedFile, connection: profile)
-            document.content = content
-            document.originalContent = content
+            let snapshot = try await fileEditorService.read(file: trackedFile, connection: profile)
+            document.content = snapshot.content
+            document.originalContent = snapshot.content
+            document.remoteContentHash = snapshot.contentHash
             document.lastSavedAt = nil
             document.errorMessage = nil
             document.isLoading = false
@@ -246,12 +282,14 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            try await fileEditorService.write(
+            let saveResult = try await fileEditorService.write(
                 file: trackedFile,
                 content: document.content,
+                expectedContentHash: document.remoteContentHash,
                 connection: profile
             )
             document.originalContent = document.content
+            document.remoteContentHash = saveResult.contentHash
             document.lastSavedAt = Date()
             document.hasLoaded = true
             document.isLoading = false
@@ -261,7 +299,7 @@ final class AppState: ObservableObject {
             document.isLoading = false
             document.errorMessage = error.localizedDescription
             setDocument(document)
-            setStatusMessage("Unable to save \(trackedFile.fileName)")
+            setStatusMessage(error.localizedDescription)
         }
     }
 
@@ -525,16 +563,22 @@ final class AppState: ObservableObject {
         await refreshOverview()
 
         guard overviewError == nil else {
+            isRefreshingOverview = false
             sessions = []
             sessionMessages = []
+            sessionsError = nil
+            isLoadingSessions = false
+            isRefreshingSessions = false
             usageSummary = nil
             usageError = nil
             isLoadingUsage = false
+            isRefreshingUsage = false
             skills = []
             selectedSkillID = nil
             selectedSkillDetail = nil
             skillsError = nil
             isLoadingSkills = false
+            isRefreshingSkills = false
             isLoadingSkillDetail = false
             resetDocuments()
             return
@@ -547,10 +591,12 @@ final class AppState: ObservableObject {
     private func resetWorkspaceStateForConnectionChange() {
         overview = nil
         overviewError = nil
+        isRefreshingOverview = false
         sessions = []
         sessionMessages = []
         sessionsError = nil
         isLoadingSessions = false
+        isRefreshingSessions = false
         isDeletingSession = false
         hasMoreSessions = false
         totalSessionsCount = 0
@@ -560,11 +606,13 @@ final class AppState: ObservableObject {
         usageSummary = nil
         usageError = nil
         isLoadingUsage = false
+        isRefreshingUsage = false
         skills = []
         selectedSkillID = nil
         selectedSkillDetail = nil
         skillsError = nil
         isLoadingSkills = false
+        isRefreshingSkills = false
         isLoadingSkillDetail = false
         resetDocuments()
         terminalWorkspace.closeAllTabs()

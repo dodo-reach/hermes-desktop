@@ -109,6 +109,59 @@ struct HermesInsetSurface<Content: View>: View {
     }
 }
 
+struct HermesLoadingState: View {
+    let label: String
+    var minHeight: CGFloat = 300
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.regular)
+
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: minHeight)
+    }
+}
+
+struct HermesLoadingOverlay: View {
+    var body: some View {
+        ProgressView()
+            .controlSize(.small)
+            .padding(10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+    }
+}
+
+struct HermesRefreshButton: View {
+    let isRefreshing: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            if isRefreshing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+
+                    Text("Refreshing…")
+                }
+            } else {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(isRefreshing)
+    }
+}
+
 struct HermesBadge: View {
     let text: String
     let tint: Color

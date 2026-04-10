@@ -7,10 +7,11 @@ final class FileEditorService: @unchecked Sendable {
         self.sshTransport = sshTransport
     }
 
-    func read(file: RemoteTrackedFile, connection: ConnectionProfile) async throws -> String {
+    func read(file: RemoteTrackedFile, connection: ConnectionProfile) async throws -> FileSnapshot {
         let script = try RemotePythonScript.wrap(
             FileRequest(path: file.remoteTildePath),
             body: """
+            import hashlib
             import json
             import os
             import pathlib
@@ -26,14 +27,17 @@ final class FileEditorService: @unchecked Sendable {
             try:
                 target = pathlib.Path(os.path.expanduser(payload["path"]))
                 if not target.exists():
-                    fail(f"{payload['path']} does not exist on the remote host.")
+                    fail(f"{payload['path']} does not exist on the active host.")
                 if not target.is_file():
                     fail(f"{payload['path']} is not a regular file.")
 
-                content = target.read_text(encoding="utf-8")
+                raw_content = target.read_bytes()
+                content_hash = hashlib.sha256(raw_content).hexdigest()
+                content = raw_content.decode("utf-8")
                 print(json.dumps({
                     "ok": True,
                     "content": content,
+                    "content_hash": content_hash,
                 }, ensure_ascii=False))
             except UnicodeDecodeError:
                 fail(f"{payload['path']} is not valid UTF-8.")
@@ -50,13 +54,27 @@ final class FileEditorService: @unchecked Sendable {
             responseType: FileReadResponse.self
         )
 
-        return response.content
+        return FileSnapshot(
+            content: response.content,
+            contentHash: response.contentHash
+        )
     }
 
-    func write(file: RemoteTrackedFile, content: String, connection: ConnectionProfile) async throws {
+    func write(
+        file: RemoteTrackedFile,
+        content: String,
+        expectedContentHash: String?,
+        connection: ConnectionProfile
+    ) async throws -> FileSaveResult {
         let script = try RemotePythonScript.wrap(
-            FileWriteRequest(path: file.remoteTildePath, content: content, atomic: true),
+            FileWriteRequest(
+                path: file.remoteTildePath,
+                content: content,
+                expectedContentHash: expectedContentHash,
+                atomic: true
+            ),
             body: """
+            import hashlib
             import json
             import os
             import pathlib
@@ -72,10 +90,23 @@ final class FileEditorService: @unchecked Sendable {
 
             temp_name = None
             directory_fd = None
+            content_bytes = payload["content"].encode("utf-8")
+            expected_hash = payload.get("expected_content_hash")
 
             try:
                 target = pathlib.Path(os.path.expanduser(payload["path"]))
                 target.parent.mkdir(parents=True, exist_ok=True)
+
+                if expected_hash is not None:
+                    if not target.exists():
+                        fail(f"{payload['path']} was removed on the active host after it was loaded. Reload from Remote before saving.")
+                    if not target.is_file():
+                        fail(f"{payload['path']} is not a regular file anymore. Reload from Remote before saving.")
+
+                    current_bytes = target.read_bytes()
+                    current_hash = hashlib.sha256(current_bytes).hexdigest()
+                    if current_hash != expected_hash:
+                        fail(f"{payload['path']} changed on the active host after it was loaded. Reload from Remote before saving.")
 
                 fd, temp_name = tempfile.mkstemp(
                     dir=str(target.parent),
@@ -83,8 +114,8 @@ final class FileEditorService: @unchecked Sendable {
                     suffix=".tmp",
                 )
 
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    handle.write(payload["content"])
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(content_bytes)
                     handle.flush()
                     os.fsync(handle.fileno())
 
@@ -99,6 +130,7 @@ final class FileEditorService: @unchecked Sendable {
                 print(json.dumps({
                     "ok": True,
                     "path": payload["path"],
+                    "content_hash": hashlib.sha256(content_bytes).hexdigest(),
                 }, ensure_ascii=False))
             except PermissionError:
                 fail(f"Permission denied while writing {payload['path']}.")
@@ -112,10 +144,15 @@ final class FileEditorService: @unchecked Sendable {
             """
         )
 
-        _ = try await sshTransport.executeJSON(
+        let response = try await sshTransport.executeJSON(
             on: connection,
             pythonScript: script,
             responseType: FileWriteResponse.self
+        )
+
+        return FileSaveResult(
+            path: response.path,
+            contentHash: response.contentHash
         )
     }
 }
@@ -127,15 +164,47 @@ private struct FileRequest: Encodable {
 private struct FileWriteRequest: Encodable {
     let path: String
     let content: String
+    let expectedContentHash: String?
     let atomic: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case path
+        case content
+        case expectedContentHash = "expected_content_hash"
+        case atomic
+    }
 }
 
 private struct FileReadResponse: Decodable {
     let ok: Bool
     let content: String
+    let contentHash: String
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case content
+        case contentHash = "content_hash"
+    }
 }
 
 private struct FileWriteResponse: Decodable {
     let ok: Bool
     let path: String
+    let contentHash: String
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case path
+        case contentHash = "content_hash"
+    }
+}
+
+struct FileSnapshot {
+    let content: String
+    let contentHash: String
+}
+
+struct FileSaveResult {
+    let path: String
+    let contentHash: String
 }

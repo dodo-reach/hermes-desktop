@@ -13,7 +13,7 @@ struct FilesView: View {
                     Text("Canonical Files")
                         .font(.largeTitle)
                         .fontWeight(.semibold)
-                    Text("Edits are written remotely with atomic replace semantics over SSH.")
+                    Text("Edits are written remotely with atomic replace semantics and conflict checks over SSH.")
                         .foregroundStyle(.secondary)
                 }
 
@@ -76,7 +76,7 @@ struct FilesView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 if currentDocument.isLoading {
-                    ProgressView()
+                    HermesLoadingOverlay()
                 }
             }
         }

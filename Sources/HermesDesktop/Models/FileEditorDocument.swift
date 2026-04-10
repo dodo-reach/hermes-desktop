@@ -4,6 +4,7 @@ struct FileEditorDocument {
     let trackedFile: RemoteTrackedFile
     var content: String = ""
     var originalContent: String = ""
+    var remoteContentHash: String?
     var isLoading = false
     var errorMessage: String?
     var lastSavedAt: Date?

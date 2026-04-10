@@ -78,6 +78,23 @@ final class UsageBrowserService: @unchecked Sendable {
                 return None
             return text[:120]
 
+        def sanitize_text(value):
+            text = stringify(value)
+            if text is None:
+                return None
+            text = text.replace("\\n", " ").replace("\\r", " ").strip()
+            return text or None
+
+        def normalize_model(value):
+            text = sanitize_text(value)
+            return text or "Unknown model"
+
+        def parse_float(value):
+            try:
+                return float(value or 0)
+            except Exception:
+                return 0.0
+
         def tilde(path, home):
             try:
                 relative = path.relative_to(home)
@@ -201,6 +218,7 @@ final class UsageBrowserService: @unchecked Sendable {
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "top_sessions": [],
+                "top_models": [],
                 "recent_sessions": [],
                 "database_path": None,
                 "session_table": None,
@@ -246,6 +264,8 @@ final class UsageBrowserService: @unchecked Sendable {
                 session_id_column = choose_column(columns, ["id", "session_id"])
                 session_title_column = choose_column(columns, ["title", "summary", "name"])
                 session_started_column = choose_column(columns, ["started_at", "created_at", "timestamp"])
+                model_column = choose_column(columns, ["model"])
+                billing_provider_column = choose_column(columns, ["billing_provider", "provider"])
                 missing_columns = []
 
                 if "input_tokens" in lowered_columns:
@@ -264,12 +284,49 @@ final class UsageBrowserService: @unchecked Sendable {
                     output_value_expression = "0"
                     missing_columns.append("output_tokens")
 
+                if "cache_read_tokens" in lowered_columns:
+                    cache_read_value_expression = f"COALESCE({quote_ident(lowered_columns['cache_read_tokens'])}, 0)"
+                else:
+                    cache_read_value_expression = "0"
+                    missing_columns.append("cache_read_tokens")
+
+                if "cache_write_tokens" in lowered_columns:
+                    cache_write_value_expression = f"COALESCE({quote_ident(lowered_columns['cache_write_tokens'])}, 0)"
+                else:
+                    cache_write_value_expression = "0"
+                    missing_columns.append("cache_write_tokens")
+
+                if "reasoning_tokens" in lowered_columns:
+                    reasoning_value_expression = f"COALESCE({quote_ident(lowered_columns['reasoning_tokens'])}, 0)"
+                else:
+                    reasoning_value_expression = "0"
+                    missing_columns.append("reasoning_tokens")
+
+                if "estimated_cost_usd" in lowered_columns:
+                    estimated_cost_value_expression = f"COALESCE({quote_ident(lowered_columns['estimated_cost_usd'])}, 0)"
+                else:
+                    estimated_cost_value_expression = "0"
+                    missing_columns.append("estimated_cost_usd")
+
+                if model_column is None:
+                    missing_columns.append("model")
+
+                model_total_expression = (
+                    f"({input_value_expression} + {output_value_expression})"
+                )
+                model_group_expression = (
+                    f"COALESCE(NULLIF(TRIM({quote_ident(model_column)}), ''), 'Unknown model')"
+                    if model_column
+                    else None
+                )
+
                 row = connection.execute(
                     f"SELECT COUNT(*), {input_expression}, {output_expression} "
                     f"FROM {quote_ident(store['session_table'])}"
                 ).fetchone() or (0, 0, 0)
 
                 top_sessions = []
+                top_models = []
                 recent_sessions = []
                 if session_id_column:
                     top_query = (
@@ -333,6 +390,52 @@ final class UsageBrowserService: @unchecked Sendable {
                             "total_tokens": int(recent_row[4] or 0),
                         })
 
+                if model_column:
+                    provider_expression = (
+                        quote_ident(billing_provider_column)
+                        if billing_provider_column
+                        else "NULL"
+                    )
+                    top_models_query = (
+                        f"SELECT "
+                        f"{model_group_expression}, "
+                        f"COUNT(*), "
+                        f"SUM({model_total_expression}), "
+                        f"SUM({cache_read_value_expression} + {cache_write_value_expression} + {reasoning_value_expression}), "
+                        f"SUM({estimated_cost_value_expression}), "
+                        f"COUNT(DISTINCT CASE "
+                        f"WHEN {provider_expression} IS NOT NULL "
+                        f"AND TRIM({provider_expression}) <> '' "
+                        f"THEN TRIM({provider_expression}) END), "
+                        f"MIN(CASE "
+                        f"WHEN {provider_expression} IS NOT NULL "
+                        f"AND TRIM({provider_expression}) <> '' "
+                        f"THEN TRIM({provider_expression}) END) "
+                        f"FROM {quote_ident(store['session_table'])} "
+                        f"GROUP BY {model_group_expression} "
+                        f"ORDER BY 3 DESC, 4 DESC, 2 DESC, 1 ASC "
+                        f"LIMIT 5"
+                    )
+
+                    for model_row in connection.execute(top_models_query).fetchall():
+                        model_name = normalize_model(model_row[0])
+                        provider_count = int(model_row[5] or 0)
+                        provider_name = sanitize_text(model_row[6])
+
+                        if provider_count > 1:
+                            provider_label = "Multiple providers"
+                        else:
+                            provider_label = provider_name
+
+                        top_models.append({
+                            "model": model_name,
+                            "billing_provider": provider_label,
+                            "session_count": int(model_row[1] or 0),
+                            "total_tokens": int(model_row[2] or 0),
+                            "cache_reasoning_tokens": int(model_row[3] or 0),
+                            "estimated_cost_usd": parse_float(model_row[4]),
+                        })
+
                 message = None
                 if missing_columns:
                     joined = ", ".join(missing_columns)
@@ -345,6 +448,7 @@ final class UsageBrowserService: @unchecked Sendable {
                     "input_tokens": int(row[1] or 0),
                     "output_tokens": int(row[2] or 0),
                     "top_sessions": top_sessions,
+                    "top_models": top_models,
                     "recent_sessions": recent_sessions,
                     "database_path": store["display_path"],
                     "session_table": store["session_table"],

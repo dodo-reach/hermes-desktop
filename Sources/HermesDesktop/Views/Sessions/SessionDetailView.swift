@@ -30,6 +30,10 @@ struct SessionDetailView: View {
                                 Spacer(minLength: 12)
 
                                 HStack(spacing: 8) {
+                                    if let model = session.displayModel {
+                                        HermesBadge(text: model, tint: .orange)
+                                    }
+
                                     if let count = session.messageCount {
                                         HermesBadge(text: "\(count) messages", tint: .accentColor)
                                     }

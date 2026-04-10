@@ -7,6 +7,7 @@ struct UsageSummary: Codable {
     let inputTokens: Int64
     let outputTokens: Int64
     let topSessions: [UsageTopSession]
+    let topModels: [UsageTopModel]
     let recentSessions: [UsageRecentSession]
     let databasePath: String?
     let sessionTable: String?
@@ -20,6 +21,7 @@ struct UsageSummary: Codable {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case topSessions = "top_sessions"
+        case topModels = "top_models"
         case recentSessions = "recent_sessions"
         case databasePath = "database_path"
         case sessionTable = "session_table"
@@ -64,6 +66,26 @@ struct UsageTopSession: Codable, Identifiable, Hashable {
             return title
         }
         return id
+    }
+}
+
+struct UsageTopModel: Codable, Identifiable, Hashable {
+    let model: String
+    let billingProvider: String?
+    let sessionCount: Int
+    let totalTokens: Int64
+    let cacheAndReasoningTokens: Int64
+    let estimatedCostUSD: Double
+
+    var id: String { model }
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case billingProvider = "billing_provider"
+        case sessionCount = "session_count"
+        case totalTokens = "total_tokens"
+        case cacheAndReasoningTokens = "cache_reasoning_tokens"
+        case estimatedCostUSD = "estimated_cost_usd"
     }
 }
 
