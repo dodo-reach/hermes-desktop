@@ -63,9 +63,6 @@ final class SessionBrowserService: @unchecked Sendable {
                 items = []
                 for row in session_rows:
                     record = dict(zip(context["session_columns"], row))
-                    parent_value = record.get(context["session_parent_column"]) if context["session_parent_column"] else None
-                    if parent_value not in (None, "", 0, "0"):
-                        continue
 
                     session_id = stringify(record.get(context["session_id_column"]))
                     if not session_id:
@@ -133,6 +130,7 @@ final class SessionBrowserService: @unchecked Sendable {
 
             print(json.dumps({
                 "ok": True,
+                "total_count": len(items),
                 "items": items[start:end],
             }, ensure_ascii=False))
         except Exception as exc:

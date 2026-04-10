@@ -3,6 +3,13 @@ import Foundation
 struct SessionListPage: Codable {
     let ok: Bool
     let items: [SessionSummary]
+    let totalCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case items
+        case totalCount = "total_count"
+    }
 }
 
 struct SessionSummary: Codable, Identifiable, Hashable {

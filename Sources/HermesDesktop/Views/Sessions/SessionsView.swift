@@ -8,7 +8,7 @@ struct SessionsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HermesPageHeader(
                     title: "Sessions",
-                    subtitle: "Browse the recent Hermes conversations discovered for the active host."
+                    subtitle: "Browse the recent Hermes conversations discovered on the active host."
                 ) {
                     Button {
                         Task { await appState.loadSessions(reset: true) }
@@ -67,7 +67,7 @@ struct SessionsView: View {
             }
         } else {
             HermesSurfacePanel(
-                title: "Recent Sessions",
+                title: "Stored Sessions (\(appState.totalSessionsCount))",
                 subtitle: "Select a session to inspect its transcript, metadata and last activity."
             ) {
                 ScrollView {

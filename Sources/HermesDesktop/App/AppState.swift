@@ -17,6 +17,10 @@ final class AppState: ObservableObject {
     @Published var sessionsError: String?
     @Published var isLoadingSessions = false
     @Published var hasMoreSessions = false
+    @Published var totalSessionsCount = 0
+    @Published var usageSummary: UsageSummary?
+    @Published var usageError: String?
+    @Published var isLoadingUsage = false
     @Published var selectedSkillID: String?
     @Published var skills: [SkillSummary] = []
     @Published var selectedSkillDetail: SkillDetail?
@@ -35,6 +39,7 @@ final class AppState: ObservableObject {
     let remoteHermesService: RemoteHermesService
     let fileEditorService: FileEditorService
     let sessionBrowserService: SessionBrowserService
+    let usageBrowserService: UsageBrowserService
     let skillBrowserService: SkillBrowserService
     let terminalWorkspace: TerminalWorkspaceStore
 
@@ -53,6 +58,7 @@ final class AppState: ObservableObject {
         self.remoteHermesService = RemoteHermesService(sshTransport: sshTransport)
         self.fileEditorService = FileEditorService(sshTransport: sshTransport)
         self.sessionBrowserService = SessionBrowserService(sshTransport: sshTransport)
+        self.usageBrowserService = UsageBrowserService(sshTransport: sshTransport)
         self.skillBrowserService = SkillBrowserService(sshTransport: sshTransport)
         self.terminalWorkspace = TerminalWorkspaceStore(sshTransport: sshTransport)
 
@@ -271,6 +277,7 @@ final class AppState: ObservableObject {
             sessionOffset = 0
             sessions = []
             hasMoreSessions = false
+            totalSessionsCount = 0
             selectedSessionID = nil
             sessionMessages = []
         }
@@ -291,6 +298,7 @@ final class AppState: ObservableObject {
                 sessions.append(contentsOf: page.items)
             }
 
+            totalSessionsCount = page.totalCount
             hasMoreSessions = page.items.count == sessionPageSize
             sessionOffset += page.items.count
             isLoadingSessions = false
@@ -319,6 +327,32 @@ final class AppState: ObservableObject {
             sessionMessages = []
             sessionsError = error.localizedDescription
             setStatusMessage("Unable to load session transcript")
+        }
+    }
+
+    func loadUsage(forceRefresh: Bool = false) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingUsage { return }
+        if !forceRefresh {
+            if usageSummary != nil || usageError != nil {
+                return
+            }
+        }
+
+        isLoadingUsage = true
+        usageError = nil
+
+        do {
+            usageSummary = try await usageBrowserService.loadUsage(
+                connection: profile,
+                hintedSessionStore: overview?.sessionStore
+            )
+            isLoadingUsage = false
+        } catch {
+            isLoadingUsage = false
+            usageSummary = nil
+            usageError = error.localizedDescription
+            setStatusMessage("Unable to load usage")
         }
     }
 
@@ -398,6 +432,8 @@ final class AppState: ObservableObject {
             Task { await ensureInitialFileLoads() }
         case .sessions:
             Task { await loadSessions(reset: sessions.isEmpty) }
+        case .usage:
+            Task { await loadUsage() }
         case .skills:
             Task { await loadSkills(reset: skills.isEmpty) }
         case .terminal:
@@ -442,6 +478,9 @@ final class AppState: ObservableObject {
         guard overviewError == nil else {
             sessions = []
             sessionMessages = []
+            usageSummary = nil
+            usageError = nil
+            isLoadingUsage = false
             skills = []
             selectedSkillID = nil
             selectedSkillDetail = nil
@@ -464,8 +503,12 @@ final class AppState: ObservableObject {
         sessionsError = nil
         isLoadingSessions = false
         hasMoreSessions = false
+        totalSessionsCount = 0
         selectedSessionID = nil
         sessionOffset = 0
+        usageSummary = nil
+        usageError = nil
+        isLoadingUsage = false
         skills = []
         selectedSkillID = nil
         selectedSkillDetail = nil
