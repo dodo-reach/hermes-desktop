@@ -1,6 +1,6 @@
 # Hermes Desktop
 
-Native macOS app for Hermes over SSH.
+Native macOS app for Hermes Agent over SSH.
 
 Hermes Desktop is for people who already use Hermes and want it to feel at home
 on a Mac.
