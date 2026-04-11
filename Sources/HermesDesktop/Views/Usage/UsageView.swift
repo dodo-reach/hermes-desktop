@@ -686,7 +686,7 @@ private struct UsageTopModelRow: View {
 
     private var accessoryText: String? {
         if model.cacheAndReasoningTokens > 0 {
-            return "+\(UsageNumberFormatter.shortString(for: model.cacheAndReasoningTokens)) cache"
+            return "+\(UsageNumberFormatter.shortString(for: model.cacheAndReasoningTokens)) cache/reasoning"
         }
         return nil
     }
