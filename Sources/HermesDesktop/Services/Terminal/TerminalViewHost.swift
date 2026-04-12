@@ -64,10 +64,10 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
         ]
 
         hostView.terminalView.startProcess(
-            executable: "/usr/bin/ssh",
-            args: session.sshArguments,
+            executable: session.executablePath,
+            args: session.terminalArguments,
             environment: environment,
-            execName: "ssh"
+            execName: session.usesMosh ? "mosh" : "ssh"
         )
     }
 

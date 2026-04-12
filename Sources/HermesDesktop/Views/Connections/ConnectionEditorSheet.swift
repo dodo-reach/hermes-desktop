@@ -89,6 +89,36 @@ struct ConnectionEditorSheet: View {
                     }
 
                     HermesSurfacePanel(
+                        title: "Terminal",
+                        subtitle: "Controls how the terminal tab connects. All other features (files, sessions, skills) always use SSH."
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HermesInsetSurface {
+                                Toggle(isOn: $draft.prefersMosh) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Use Mosh for terminal")
+                                            .font(.headline)
+                                        Text("Keeps the terminal alive through network changes and sleep/wake. Useful when connecting to a home machine from a laptop on the go.")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .disabled(!MoshSupport.isAvailable)
+                            }
+
+                            if !MoshSupport.isAvailable {
+                                HermesInsetSurface {
+                                    Text("Mosh is not installed on this Mac. Install it with Homebrew to enable this option:\n\nbrew install mosh")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+
+                    HermesSurfacePanel(
                         title: "How Hermes Connects",
                         subtitle: "The goal is to keep the profile understandable without hiding the technical model."
                     ) {
