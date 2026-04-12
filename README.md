@@ -76,8 +76,7 @@ there. That includes:
 
 Setup is intentionally lightweight. You need only a few things:
 
-- an Intel or Apple Silicon Mac for the current public release build
-- macOS 14 or newer
+- a Mac running macOS 14 or newer
 - SSH access from this Mac that already works in Terminal without interactive prompts
 - the SSH host key already accepted once in Terminal for that target
 - a normal route from this Mac to the Hermes host, such as local LAN, public IP/DNS, VPN, or a Tailscale IP/hostname
@@ -103,7 +102,8 @@ Install takes about a minute:
 4. Open it.
 
 The current public build is now packaged as a universal macOS build for both
-Intel and Apple Silicon Macs, and it is not notarized yet.
+Intel and Apple Silicon Macs, and it is not notarized yet. Full first-launch
+validation on real Intel hardware is still ongoing.
 Because of that, macOS may show a warning saying Apple cannot verify the app
 for malware. That is expected for this release and does not mean macOS found
 malware in Hermes Desktop.
