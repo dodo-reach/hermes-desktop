@@ -76,7 +76,7 @@ there. That includes:
 
 Setup is intentionally lightweight. You need only a few things:
 
-- an Apple Silicon Mac for the current public release build
+- an Intel or Apple Silicon Mac for the current public release build
 - macOS 14 or newer
 - SSH access from this Mac that already works in Terminal without interactive prompts
 - the SSH host key already accepted once in Terminal for that target
@@ -102,7 +102,8 @@ Install takes about a minute:
 3. Drag `HermesDesktop.app` into `Applications`.
 4. Open it.
 
-The current public build is Apple Silicon only and not notarized yet.
+The current public build is now packaged as a universal macOS build for both
+Intel and Apple Silicon Macs, and it is not notarized yet.
 Because of that, macOS may show a warning saying Apple cannot verify the app
 for malware. That is expected for this release and does not mean macOS found
 malware in Hermes Desktop.
@@ -232,9 +233,10 @@ Here are concrete things you can verify yourself:
 - if you already use a coding agent you trust, point it at this repo and ask for an independent review of the codebase, build scripts, packaging flow, and release process
 
 One important limitation today is distribution trust: the current public build
-is not notarized by Apple yet. That is why macOS may show a first-launch
-warning. It is a real friction point, and it is different from Apple actively
-reporting that it found malware in the app.
+is now packaged as a universal macOS build for both Intel and Apple Silicon
+Macs, but it is still not notarized by Apple. That is why macOS may show a
+first-launch warning. It is a real friction point, and it is different from
+Apple actively reporting that it found malware in the app.
 
 ### Why can't I browse every file the agent creates on the host?
 
