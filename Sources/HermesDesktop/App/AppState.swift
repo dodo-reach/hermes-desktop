@@ -39,6 +39,8 @@ final class AppState: ObservableObject {
     @Published var soulDocument = FileEditorDocument(trackedFile: .soul)
     @Published var pendingSectionSelection: AppSection?
     @Published var showDiscardChangesAlert = false
+    @Published var availableProfiles: [HermesAgentProfile] = []
+    @Published var activeProfile: HermesAgentProfile = .defaultProfile
 
     let connectionStore: ConnectionStore
     let sshTransport: SSHTransport
@@ -52,6 +54,7 @@ final class AppState: ObservableObject {
     private let sessionPageSize = 50
     private var sessionOffset = 0
     private var statusTask: Task<Void, Never>?
+    private var profileSwitchTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -150,6 +153,30 @@ final class AppState: ObservableObject {
         }
     }
 
+    func selectProfile(_ profile: HermesAgentProfile) {
+        profileSwitchTask?.cancel()
+        profileSwitchTask = Task {
+            guard !Task.isCancelled else { return }
+
+            if var cp = activeConnection {
+                cp.lastUsedProfileID = profile.id
+                connectionStore.upsert(cp)
+            }
+
+            let previousProfiles = availableProfiles
+            resetWorkspaceStateForConnectionChange()
+            availableProfiles = previousProfiles
+            activeProfile = profile
+
+            guard !Task.isCancelled else { return }
+            await refreshOverview()
+
+            guard overviewError == nil, !Task.isCancelled else { return }
+            await ensureInitialFileLoads()
+            await loadSessions(reset: true)
+        }
+    }
+
     func testConnection(_ profile: ConnectionProfile) {
         Task {
             do {
@@ -208,7 +235,7 @@ final class AppState: ObservableObject {
         do {
             isBusy = true
             overviewError = nil
-            overview = try await remoteHermesService.discover(connection: profile)
+            overview = try await remoteHermesService.discover(connection: profile, hermesHome: activeProfile.hermesHome)
             isBusy = false
             if manual {
                 isRefreshingOverview = false
@@ -246,7 +273,7 @@ final class AppState: ObservableObject {
     }
 
     func loadTrackedFile(_ trackedFile: RemoteTrackedFile, forceReload: Bool = false) async {
-        guard let profile = activeConnection else { return }
+        guard let profile = activeConnection, let discovery = overview else { return }
         var document = document(for: trackedFile)
 
         if document.hasLoaded && !forceReload {
@@ -258,7 +285,7 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            let snapshot = try await fileEditorService.read(file: trackedFile, connection: profile)
+            let snapshot = try await fileEditorService.read(file: trackedFile, discovery: discovery, connection: profile)
             document.content = snapshot.content
             document.originalContent = snapshot.content
             document.remoteContentHash = snapshot.contentHash
@@ -275,7 +302,7 @@ final class AppState: ObservableObject {
     }
 
     func saveTrackedFile(_ trackedFile: RemoteTrackedFile) async {
-        guard let profile = activeConnection else { return }
+        guard let profile = activeConnection, let discovery = overview else { return }
         var document = document(for: trackedFile)
         document.isLoading = true
         document.errorMessage = nil
@@ -286,6 +313,7 @@ final class AppState: ObservableObject {
                 file: trackedFile,
                 content: document.content,
                 expectedContentHash: document.remoteContentHash,
+                discovery: discovery,
                 connection: profile
             )
             document.originalContent = document.content
@@ -328,7 +356,8 @@ final class AppState: ObservableObject {
                 connection: profile,
                 offset: reset ? 0 : sessionOffset,
                 limit: sessionPageSize,
-                query: normalizedQuery
+                query: normalizedQuery,
+                hintedSessionStore: overview?.sessionStore
             )
 
             if reset {
@@ -559,7 +588,22 @@ final class AppState: ObservableObject {
     }
 
     private func prepareWorkspaceForActiveConnection() async {
-        guard activeConnection != nil else { return }
+        guard let connection = activeConnection else { return }
+
+        do {
+            let discovered = try await remoteHermesService.discoverProfiles(connection: connection)
+            availableProfiles = discovered
+            if let lastID = connection.lastUsedProfileID,
+               let match = discovered.first(where: { $0.id == lastID }) {
+                activeProfile = match
+            } else {
+                activeProfile = discovered.first(where: { $0.id == "" }) ?? .defaultProfile
+            }
+        } catch {
+            availableProfiles = [.defaultProfile]
+            activeProfile = .defaultProfile
+        }
+
         await refreshOverview()
 
         guard overviewError == nil else {
@@ -592,6 +636,8 @@ final class AppState: ObservableObject {
         overview = nil
         overviewError = nil
         isRefreshingOverview = false
+        availableProfiles = []
+        activeProfile = .defaultProfile
         sessions = []
         sessionMessages = []
         sessionsError = nil

@@ -7,15 +7,28 @@ final class RemoteHermesService: @unchecked Sendable {
         self.sshTransport = sshTransport
     }
 
-    func discover(connection: ConnectionProfile) async throws -> RemoteDiscovery {
-        try await sshTransport.executeJSON(
+    func discover(connection: ConnectionProfile, hermesHome: String = "~/.hermes") async throws -> RemoteDiscovery {
+        let script = try RemotePythonScript.wrap(
+            HermesDiscoveryRequest(hermesHome: hermesHome),
+            body: discoveryBody
+        )
+        return try await sshTransport.executeJSON(
             on: connection,
-            pythonScript: discoveryScript,
+            pythonScript: script,
             responseType: RemoteDiscovery.self
         )
     }
 
-    private var discoveryScript: String {
+    func discoverProfiles(connection: ConnectionProfile) async throws -> [HermesAgentProfile] {
+        let response = try await sshTransport.executeJSON(
+            on: connection,
+            pythonScript: profilesScript,
+            responseType: ProfilesResponse.self
+        )
+        return response.profiles
+    }
+
+    private var discoveryBody: String {
         """
         import json
         import pathlib
@@ -129,7 +142,7 @@ final class RemoteHermesService: @unchecked Sendable {
 
         try:
             home = pathlib.Path.home()
-            hermes_home = home / ".hermes"
+            hermes_home = pathlib.Path(payload["hermes_home"]).expanduser()
             user_path = hermes_home / "memories" / "USER.md"
             memory_path = hermes_home / "memories" / "MEMORY.md"
             soul_path = hermes_home / "SOUL.md"
@@ -159,4 +172,35 @@ final class RemoteHermesService: @unchecked Sendable {
             fail(f"Unable to discover the remote Hermes workspace: {exc}")
         """
     }
+
+    private var profilesScript: String {
+        """
+        import json
+        import pathlib
+
+        home = pathlib.Path.home()
+        hermes_root = home / ".hermes"
+        profiles_dir = hermes_root / "profiles"
+
+        profiles = [{"id": "", "hermesHome": str(hermes_root)}]
+
+        if profiles_dir.exists() and profiles_dir.is_dir():
+            for entry in sorted(profiles_dir.iterdir()):
+                if entry.is_dir():
+                    profiles.append({"id": entry.name, "hermesHome": str(entry)})
+
+        print(json.dumps({"profiles": profiles}, ensure_ascii=False))
+        """
+    }
+}
+
+private struct HermesDiscoveryRequest: Encodable {
+    let hermesHome: String
+    enum CodingKeys: String, CodingKey {
+        case hermesHome = "hermes_home"
+    }
+}
+
+private struct ProfilesResponse: Decodable {
+    let profiles: [HermesAgentProfile]
 }

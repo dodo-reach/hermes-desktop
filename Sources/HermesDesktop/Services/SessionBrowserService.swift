@@ -11,10 +11,18 @@ final class SessionBrowserService: @unchecked Sendable {
         connection: ConnectionProfile,
         offset: Int,
         limit: Int,
-        query: String
+        query: String,
+        hintedSessionStore: RemoteSessionStore? = nil
     ) async throws -> SessionListPage {
         let script = try RemotePythonScript.wrap(
-            SessionPageRequest(offset: offset, limit: limit, query: query),
+            SessionPageRequest(
+                offset: offset,
+                limit: limit,
+                query: query,
+                hintedStorePath: hintedSessionStore?.path,
+                hintedSessionTable: hintedSessionStore?.sessionTable,
+                hintedMessageTable: hintedSessionStore?.messageTable
+            ),
             body: sessionListBody
         )
 
@@ -72,7 +80,11 @@ final class SessionBrowserService: @unchecked Sendable {
         context = None
 
         try:
-            context = try_open_store()
+            context = try_open_store(
+                request.get("hinted_store_path"),
+                request.get("hinted_session_table"),
+                request.get("hinted_message_table")
+            )
 
             if context is None:
                 items = build_jsonl_session_summaries()
@@ -809,6 +821,18 @@ private struct SessionPageRequest: Encodable {
     let offset: Int
     let limit: Int
     let query: String
+    let hintedStorePath: String?
+    let hintedSessionTable: String?
+    let hintedMessageTable: String?
+
+    enum CodingKeys: String, CodingKey {
+        case offset
+        case limit
+        case query
+        case hintedStorePath = "hinted_store_path"
+        case hintedSessionTable = "hinted_session_table"
+        case hintedMessageTable = "hinted_message_table"
+    }
 }
 
 private struct SessionDetailRequest: Encodable {

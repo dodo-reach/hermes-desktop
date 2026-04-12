@@ -7,9 +7,9 @@ final class FileEditorService: @unchecked Sendable {
         self.sshTransport = sshTransport
     }
 
-    func read(file: RemoteTrackedFile, connection: ConnectionProfile) async throws -> FileSnapshot {
+    func read(file: RemoteTrackedFile, discovery: RemoteDiscovery, connection: ConnectionProfile) async throws -> FileSnapshot {
         let script = try RemotePythonScript.wrap(
-            FileRequest(path: file.remoteTildePath),
+            FileRequest(path: resolvePath(for: file, in: discovery)),
             body: """
             import hashlib
             import json
@@ -64,11 +64,12 @@ final class FileEditorService: @unchecked Sendable {
         file: RemoteTrackedFile,
         content: String,
         expectedContentHash: String?,
+        discovery: RemoteDiscovery,
         connection: ConnectionProfile
     ) async throws -> FileSaveResult {
         let script = try RemotePythonScript.wrap(
             FileWriteRequest(
-                path: file.remoteTildePath,
+                path: resolvePath(for: file, in: discovery),
                 content: content,
                 expectedContentHash: expectedContentHash,
                 atomic: true
@@ -154,6 +155,14 @@ final class FileEditorService: @unchecked Sendable {
             path: response.path,
             contentHash: response.contentHash
         )
+    }
+
+    private func resolvePath(for file: RemoteTrackedFile, in discovery: RemoteDiscovery) -> String {
+        switch file {
+        case .user:   return discovery.paths.user
+        case .memory: return discovery.paths.memory
+        case .soul:   return discovery.paths.soul
+        }
     }
 }
 

@@ -23,6 +23,18 @@ struct RootView: View {
                     }
                 }
 
+                if appState.availableProfiles.count > 1 {
+                    Section("Profile") {
+                        Picker("Profile", selection: profileBinding) {
+                            ForEach(appState.availableProfiles) { profile in
+                                Text(profile.displayName).tag(profile)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                    }
+                }
+
                 Section("Workspace") {
                     ForEach(availableSections) { section in
                         Label(section.title, systemImage: section.systemImage)
@@ -80,6 +92,13 @@ struct RootView: View {
             guard let newValue else { return }
             appState.requestSectionSelection(newValue)
         }
+    }
+
+    private var profileBinding: Binding<HermesAgentProfile> {
+        Binding(
+            get: { appState.activeProfile },
+            set: { appState.selectProfile($0) }
+        )
     }
 
     @ViewBuilder

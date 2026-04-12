@@ -7,6 +7,7 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
     var sshHost: String
     var sshPort: Int?
     var sshUser: String
+    var lastUsedProfileID: String?
     var createdAt: Date
     var updatedAt: Date
     var lastConnectedAt: Date?
@@ -18,6 +19,7 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
         sshHost: String = "",
         sshPort: Int? = nil,
         sshUser: String = "",
+        lastUsedProfileID: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         lastConnectedAt: Date? = nil
@@ -28,6 +30,7 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
         self.sshHost = sshHost
         self.sshPort = sshPort
         self.sshUser = sshUser
+        self.lastUsedProfileID = lastUsedProfileID
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastConnectedAt = lastConnectedAt
