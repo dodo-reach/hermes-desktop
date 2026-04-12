@@ -3,7 +3,9 @@ import Foundation
 @MainActor
 final class TerminalSession: ObservableObject, @unchecked Sendable {
     let connection: ConnectionProfile
-    let sshArguments: [String]
+    let executablePath: String
+    let terminalArguments: [String]
+    let usesMosh: Bool
     private let viewHost = TerminalViewHost()
 
     @Published var terminalTitle: String
@@ -15,7 +17,17 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
 
     init(connection: ConnectionProfile, sshTransport: SSHTransport) {
         self.connection = connection
-        self.sshArguments = sshTransport.shellArguments(for: connection)
+
+        if connection.prefersMosh, let moshPath = MoshSupport.executablePath {
+            self.executablePath = moshPath
+            self.terminalArguments = sshTransport.moshArguments(for: connection)
+            self.usesMosh = true
+        } else {
+            self.executablePath = "/usr/bin/ssh"
+            self.terminalArguments = sshTransport.shellArguments(for: connection)
+            self.usesMosh = false
+        }
+
         self.terminalTitle = connection.label
         viewHost.bind(session: self)
     }

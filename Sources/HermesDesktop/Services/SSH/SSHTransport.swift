@@ -84,6 +84,24 @@ final class SSHTransport: @unchecked Sendable {
         sshArguments(for: connection, remoteCommand: nil, allocateTTY: true)
     }
 
+    func moshArguments(for connection: ConnectionProfile) -> [String] {
+        var args: [String] = []
+
+        // Pass custom SSH port through mosh's --ssh flag
+        if let port = connection.resolvedPort {
+            args += ["--ssh=ssh -p \(port)"]
+        }
+
+        // user@host or just host
+        if let user = connection.trimmedUser {
+            args.append("\(user)@\(connection.effectiveTarget)")
+        } else {
+            args.append(connection.effectiveTarget)
+        }
+
+        return args
+    }
+
     func validateSuccessfulExit(_ result: SSHCommandResult, for connection: ConnectionProfile? = nil) throws {
         guard result.exitCode == 0 else {
             throw SSHTransportError.remoteFailure(
