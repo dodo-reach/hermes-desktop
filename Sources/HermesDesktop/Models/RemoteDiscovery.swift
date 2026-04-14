@@ -23,12 +23,14 @@ struct RemoteHermesPaths: Codable {
     let memory: String
     let soul: String
     let sessionsDir: String
+    let cronJobs: String
 
     enum CodingKeys: String, CodingKey {
         case user
         case memory
         case soul
         case sessionsDir = "sessions_dir"
+        case cronJobs = "cron_jobs"
     }
 }
 
@@ -37,12 +39,14 @@ struct RemoteHermesPathExistence: Codable {
     let memory: Bool
     let soul: Bool
     let sessionsDir: Bool
+    let cronJobs: Bool
 
     enum CodingKeys: String, CodingKey {
         case user
         case memory
         case soul
         case sessionsDir = "sessions_dir"
+        case cronJobs = "cron_jobs"
     }
 }
 

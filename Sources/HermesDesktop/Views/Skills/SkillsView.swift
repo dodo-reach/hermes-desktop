@@ -22,12 +22,6 @@ struct SkillsView: View {
             .frame(minWidth: 300, idealWidth: 340, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, 20)
             .padding(.vertical, 20)
-            .overlay(alignment: .topTrailing) {
-                if appState.isLoadingSkills && !appState.isRefreshingSkills && !appState.skills.isEmpty {
-                    HermesLoadingOverlay()
-                        .padding(18)
-                }
-            }
 
             SkillDetailView(
                 summary: selectedSkill,
@@ -113,6 +107,12 @@ struct SkillsView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if appState.isLoadingSkills && !appState.isRefreshingSkills && !appState.skills.isEmpty {
+                    HermesLoadingOverlay()
+                        .padding(18)
                 }
             }
         }

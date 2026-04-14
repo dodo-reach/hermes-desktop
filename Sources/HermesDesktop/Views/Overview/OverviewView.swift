@@ -48,7 +48,7 @@ struct OverviewView: View {
                     .font(.largeTitle)
                     .fontWeight(.semibold)
 
-                Text("See which host Hermes is connected to, where its files live, and which source powers Sessions and Usage.")
+                Text("See which host Hermes is connected to, where its files live, and which source powers Sessions, Cron Jobs, and Usage.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -93,8 +93,6 @@ struct OverviewView: View {
                 sessionHistoryPanel(overview)
                     .frame(minWidth: 420, maxWidth: .infinity)
             }
-
-            quickActionsPanel
         }
     }
 
@@ -105,7 +103,6 @@ struct OverviewView: View {
             statusPanel(for: overview)
             workspaceFilesPanel(overview)
             sessionHistoryPanel(overview)
-            quickActionsPanel
         }
     }
 
@@ -244,6 +241,13 @@ struct OverviewView: View {
                     value: overview.paths.sessionsDir,
                     isReady: overview.exists.sessionsDir
                 )
+
+                OverviewPathRow(
+                    title: "Cron jobs registry",
+                    badge: "Cron",
+                    value: overview.paths.cronJobs,
+                    isReady: overview.exists.cronJobs
+                )
             }
         }
     }
@@ -329,118 +333,6 @@ struct OverviewView: View {
                 }
             }
         }
-    }
-
-    private var quickActionsPanel: some View {
-        OverviewPanel(
-            title: "Quick Actions",
-            subtitle: "Open the part of the active host you want to inspect next."
-        ) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    quickActionButton(
-                        title: "Browse Files",
-                        subtitle: "Open the canonical Hermes files.",
-                        systemImage: "doc.text",
-                        isProminent: true
-                    ) {
-                        appState.requestSectionSelection(.files)
-                    }
-                    .frame(minWidth: 220, maxWidth: .infinity)
-
-                    quickActionButton(
-                        title: "View Sessions",
-                        subtitle: "Inspect the remote session history.",
-                        systemImage: "clock.arrow.circlepath"
-                    ) {
-                        appState.requestSectionSelection(.sessions)
-                    }
-                    .frame(minWidth: 220, maxWidth: .infinity)
-
-                    quickActionButton(
-                        title: "Open Terminal",
-                        subtitle: "Work directly on the active host.",
-                        systemImage: "terminal"
-                    ) {
-                        appState.requestSectionSelection(.terminal)
-                    }
-                    .frame(minWidth: 220, maxWidth: .infinity)
-                }
-
-                VStack(spacing: 12) {
-                    quickActionButton(
-                        title: "Browse Files",
-                        subtitle: "Open the canonical Hermes files.",
-                        systemImage: "doc.text",
-                        isProminent: true
-                    ) {
-                        appState.requestSectionSelection(.files)
-                    }
-
-                    quickActionButton(
-                        title: "View Sessions",
-                        subtitle: "Inspect the remote session history.",
-                        systemImage: "clock.arrow.circlepath"
-                    ) {
-                        appState.requestSectionSelection(.sessions)
-                    }
-
-                    quickActionButton(
-                        title: "Open Terminal",
-                        subtitle: "Work directly on the active host.",
-                        systemImage: "terminal"
-                    ) {
-                        appState.requestSectionSelection(.terminal)
-                    }
-                }
-            }
-        }
-    }
-
-    private func quickActionButton(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        isProminent: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.title3)
-                    .foregroundStyle(isProminent ? Color.accentColor : .primary)
-                    .frame(width: 28)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isProminent ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(isProminent ? 0.10 : 0.06), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
     }
 
     private func makeStatusItems(for overview: RemoteDiscovery) -> [OverviewStatusItem] {

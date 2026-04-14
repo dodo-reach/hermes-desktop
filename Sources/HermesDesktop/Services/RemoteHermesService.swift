@@ -134,6 +134,7 @@ final class RemoteHermesService: @unchecked Sendable {
             memory_path = hermes_home / "memories" / "MEMORY.md"
             soul_path = hermes_home / "SOUL.md"
             sessions_dir = hermes_home / "sessions"
+            cron_jobs_path = hermes_home / "cron" / "jobs.json"
 
             result = {
                 "ok": True,
@@ -144,12 +145,14 @@ final class RemoteHermesService: @unchecked Sendable {
                     "memory": tilde(memory_path, home),
                     "soul": tilde(soul_path, home),
                     "sessions_dir": tilde(sessions_dir, home),
+                    "cron_jobs": tilde(cron_jobs_path, home),
                 },
                 "exists": {
                     "user": user_path.exists(),
                     "memory": memory_path.exists(),
                     "soul": soul_path.exists(),
                     "sessions_dir": sessions_dir.exists(),
+                    "cron_jobs": cron_jobs_path.exists(),
                 },
                 "session_store": discover_session_store(hermes_home),
             }
