@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TerminalTabContainer: View {
     @ObservedObject var session: TerminalSession
+    let appearance: TerminalThemeAppearance
     let isActive: Bool
 
     var body: some View {
@@ -34,9 +35,9 @@ struct TerminalTabContainer: View {
             .padding(.vertical, 10)
             .background(Color.secondary.opacity(0.08))
 
-            SwiftTermTerminalView(session: session, isActive: isActive)
+            SwiftTermTerminalView(session: session, appearance: appearance, isActive: isActive)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.textBackgroundColor))
+                .background(appearance.backgroundColor.swiftUIColor)
                 .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -9,6 +9,11 @@ final class ConnectionStore: ObservableObject {
             savePreferences()
         }
     }
+    @Published var terminalTheme: TerminalThemePreference = .defaultValue {
+        didSet {
+            savePreferences()
+        }
+    }
 
     private let paths: AppPaths
     private let encoder = JSONEncoder()
@@ -48,6 +53,7 @@ final class ConnectionStore: ObservableObject {
         if let data = try? Data(contentsOf: paths.preferencesURL),
            let decoded = try? decoder.decode(AppPreferences.self, from: data) {
             lastConnectionID = decoded.lastConnectionID
+            terminalTheme = decoded.terminalTheme ?? .defaultValue
         }
     }
 
@@ -59,7 +65,10 @@ final class ConnectionStore: ObservableObject {
     }
 
     private func savePreferences() {
-        let preferences = AppPreferences(lastConnectionID: lastConnectionID)
+        let preferences = AppPreferences(
+            lastConnectionID: lastConnectionID,
+            terminalTheme: terminalTheme
+        )
         if let data = try? encoder.encode(preferences) {
             try? data.write(to: paths.preferencesURL, options: [.atomic])
         }
@@ -68,4 +77,5 @@ final class ConnectionStore: ObservableObject {
 
 private struct AppPreferences: Codable {
     var lastConnectionID: UUID?
+    var terminalTheme: TerminalThemePreference?
 }

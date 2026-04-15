@@ -7,6 +7,7 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
     private weak var session: TerminalSession?
     private let hostView = TerminalHostView()
     private var startedLaunchToken: UUID?
+    private var appliedAppearance: TerminalThemeAppearance?
 
     override init() {
         super.init()
@@ -17,9 +18,15 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
         self.session = session
     }
 
-    func mount(in container: TerminalMountContainerView, session: TerminalSession, isActive: Bool) {
+    func mount(
+        in container: TerminalMountContainerView,
+        session: TerminalSession,
+        appearance: TerminalThemeAppearance,
+        isActive: Bool
+    ) {
         self.session = session
         container.mount(hostView)
+        applyAppearance(appearance)
         setActive(isActive)
         startIfNeeded(for: session)
     }
@@ -69,6 +76,12 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
             environment: environment,
             execName: "ssh"
         )
+    }
+
+    private func applyAppearance(_ appearance: TerminalThemeAppearance) {
+        guard appliedAppearance != appearance else { return }
+        appliedAppearance = appearance
+        hostView.apply(appearance: appearance)
     }
 
     private func setActive(_ isActive: Bool) {
@@ -162,5 +175,27 @@ final class TerminalHostView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func apply(appearance: TerminalThemeAppearance) {
+        let backgroundColor = appearance.backgroundColor.nsColor
+        let foregroundColor = appearance.foregroundColor.nsColor
+
+        layer?.backgroundColor = backgroundColor.cgColor
+        terminalView.nativeBackgroundColor = backgroundColor
+        terminalView.nativeForegroundColor = foregroundColor
+        terminalView.selectedTextBackgroundColor = foregroundColor.withAlphaComponent(0.28)
+        terminalView.caretColor = foregroundColor
+        terminalView.caretTextColor = backgroundColor
+        terminalView.installColors(appearance.ansiPalette.map(Self.makeTerminalColor(from:)))
+    }
+
+    private static func makeTerminalColor(from themeColor: TerminalThemeColor) -> SwiftTerm.Color {
+        let color = themeColor.nsColor.usingColorSpace(.deviceRGB) ?? .black
+        return SwiftTerm.Color(
+            red: UInt16(color.redComponent * 65535),
+            green: UInt16(color.greenComponent * 65535),
+            blue: UInt16(color.blueComponent * 65535)
+        )
     }
 }
