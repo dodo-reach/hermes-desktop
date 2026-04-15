@@ -64,6 +64,39 @@ pick_sdk() {
     printf '%s\n' "$selected"
 }
 
+derive_version() {
+    if [[ -n "${HERMES_VERSION:-}" ]]; then
+        printf '%s\n' "$HERMES_VERSION"
+        return
+    fi
+    local tag
+    tag="$(git -C "$ROOT_DIR" describe --tags --exact-match 2>/dev/null || true)"
+    printf '%s\n' "${tag#v}"
+}
+
+derive_build_number() {
+    if [[ -n "${HERMES_BUILD:-}" ]]; then
+        printf '%s\n' "$HERMES_BUILD"
+        return
+    fi
+    git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || true
+}
+
+stamp_plist_versions() {
+    local plist="$1"
+    local version build
+    version="$(derive_version)"
+    build="$(derive_build_number)"
+    if [[ -n "$version" ]]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$plist"
+    fi
+    if [[ -n "$build" ]]; then
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
+    fi
+    STAMPED_VERSION="${version:-$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$plist")}"
+    STAMPED_BUILD="${build:-$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$plist")}"
+}
+
 generate_icon() {
     mkdir -p "$ICONSET_PATH"
 
@@ -151,6 +184,7 @@ fi
 
 cp "$UNIVERSAL_EXECUTABLE_PATH" "$MACOS_PATH/$APP_NAME"
 cp "$PLIST_PATH" "$CONTENTS_PATH/Info.plist"
+stamp_plist_versions "$CONTENTS_PATH/Info.plist"
 cp "$ICNS_PATH" "$RESOURCES_PATH/AppIcon.icns"
 cp "$SHADER_SOURCE_PATH" "$RESOURCES_PATH/Shaders.metal"
 codesign --force --deep --sign - "$BUNDLE_PATH" >/dev/null
@@ -159,5 +193,6 @@ codesign --verify --deep --strict "$BUNDLE_PATH" >/dev/null
 echo
 echo "App bundle created:"
 echo "  $BUNDLE_PATH"
+echo "Version: ${STAMPED_VERSION} (build ${STAMPED_BUILD})"
 echo "Architectures: $(lipo -archs "$MACOS_PATH/$APP_NAME")"
 echo "Ad-hoc signed bundle created: macOS may still require right-click > Open on first launch."

@@ -353,3 +353,12 @@ To create the GitHub Releases archive:
 Release artifact:
 
 - `dist/HermesDesktop.app.zip` as a universal macOS archive for Apple Silicon and Intel Macs
+
+The bundled `Info.plist` is stamped at build time so the app's `CFBundleShortVersionString`
+and `CFBundleVersion` match the release being built:
+
+- if `HERMES_VERSION` is set (e.g. `HERMES_VERSION=0.2.0 ./scripts/package-github-release.sh`), it wins
+- otherwise, if `HEAD` is on an annotated tag like `v0.2.0`, the leading `v` is stripped and `0.2.0` is stamped
+- otherwise the template version in `packaging/Info.plist` is left as-is (useful for local dev builds)
+
+`CFBundleVersion` follows the same order, falling back to the commit count (`git rev-list --count HEAD`) so every build is monotonically numbered. `HERMES_BUILD` overrides it.
