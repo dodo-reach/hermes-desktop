@@ -12,6 +12,7 @@ struct CronJob: Codable, Identifiable, Hashable {
     let skills: [String]
     let model: String?
     let provider: String?
+    let baseURL: String?
     let schedule: CronSchedule?
     let scheduleDisplay: String
     let recurrence: CronRecurrence?
@@ -33,6 +34,7 @@ struct CronJob: Codable, Identifiable, Hashable {
         case skills
         case model
         case provider
+        case baseURL = "base_url"
         case schedule
         case scheduleDisplay = "schedule_display"
         case recurrence
@@ -127,7 +129,9 @@ struct CronJob: Codable, Identifiable, Hashable {
             resolvedScheduleDisplay,
             rawScheduleText ?? "",
             model ?? "",
-            provider ?? ""
+            provider ?? "",
+            baseURL ?? "",
+            deliveryTarget ?? ""
         ] + skills
 
         return haystacks.contains { value in
@@ -141,13 +145,13 @@ struct CronJob: Codable, Identifiable, Hashable {
     }
 
     var rawScheduleText: String? {
-        let display = scheduleDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !display.isEmpty {
-            return display
+        let expr = schedule?.expr?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !expr.isEmpty {
+            return expr
         }
 
-        let expr = schedule?.expr?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return expr.isEmpty ? nil : expr
+        let display = scheduleDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+        return display.isEmpty ? nil : display
     }
 }
 
@@ -168,7 +172,484 @@ struct CronJobOrigin: Codable, Hashable {
     let label: String?
 }
 
-private enum CronScheduleFormatter {
+enum CronSchedulePreset: String, CaseIterable, Identifiable {
+    case afterDelay
+    case atDateTime
+    case everyInterval
+    case hourly
+    case daily
+    case weekdays
+    case weekly
+    case monthly
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .afterDelay:
+            return "One Time After"
+        case .atDateTime:
+            return "One Time At"
+        case .everyInterval:
+            return "Every"
+        case .hourly:
+            return "Hourly"
+        case .daily:
+            return "Daily"
+        case .weekdays:
+            return "Weekdays"
+        case .weekly:
+            return "Weekly"
+        case .monthly:
+            return "Monthly"
+        case .custom:
+            return "Custom"
+        }
+    }
+}
+
+enum CronIntervalUnit: String, CaseIterable, Identifiable {
+    case minutes
+    case hours
+    case days
+
+    var id: String { rawValue }
+
+    var shortLabel: String {
+        switch self {
+        case .minutes:
+            return "m"
+        case .hours:
+            return "h"
+        case .days:
+            return "d"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .minutes:
+            return "Minutes"
+        case .hours:
+            return "Hours"
+        case .days:
+            return "Days"
+        }
+    }
+
+    func displayLabel(for value: Int) -> String {
+        switch self {
+        case .minutes:
+            return value == 1 ? "minute" : "minutes"
+        case .hours:
+            return value == 1 ? "hour" : "hours"
+        case .days:
+            return value == 1 ? "day" : "days"
+        }
+    }
+}
+
+enum CronDeliveryPreset: String, CaseIterable, Identifiable {
+    case local
+    case origin
+    case telegram
+    case discord
+    case slack
+    case whatsapp
+    case email
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .local:
+            return "Local Only"
+        case .origin:
+            return "Origin Chat"
+        case .telegram:
+            return "Telegram Home"
+        case .discord:
+            return "Discord Home"
+        case .slack:
+            return "Slack Home"
+        case .whatsapp:
+            return "WhatsApp Home"
+        case .email:
+            return "Email"
+        case .custom:
+            return "Custom Target"
+        }
+    }
+
+    var resolvedValue: String? {
+        switch self {
+        case .local:
+            return "local"
+        case .origin:
+            return "origin"
+        case .telegram:
+            return "telegram"
+        case .discord:
+            return "discord"
+        case .slack:
+            return "slack"
+        case .whatsapp:
+            return "whatsapp"
+        case .email:
+            return "email"
+        case .custom:
+            return nil
+        }
+    }
+
+    static func from(deliveryTarget: String?) -> (preset: CronDeliveryPreset, customValue: String) {
+        let trimmed = deliveryTarget?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else {
+            return (.custom, "")
+        }
+
+        switch trimmed {
+        case "local":
+            return (.local, "")
+        case "origin":
+            return (.origin, "")
+        case "telegram":
+            return (.telegram, "")
+        case "discord":
+            return (.discord, "")
+        case "slack":
+            return (.slack, "")
+        case "whatsapp":
+            return (.whatsapp, "")
+        case "email":
+            return (.email, "")
+        default:
+            return (.custom, trimmed)
+        }
+    }
+}
+
+struct CronScheduleDraft: Hashable {
+    var preset: CronSchedulePreset
+    var hour: Int
+    var minute: Int
+    var weekday: Int
+    var dayOfMonth: Int
+    var intervalValue: Int
+    var intervalUnit: CronIntervalUnit
+    var oneTimeDate: Date
+    var customExpression: String
+
+    init(
+        preset: CronSchedulePreset = .daily,
+        hour: Int = 9,
+        minute: Int = 0,
+        weekday: Int = 1,
+        dayOfMonth: Int = 1,
+        intervalValue: Int = 1,
+        intervalUnit: CronIntervalUnit = .hours,
+        oneTimeDate: Date = Date().addingTimeInterval(3600),
+        customExpression: String = ""
+    ) {
+        self.preset = preset
+        self.hour = max(0, min(hour, 23))
+        self.minute = max(0, min(minute, 59))
+        self.weekday = max(0, min(weekday, 6))
+        self.dayOfMonth = max(1, min(dayOfMonth, 31))
+        self.intervalValue = max(1, intervalValue)
+        self.intervalUnit = intervalUnit
+        self.oneTimeDate = oneTimeDate
+        self.customExpression = customExpression
+    }
+
+    init(job: CronJob) {
+        self = Self.from(expression: job.rawScheduleText)
+    }
+
+    static func from(expression: String?) -> CronScheduleDraft {
+        guard let expression else { return CronScheduleDraft() }
+
+        let trimmed = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let (value, unit) = CronScheduleFormatter.oneTimeDelayComponents(from: trimmed) {
+            return CronScheduleDraft(
+                preset: .afterDelay,
+                intervalValue: value,
+                intervalUnit: unit,
+                customExpression: trimmed
+            )
+        }
+
+        if let (value, unit) = CronScheduleFormatter.intervalComponents(from: trimmed) {
+            return CronScheduleDraft(
+                preset: .everyInterval,
+                intervalValue: value,
+                intervalUnit: unit,
+                customExpression: trimmed
+            )
+        }
+
+        if let date = CronScheduleFormatter.date(from: trimmed) {
+            return CronScheduleDraft(
+                preset: .atDateTime,
+                oneTimeDate: date,
+                customExpression: trimmed
+            )
+        }
+
+        let parts = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard parts.count == 5 else {
+            return CronScheduleDraft(preset: .custom, customExpression: trimmed)
+        }
+
+        let minute = Int(parts[0])
+        let hour = Int(parts[1])
+        let dayOfMonth = Int(parts[2])
+        let month = parts[3]
+        let dayOfWeek = parts[4]
+
+        if parts[2] == "*",
+           month == "*",
+           dayOfWeek == "*",
+           let minute,
+           parts[1] == "*" {
+            return CronScheduleDraft(
+                preset: .hourly,
+                minute: minute,
+                customExpression: trimmed
+            )
+        }
+
+        guard let minute, let hour, month == "*" else {
+            return CronScheduleDraft(preset: .custom, customExpression: trimmed)
+        }
+
+        if parts[2] == "*", dayOfWeek == "*" {
+            return CronScheduleDraft(
+                preset: .daily,
+                hour: hour,
+                minute: minute,
+                customExpression: trimmed
+            )
+        }
+
+        if parts[2] == "*", dayOfWeek == "1-5" {
+            return CronScheduleDraft(
+                preset: .weekdays,
+                hour: hour,
+                minute: minute,
+                customExpression: trimmed
+            )
+        }
+
+        if parts[2] == "*",
+           let weekday = CronScheduleFormatter.weekdayIndex(for: dayOfWeek) {
+            return CronScheduleDraft(
+                preset: .weekly,
+                hour: hour,
+                minute: minute,
+                weekday: weekday,
+                customExpression: trimmed
+            )
+        }
+
+        if dayOfWeek == "*",
+           let dayOfMonth {
+            return CronScheduleDraft(
+                preset: .monthly,
+                hour: hour,
+                minute: minute,
+                dayOfMonth: dayOfMonth,
+                customExpression: trimmed
+            )
+        }
+
+        return CronScheduleDraft(preset: .custom, customExpression: trimmed)
+    }
+
+    var expression: String? {
+        switch preset {
+        case .afterDelay:
+            return "\(intervalValue)\(intervalUnit.shortLabel)"
+        case .atDateTime:
+            return CronScheduleFormatter.localTimestampString(from: oneTimeDate)
+        case .everyInterval:
+            return "every \(intervalValue)\(intervalUnit.shortLabel)"
+        case .hourly:
+            return String(format: "%d * * * *", minute)
+        case .daily:
+            return String(format: "%d %d * * *", minute, hour)
+        case .weekdays:
+            return String(format: "%d %d * * 1-5", minute, hour)
+        case .weekly:
+            return String(format: "%d %d * * %d", minute, hour, weekday)
+        case .monthly:
+            return String(format: "%d %d %d * *", minute, hour, dayOfMonth)
+        case .custom:
+            let trimmed = customExpression.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
+    var scheduleKind: String? {
+        switch preset {
+        case .afterDelay:
+            return "delay"
+        case .atDateTime:
+            return "at"
+        case .everyInterval:
+            return "every"
+        case .hourly, .daily, .weekdays, .weekly, .monthly:
+            return "cron"
+        case .custom:
+            guard let expression else { return nil }
+            let parts = expression.split(whereSeparator: \.isWhitespace)
+            return parts.count == 5 ? "cron" : nil
+        }
+    }
+
+    var repeatTimes: Int? {
+        switch preset {
+        case .afterDelay, .atDateTime:
+            return 1
+        default:
+            return nil
+        }
+    }
+
+    var summary: String {
+        guard let expression else { return "No schedule" }
+        return CronScheduleFormatter.humanReadableDescription(for: expression) ?? expression
+    }
+}
+
+struct CronJobDraft: Hashable {
+    var name: String
+    var prompt: String
+    var skillsText: String
+    var model: String
+    var provider: String
+    var baseURL: String
+    var deliveryPreset: CronDeliveryPreset
+    var customDeliveryTarget: String
+    var timezone: String
+    var schedule: CronScheduleDraft
+
+    init(
+        name: String = "",
+        prompt: String = "",
+        skillsText: String = "",
+        model: String = "",
+        provider: String = "",
+        baseURL: String = "",
+        deliveryPreset: CronDeliveryPreset = .local,
+        customDeliveryTarget: String = "",
+        timezone: String = "",
+        schedule: CronScheduleDraft = CronScheduleDraft()
+    ) {
+        self.name = name
+        self.prompt = prompt
+        self.skillsText = skillsText
+        self.model = model
+        self.provider = provider
+        self.baseURL = baseURL
+        self.deliveryPreset = deliveryPreset
+        self.customDeliveryTarget = customDeliveryTarget
+        self.timezone = timezone
+        self.schedule = schedule
+    }
+
+    init(job: CronJob) {
+        let parsedDelivery = CronDeliveryPreset.from(deliveryTarget: job.deliveryTarget)
+        self.name = job.resolvedName
+        self.prompt = job.trimmedPrompt ?? job.prompt
+        self.skillsText = job.skills.joined(separator: ", ")
+        self.model = job.model ?? ""
+        self.provider = job.provider ?? ""
+        self.baseURL = job.baseURL ?? ""
+        self.deliveryPreset = parsedDelivery.preset
+        self.customDeliveryTarget = parsedDelivery.customValue
+        self.timezone = job.schedule?.timezone ?? ""
+        self.schedule = CronScheduleDraft(job: job)
+    }
+
+    var normalizedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var normalizedPrompt: String {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var normalizedSkills: [String] {
+        skillsText
+            .split(whereSeparator: { $0 == "," || $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    var normalizedModel: String? {
+        normalizedOptional(model)
+    }
+
+    var normalizedProvider: String? {
+        normalizedOptional(provider)
+    }
+
+    var normalizedBaseURL: String? {
+        normalizedOptional(baseURL)
+    }
+
+    var normalizedDeliveryTarget: String? {
+        if let resolvedValue = deliveryPreset.resolvedValue {
+            return resolvedValue
+        }
+
+        return normalizedOptional(customDeliveryTarget)
+    }
+
+    var normalizedTimezone: String? {
+        switch schedule.preset {
+        case .afterDelay, .atDateTime, .everyInterval:
+            return nil
+        case .hourly, .daily, .weekdays, .weekly, .monthly, .custom:
+            break
+        }
+        return normalizedOptional(timezone)
+    }
+
+    var validationError: String? {
+        if normalizedName.isEmpty {
+            return "A cron job title is required."
+        }
+
+        if normalizedPrompt.isEmpty {
+            return "A prompt is required."
+        }
+
+        guard let expression = schedule.expression else {
+            return "A valid schedule is required."
+        }
+
+        if expression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "A valid schedule is required."
+        }
+
+        if normalizedDeliveryTarget == nil {
+            return "A delivery target is required."
+        }
+
+        return nil
+    }
+
+    private func normalizedOptional(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+enum CronScheduleFormatter {
     private static let weekdaySymbols = [
         "0": "Sun",
         "1": "Mon",
@@ -187,8 +668,31 @@ private enum CronScheduleFormatter {
         "sat": "Sat"
     ]
 
+    static let weekdayPickerLabels = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday"
+    ]
+
     static func humanReadableDescription(for expression: String) -> String? {
         let trimmed = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let (value, unit) = oneTimeDelayComponents(from: trimmed) {
+            return "Once in \(value) \(unit.displayLabel(for: value))"
+        }
+
+        if let (value, unit) = intervalComponents(from: trimmed) {
+            return "Every \(value) \(unit.displayLabel(for: value))"
+        }
+
+        if let date = date(from: trimmed) {
+            return "Once on \(DateFormatters.shortDateTimeFormatter().string(from: date))"
+        }
+
         let parts = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
         guard parts.count == 5 else { return nil }
 
@@ -249,4 +753,80 @@ private enum CronScheduleFormatter {
 
         return resolved.joined(separator: ", ")
     }
+
+    static func weekdayIndex(for rawValue: String) -> Int? {
+        let lowered = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        switch lowered {
+        case "0", "7", "sun":
+            return 0
+        case "1", "mon":
+            return 1
+        case "2", "tue":
+            return 2
+        case "3", "wed":
+            return 3
+        case "4", "thu":
+            return 4
+        case "5", "fri":
+            return 5
+        case "6", "sat":
+            return 6
+        default:
+            return nil
+        }
+    }
+
+    static func oneTimeDelayComponents(from value: String) -> (Int, CronIntervalUnit)? {
+        durationComponents(from: value)
+    }
+
+    static func intervalComponents(from value: String) -> (Int, CronIntervalUnit)? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard trimmed.hasPrefix("every ") else { return nil }
+        return durationComponents(from: String(trimmed.dropFirst(6)))
+    }
+
+    static func date(from value: String) -> Date? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let date = ISO8601DateFormatter.fractionalSecondsFormatter().date(from: trimmed) {
+            return date
+        }
+        if let date = ISO8601DateFormatter().date(from: trimmed) {
+            return date
+        }
+        return localTimestampFormatter.date(from: trimmed)
+    }
+
+    static func localTimestampString(from date: Date) -> String {
+        localTimestampFormatter.string(from: date)
+    }
+
+    private static func durationComponents(from value: String) -> (Int, CronIntervalUnit)? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard trimmed.count >= 2,
+              let quantity = Int(trimmed.dropLast()) else {
+            return nil
+        }
+
+        switch trimmed.suffix(1) {
+        case "m":
+            return (quantity, .minutes)
+        case "h":
+            return (quantity, .hours)
+        case "d":
+            return (quantity, .days)
+        default:
+            return nil
+        }
+    }
+
+    private static let localTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }()
 }

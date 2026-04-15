@@ -40,6 +40,7 @@ final class AppState: ObservableObject {
     @Published var isRefreshingCronJobs = false
     @Published var isOperatingOnCronJob = false
     @Published var operatingCronJobID: String?
+    @Published var isSavingCronJobDraft = false
     @Published var selectedTrackedFile: RemoteTrackedFile = .memory
     @Published var memoryDocument = FileEditorDocument(trackedFile: .memory)
     @Published var userDocument = FileEditorDocument(trackedFile: .user)
@@ -561,6 +562,64 @@ final class AppState: ObservableObject {
         }
     }
 
+    func createCronJob(_ draft: CronJobDraft) async -> Bool {
+        guard let profile = activeConnection else { return false }
+        guard !isSavingCronJobDraft, !isOperatingOnCronJob else { return false }
+
+        if let validationError = draft.validationError {
+            cronJobsError = validationError
+            setStatusMessage(validationError)
+            return false
+        }
+
+        isSavingCronJobDraft = true
+        cronJobsError = nil
+        setStatusMessage("Creating cron job…")
+
+        do {
+            let jobID = try await cronBrowserService.createJob(connection: profile, draft: draft)
+            await loadCronJobs()
+            selectedCronJobID = jobID
+            isSavingCronJobDraft = false
+            setStatusMessage("\(draft.normalizedName) created")
+            return true
+        } catch {
+            isSavingCronJobDraft = false
+            cronJobsError = error.localizedDescription
+            setStatusMessage("Unable to create cron job")
+            return false
+        }
+    }
+
+    func updateCronJob(_ job: CronJob, draft: CronJobDraft) async -> Bool {
+        guard let profile = activeConnection else { return false }
+        guard !isSavingCronJobDraft, !isOperatingOnCronJob else { return false }
+
+        if let validationError = draft.validationError {
+            cronJobsError = validationError
+            setStatusMessage(validationError)
+            return false
+        }
+
+        isSavingCronJobDraft = true
+        cronJobsError = nil
+        setStatusMessage("Updating \(job.resolvedName)…")
+
+        do {
+            try await cronBrowserService.updateJob(connection: profile, jobID: job.id, draft: draft)
+            await loadCronJobs()
+            selectedCronJobID = job.id
+            isSavingCronJobDraft = false
+            setStatusMessage("\(draft.normalizedName) updated")
+            return true
+        } catch {
+            isSavingCronJobDraft = false
+            cronJobsError = error.localizedDescription
+            setStatusMessage("Unable to update cron job")
+            return false
+        }
+    }
+
     func resumeCronJob(_ job: CronJob) async {
         guard let profile = activeConnection else { return }
         guard !isOperatingOnCronJob else { return }
@@ -720,6 +779,7 @@ final class AppState: ObservableObject {
             isRefreshingCronJobs = false
             isOperatingOnCronJob = false
             operatingCronJobID = nil
+            isSavingCronJobDraft = false
             resetDocuments()
             return
         }
@@ -761,6 +821,7 @@ final class AppState: ObservableObject {
         isRefreshingCronJobs = false
         isOperatingOnCronJob = false
         operatingCronJobID = nil
+        isSavingCronJobDraft = false
         resetDocuments()
         terminalWorkspace.closeAllTabs()
     }
