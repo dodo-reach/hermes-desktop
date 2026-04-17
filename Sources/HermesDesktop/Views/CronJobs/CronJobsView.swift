@@ -110,7 +110,7 @@ struct CronJobsView: View {
                 ContentUnavailableView(
                     "No cron jobs found",
                     systemImage: "calendar.badge.exclamationmark",
-                    description: Text("No saved Hermes cron jobs were discovered under ~/.hermes/cron/jobs.json on this SSH target.")
+                    description: Text("No saved Hermes cron jobs were discovered under \(cronJobsPath) on this SSH target.")
                 )
                 .frame(maxWidth: .infinity, minHeight: 300)
             }
@@ -236,6 +236,14 @@ struct CronJobsView: View {
         }
 
         return "Cron Jobs (\(total))"
+    }
+
+    private var cronJobsPath: String {
+        if let activeConnection = appState.activeConnection {
+            return activeConnection.remoteCronJobsPath
+        }
+
+        return "~/.hermes/cron/jobs.json"
     }
 
     private var selectedJob: CronJob? {
@@ -645,6 +653,7 @@ private struct CronJobDetailView: View {
 }
 
 private struct CronJobEditorView: View {
+    @EnvironmentObject private var appState: AppState
     let mode: CronEditorMode
     @Binding var draft: CronJobDraft
     let errorMessage: String?
@@ -682,7 +691,7 @@ private struct CronJobEditorView: View {
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    Text("The app will write the right cron job structure into `~/.hermes/cron/jobs.json` on the active host.")
+                    Text("The app will write the right cron job structure into `\(cronJobsPath)` on the active host.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -846,7 +855,7 @@ private struct CronJobEditorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if draft.deliveryPreset == .local {
-                    Text("`Local Only` saves cron output under `~/.hermes/cron/output/` on the active host.")
+                    Text("`Local Only` saves cron output under `\(cronOutputPath)` on the active host.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1048,6 +1057,14 @@ private struct CronJobEditorView: View {
             get: { draft.customDeliveryTarget },
             set: { draft.customDeliveryTarget = $0 }
         )
+    }
+
+    private var cronJobsPath: String {
+        appState.activeConnection?.remoteCronJobsPath ?? "~/.hermes/cron/jobs.json"
+    }
+
+    private var cronOutputPath: String {
+        (appState.activeConnection?.remoteHermesHomePath ?? "~/.hermes") + "/cron/output/"
     }
 }
 

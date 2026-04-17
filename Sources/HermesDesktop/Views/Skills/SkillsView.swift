@@ -3,6 +3,9 @@ import SwiftUI
 struct SkillsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var searchText = ""
+    @State private var editorMode: SkillEditorMode?
+    @State private var editorDraft = SkillDraft()
+    @State private var rawMarkdownContent = ""
 
     var body: some View {
         HSplitView {
@@ -11,8 +14,18 @@ struct SkillsView: View {
                     title: "Skills",
                     subtitle: "Browse the Hermes skill library discovered on the active host."
                 ) {
-                    HermesRefreshButton(isRefreshing: appState.isRefreshingSkills) {
-                        Task { await appState.refreshSkills() }
+                    HStack(spacing: 10) {
+                        Button {
+                            startCreating()
+                        } label: {
+                            Label("New", systemImage: "plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(appState.isSavingSkillDraft)
+
+                        HermesRefreshButton(isRefreshing: appState.isRefreshingSkills) {
+                            Task { await appState.refreshSkills() }
+                        }
                     }
                     .disabled(appState.isLoadingSkills)
                 }
@@ -23,13 +36,8 @@ struct SkillsView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 20)
 
-            SkillDetailView(
-                summary: selectedSkill,
-                detail: appState.selectedSkillDetail,
-                errorMessage: appState.skillsError,
-                isLoading: appState.isLoadingSkillDetail
-            )
-            .frame(minWidth: 420, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            detailContent
+                .frame(minWidth: 420, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: appState.activeConnectionID) {
@@ -75,7 +83,7 @@ struct SkillsView: View {
                 ContentUnavailableView(
                     "No skills found",
                     systemImage: "book.closed",
-                    description: Text("No readable SKILL.md files were discovered under ~/.hermes/skills on this SSH target.")
+                    description: Text("No readable SKILL.md files were discovered under \(skillsRootPath) on this SSH target.")
                 )
                 .frame(maxWidth: .infinity, minHeight: 300)
             }
@@ -143,6 +151,86 @@ struct SkillsView: View {
     private var selectedSkill: SkillSummary? {
         guard let selectedSkillID = appState.selectedSkillID else { return nil }
         return appState.skills.first(where: { $0.id == selectedSkillID })
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        if let editorMode {
+            SkillEditorView(
+                mode: editorMode,
+                draft: $editorDraft,
+                rawMarkdownContent: $rawMarkdownContent,
+                detail: appState.selectedSkillDetail,
+                errorMessage: appState.skillsError,
+                isSaving: appState.isSavingSkillDraft,
+                onCancel: {
+                    self.editorMode = nil
+                },
+                onSave: {
+                    await saveEditor()
+                }
+            )
+        } else {
+            SkillDetailView(
+                summary: selectedSkill,
+                detail: appState.selectedSkillDetail,
+                errorMessage: appState.skillsError,
+                isLoading: appState.isLoadingSkillDetail,
+                onCreate: {
+                    startCreating()
+                },
+                onEdit: {
+                    startEditing()
+                }
+            )
+        }
+    }
+
+    private var skillsRootPath: String {
+        if let activeConnection = appState.activeConnection {
+            return activeConnection.remoteSkillsPath
+        }
+
+        return "~/.hermes/skills"
+    }
+
+    private func startCreating() {
+        var draft = SkillDraft()
+        draft.refreshSuggestedSlug()
+        editorDraft = draft
+        rawMarkdownContent = draft.generatedMarkdown
+        editorMode = .create
+    }
+
+    private func startEditing() {
+        guard let detail = appState.selectedSkillDetail else { return }
+        editorDraft = SkillDraft.from(detail: detail)
+        rawMarkdownContent = detail.markdownContent
+        editorMode = .edit
+    }
+
+    private func saveEditor() async {
+        switch editorMode {
+        case .create:
+            let didSave = await appState.createSkill(editorDraft)
+            if didSave {
+                editorMode = nil
+            }
+        case .edit:
+            guard let detail = appState.selectedSkillDetail else { return }
+            let didSave = await appState.updateSkill(
+                detail,
+                markdownContent: rawMarkdownContent,
+                ensureReferencesFolder: editorDraft.includeReferencesFolder,
+                ensureScriptsFolder: editorDraft.includeScriptsFolder,
+                ensureTemplatesFolder: editorDraft.includeTemplatesFolder
+            )
+            if didSave {
+                editorMode = nil
+            }
+        case nil:
+            break
+        }
     }
 }
 

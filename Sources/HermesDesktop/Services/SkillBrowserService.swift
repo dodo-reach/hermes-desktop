@@ -9,7 +9,7 @@ final class SkillBrowserService: @unchecked Sendable {
 
     func listSkills(connection: ConnectionProfile) async throws -> [SkillSummary] {
         let script = try RemotePythonScript.wrap(
-            EmptySkillRequest(),
+            EmptySkillRequest(hermesHome: connection.remoteHermesHomePath),
             body: skillListBody
         )
 
@@ -27,7 +27,10 @@ final class SkillBrowserService: @unchecked Sendable {
         relativePath: String
     ) async throws -> SkillDetail {
         let script = try RemotePythonScript.wrap(
-            SkillDetailRequest(relativePath: relativePath),
+            SkillDetailRequest(
+                relativePath: relativePath,
+                hermesHome: connection.remoteHermesHomePath
+            ),
             body: skillDetailBody
         )
 
@@ -35,6 +38,63 @@ final class SkillBrowserService: @unchecked Sendable {
             on: connection,
             pythonScript: script,
             responseType: SkillDetailResponse.self
+        )
+
+        return response.item
+    }
+
+    func createSkill(
+        connection: ConnectionProfile,
+        draft: SkillDraft
+    ) async throws -> SkillDetail {
+        let script = try RemotePythonScript.wrap(
+            SkillWriteRequest(
+                relativePath: draft.relativePath,
+                markdownContent: draft.generatedMarkdown,
+                expectedContentHash: nil,
+                createReferencesFolder: draft.includeReferencesFolder,
+                createScriptsFolder: draft.includeScriptsFolder,
+                createTemplatesFolder: draft.includeTemplatesFolder,
+                hermesHome: connection.remoteHermesHomePath
+            ),
+            body: skillWriteBody
+        )
+
+        let response = try await sshTransport.executeJSON(
+            on: connection,
+            pythonScript: script,
+            responseType: SkillWriteResponse.self
+        )
+
+        return response.item
+    }
+
+    func updateSkill(
+        connection: ConnectionProfile,
+        relativePath: String,
+        markdownContent: String,
+        expectedContentHash: String,
+        ensureReferencesFolder: Bool,
+        ensureScriptsFolder: Bool,
+        ensureTemplatesFolder: Bool
+    ) async throws -> SkillDetail {
+        let script = try RemotePythonScript.wrap(
+            SkillWriteRequest(
+                relativePath: relativePath,
+                markdownContent: markdownContent,
+                expectedContentHash: expectedContentHash,
+                createReferencesFolder: ensureReferencesFolder,
+                createScriptsFolder: ensureScriptsFolder,
+                createTemplatesFolder: ensureTemplatesFolder,
+                hermesHome: connection.remoteHermesHomePath
+            ),
+            body: skillWriteBody
+        )
+
+        let response = try await sshTransport.executeJSON(
+            on: connection,
+            pythonScript: script,
+            responseType: SkillWriteResponse.self
         )
 
         return response.item
@@ -68,9 +128,98 @@ final class SkillBrowserService: @unchecked Sendable {
         """
     }
 
+    private var skillWriteBody: String {
+        sharedSkillHelpers + """
+
+        import hashlib
+        import os
+        import tempfile
+
+        def write_atomic_utf8(target, content):
+            temp_name = None
+            directory_fd = None
+            content_bytes = content.encode("utf-8")
+
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+
+                fd, temp_name = tempfile.mkstemp(
+                    dir=str(target.parent),
+                    prefix=f".{target.name}.",
+                    suffix=".tmp",
+                )
+
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(content_bytes)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+
+                if target.exists():
+                    os.chmod(temp_name, target.stat().st_mode)
+
+                os.replace(temp_name, target)
+                directory_fd = os.open(target.parent, os.O_RDONLY)
+                os.fsync(directory_fd)
+            finally:
+                if directory_fd is not None:
+                    os.close(directory_fd)
+                if temp_name and os.path.exists(temp_name):
+                    os.unlink(temp_name)
+
+            return hashlib.sha256(content_bytes).hexdigest()
+
+        try:
+            relative_path = normalize_text(payload.get("relative_path"))
+            if relative_path is None:
+                fail("The skill path is required.")
+
+            markdown_content = payload.get("markdown_content")
+            if not isinstance(markdown_content, str) or not markdown_content.strip():
+                fail("SKILL.md content is required.")
+
+            root = skills_root()
+            root.mkdir(parents=True, exist_ok=True)
+
+            skill_file, _ = resolve_skill_file(relative_path)
+            skill_dir = skill_file.parent
+            expected_hash = normalize_text(payload.get("expected_content_hash"))
+
+            if expected_hash is None:
+                if skill_file.exists():
+                    fail(f"A skill already exists at {relative_path}.")
+            else:
+                if not skill_file.exists():
+                    fail(f"{relative_path} no longer exists. Reload the skill list and try again.")
+                if not skill_file.is_file():
+                    fail(f"{relative_path} does not resolve to a writable SKILL.md file.")
+
+                current_hash = hashlib.sha256(skill_file.read_bytes()).hexdigest()
+                if current_hash != expected_hash:
+                    fail(f"{relative_path} changed on the active host after it was loaded. Reload the skill before saving.")
+
+            if payload.get("create_references_folder"):
+                (skill_dir / "references").mkdir(parents=True, exist_ok=True)
+            if payload.get("create_scripts_folder"):
+                (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
+            if payload.get("create_templates_folder"):
+                (skill_dir / "templates").mkdir(parents=True, exist_ok=True)
+
+            write_atomic_utf8(skill_file, markdown_content)
+            item = build_skill_detail(relative_path)
+
+            print(json.dumps({
+                "ok": True,
+                "item": item,
+            }, ensure_ascii=False))
+        except Exception as exc:
+            fail(f"Unable to save the remote Hermes skill: {exc}")
+        """
+    }
+
     private var sharedSkillHelpers: String {
         """
         import ast
+        import hashlib
         import json
         import os
         import pathlib
@@ -85,7 +234,19 @@ final class SkillBrowserService: @unchecked Sendable {
             sys.exit(1)
 
         def skills_root():
-            return pathlib.Path.home() / ".hermes" / "skills"
+            requested = payload.get("hermes_home")
+            home = pathlib.Path.home()
+
+            if requested == "~":
+                hermes_home = home
+            elif isinstance(requested, str) and requested.startswith("~/"):
+                hermes_home = home / requested[2:]
+            elif requested:
+                hermes_home = pathlib.Path(requested)
+            else:
+                hermes_home = home / ".hermes"
+
+            return hermes_home / "skills"
 
         def normalize_text(value):
             if value is None:
@@ -439,17 +600,46 @@ final class SkillBrowserService: @unchecked Sendable {
             content = skill_file.read_text(encoding="utf-8", errors="replace")
             summary = build_skill_summary(skill_file, root)
             summary["markdown_content"] = content
+            summary["content_hash"] = hashlib.sha256(skill_file.read_bytes()).hexdigest()
             return summary
         """
     }
 }
 
-private struct EmptySkillRequest: Encodable {}
+private struct EmptySkillRequest: Encodable {
+    let hermesHome: String
+
+    enum CodingKeys: String, CodingKey {
+        case hermesHome = "hermes_home"
+    }
+}
 
 private struct SkillDetailRequest: Encodable {
     let relativePath: String
+    let hermesHome: String
 
     enum CodingKeys: String, CodingKey {
         case relativePath = "relative_path"
+        case hermesHome = "hermes_home"
+    }
+}
+
+private struct SkillWriteRequest: Encodable {
+    let relativePath: String
+    let markdownContent: String
+    let expectedContentHash: String?
+    let createReferencesFolder: Bool
+    let createScriptsFolder: Bool
+    let createTemplatesFolder: Bool
+    let hermesHome: String
+
+    enum CodingKeys: String, CodingKey {
+        case relativePath = "relative_path"
+        case markdownContent = "markdown_content"
+        case expectedContentHash = "expected_content_hash"
+        case createReferencesFolder = "create_references_folder"
+        case createScriptsFolder = "create_scripts_folder"
+        case createTemplatesFolder = "create_templates_folder"
+        case hermesHome = "hermes_home"
     }
 }

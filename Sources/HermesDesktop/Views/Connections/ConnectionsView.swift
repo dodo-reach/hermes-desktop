@@ -69,7 +69,7 @@ struct ConnectionsView: View {
                 connection: editingConnection,
                 isEditing: editingExistingConnection
             ) { updatedConnection in
-                appState.connectionStore.upsert(updatedConnection)
+                appState.saveConnection(updatedConnection)
             }
             .id(editorPresentationID)
         }
@@ -208,12 +208,14 @@ private struct ConnectionCard: View {
                         metadataRow(label: "Target", value: resolvedTarget)
                         metadataRow(label: "SSH user", value: connection.trimmedUser ?? "Default")
                         metadataRow(label: "Port", value: displayPort)
+                        metadataRow(label: "Hermes profile", value: connection.resolvedHermesProfileName)
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
                         metadataRow(label: "Target", value: resolvedTarget)
                         metadataRow(label: "SSH user", value: connection.trimmedUser ?? "Default")
                         metadataRow(label: "Port", value: displayPort)
+                        metadataRow(label: "Hermes profile", value: connection.resolvedHermesProfileName)
                     }
                 }
 

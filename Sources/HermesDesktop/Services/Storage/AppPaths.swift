@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct AppPaths {
@@ -30,7 +31,7 @@ struct AppPaths {
 
     func controlPath(for connection: ConnectionProfile) -> String {
         controlSocketDirectoryURL
-            .appendingPathComponent(connection.id.uuidString.replacingOccurrences(of: "-", with: ""))
+            .appendingPathComponent(controlSocketIdentifier(for: connection))
             .path
     }
 
@@ -38,5 +39,14 @@ struct AppPaths {
         if !fileManager.fileExists(atPath: url.path) {
             try? fileManager.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
         }
+    }
+
+    private func controlSocketIdentifier(for connection: ConnectionProfile) -> String {
+        // Service-style SSH requests should stay scoped to the Hermes workspace.
+        // Different profiles map to different HERMES_HOME roots on the same host,
+        // so sharing a control socket across profiles can couple unrelated state.
+        let digest = SHA256.hash(data: Data(connection.workspaceScopeFingerprint.utf8))
+        let hexDigest = digest.map { String(format: "%02x", $0) }.joined()
+        return String(hexDigest.prefix(24))
     }
 }

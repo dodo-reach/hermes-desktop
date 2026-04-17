@@ -9,6 +9,7 @@ struct ConnectionEditorSheet: View {
         case host
         case user
         case port
+        case hermesProfile
     }
 
     @State private var draft: ConnectionProfile
@@ -85,6 +86,12 @@ struct ConnectionEditorSheet: View {
                                     }
                                 }
                             }
+
+                            EditorField(label: "Hermes profile") {
+                                TextField("default or researcher", text: hermesProfileBinding)
+                                    .focused($focusedField, equals: .hermesProfile)
+                                    .textFieldStyle(.roundedBorder)
+                            }
                         }
                     }
 
@@ -121,12 +128,24 @@ struct ConnectionEditorSheet: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             } else {
-                                ConnectionHintRow(
-                                    title: "Overrides",
-                                    detail: "SSH user and port are optional. Leave them empty to keep the remote defaults."
-                                )
+                            ConnectionHintRow(
+                                title: "Overrides",
+                                detail: "SSH user and port are optional. Leave them empty to keep the remote defaults."
+                            )
+                        }
+
+                        HermesInsetSurface {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Hermes profile")
+                                    .font(.headline)
+
+                                Text("Leave it empty for the default Hermes home at `~/.hermes`. Set a profile name like `researcher` to target `~/.hermes/profiles/researcher` on the same host.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
+                    }
                     }
 
                     HermesSurfacePanel(
@@ -184,6 +203,14 @@ struct ConnectionEditorSheet: View {
         var candidate = draft
         candidate.sshPort = parsedPort
         return hasValidPort && candidate.isValid
+    }
+
+    private var hermesProfileBinding: Binding<String> {
+        Binding {
+            draft.hermesProfile ?? ""
+        } set: { newValue in
+            draft.hermesProfile = newValue
+        }
     }
 }
 

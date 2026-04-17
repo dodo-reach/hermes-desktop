@@ -16,7 +16,7 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
     init(connection: ConnectionProfile, sshTransport: SSHTransport) {
         self.connection = connection
         self.sshArguments = sshTransport.shellArguments(for: connection)
-        self.terminalTitle = connection.label
+        self.terminalTitle = "\(connection.label) · \(connection.resolvedHermesProfileName)"
         viewHost.bind(session: self)
     }
 

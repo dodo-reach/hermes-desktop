@@ -26,6 +26,11 @@ enum SSHTransportError: LocalizedError {
 final class SSHTransport: @unchecked Sendable {
     private let paths: AppPaths
 
+    private enum ConnectionPurpose {
+        case service
+        case terminalShell
+    }
+
     init(paths: AppPaths) {
         self.paths = paths
     }
@@ -43,7 +48,8 @@ final class SSHTransport: @unchecked Sendable {
         let arguments = sshArguments(
             for: connection,
             remoteCommand: remoteCommand,
-            allocateTTY: allocateTTY
+            allocateTTY: allocateTTY,
+            purpose: .service
         )
 
         return try await runProcess(
@@ -81,7 +87,12 @@ final class SSHTransport: @unchecked Sendable {
     }
 
     func shellArguments(for connection: ConnectionProfile) -> [String] {
-        sshArguments(for: connection, remoteCommand: nil, allocateTTY: true)
+        sshArguments(
+            for: connection,
+            remoteCommand: connection.remoteShellBootstrapCommand,
+            allocateTTY: true,
+            purpose: .terminalShell
+        )
     }
 
     func validateSuccessfulExit(_ result: SSHCommandResult, for connection: ConnectionProfile? = nil) throws {
@@ -100,17 +111,31 @@ final class SSHTransport: @unchecked Sendable {
     private func sshArguments(
         for connection: ConnectionProfile,
         remoteCommand: String?,
-        allocateTTY: Bool
+        allocateTTY: Bool,
+        purpose: ConnectionPurpose
     ) -> [String] {
         var arguments = [
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
-            "-o", "ControlMaster=auto",
-            "-o", "ControlPersist=300",
             "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=3",
-            "-o", "ControlPath=\(paths.controlPath(for: connection))"
+            "-o", "ServerAliveCountMax=3"
         ]
+
+        switch purpose {
+        case .service:
+            arguments.append(contentsOf: [
+                "-o", "ControlMaster=auto",
+                "-o", "ControlPersist=300",
+                "-o", "ControlPath=\(paths.controlPath(for: connection))"
+            ])
+        case .terminalShell:
+            // Keep interactive terminal shells isolated from background RPC-style
+            // requests so an open PTY session cannot destabilize profile reloads.
+            arguments.append(contentsOf: [
+                "-o", "ControlMaster=no",
+                "-S", "none"
+            ])
+        }
 
         if allocateTTY {
             arguments.append("-tt")

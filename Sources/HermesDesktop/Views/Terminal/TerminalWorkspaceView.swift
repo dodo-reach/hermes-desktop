@@ -11,16 +11,18 @@ struct TerminalWorkspaceView: View {
             HStack(spacing: 8) {
                 ForEach(workspace.tabs) { tab in
                     TerminalTabChip(
-                        title: tab.session.terminalTitle,
+                        profileName: tab.session.connection.resolvedHermesProfileName,
+                        hostLabel: tab.session.connection.label,
                         isSelected: workspace.selectedTabID == tab.id,
-                        onSelect: { workspace.selectedTabID = tab.id },
-                        onClose: { workspace.closeTab(tab) }
+                        isCurrentWorkspace: isTabForActiveWorkspace(tab),
+                        onSelect: { requestTabSelection(tab.id) },
+                        onClose: { requestTabClose(tab) }
                     )
                 }
 
                 if let activeConnection = appState.activeConnection {
                     Button {
-                        workspace.addTab(for: activeConnection)
+                        requestNewTab(for: activeConnection)
                     } label: {
                         Label("New Tab", systemImage: "plus")
                     }
@@ -39,23 +41,13 @@ struct TerminalWorkspaceView: View {
             .padding(.vertical, 8)
             .background(.thinMaterial)
 
-            if !workspace.tabs.isEmpty {
-                ZStack {
-                    ForEach(workspace.tabs) { tab in
-                        let isActiveTerminal =
-                            appState.selectedSection == .terminal &&
-                            workspace.selectedTabID == tab.id
-
-                        TerminalTabContainer(
-                            session: tab.session,
-                            appearance: terminalAppearance,
-                            isActive: isActiveTerminal
-                        )
-                        .opacity(isActiveTerminal ? 1 : 0)
-                        .allowsHitTesting(isActiveTerminal)
-                        .zIndex(isActiveTerminal ? 1 : 0)
-                    }
-                }
+            if let selectedTab = workspace.selectedTab {
+                TerminalTabContainer(
+                    session: selectedTab.session,
+                    appearance: terminalAppearance,
+                    isActive: appState.selectedSection == .terminal
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 ContentUnavailableView(
                     "No terminal tab",
@@ -87,19 +79,64 @@ struct TerminalWorkspaceView: View {
             appState.connectionStore.terminalTheme = newValue
         }
     }
+
+    private func isTabForActiveWorkspace(_ tab: TerminalTabModel) -> Bool {
+        guard let activeConnection = appState.activeConnection else { return true }
+        return tab.workspaceScopeFingerprint == activeConnection.workspaceScopeFingerprint
+    }
+
+    private func requestNewTab(for connection: ConnectionProfile) {
+        DispatchQueue.main.async {
+            workspace.addTab(for: connection.updated())
+        }
+    }
+
+    private func requestTabSelection(_ tabID: UUID) {
+        DispatchQueue.main.async {
+            workspace.selectTab(tabID)
+        }
+    }
+
+    private func requestTabClose(_ tab: TerminalTabModel) {
+        DispatchQueue.main.async {
+            workspace.closeTab(tab)
+        }
+    }
 }
 
 private struct TerminalTabChip: View {
-    let title: String
+    let profileName: String
+    let hostLabel: String
     let isSelected: Bool
+    let isCurrentWorkspace: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        ZStack(alignment: .trailing) {
             Button(action: onSelect) {
-                Text(title)
-                    .lineLimit(1)
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(profileName)
+                                .font(profileFont)
+                                .lineLimit(1)
+
+                            if !isCurrentWorkspace {
+                                HermesBadge(text: "Other Profile", tint: .orange)
+                            }
+                        }
+
+                        Text(hostLabel)
+                            .font(hostFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: closeButtonReserveWidth)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -112,10 +149,49 @@ private struct TerminalTabChip: View {
             .buttonStyle(.borderless)
             .help("Close tab")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
-        .clipShape(Capsule())
+        .padding(.horizontal, horizontalPadding)
+        .padding(.vertical, verticalPadding)
+        .background(backgroundColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(borderColor, lineWidth: 1)
+        }
+    }
+
+    private var backgroundColor: Color {
+        if !isCurrentWorkspace {
+            return isSelected ? Color.orange.opacity(0.20) : Color.orange.opacity(0.10)
+        }
+
+        return isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08)
+    }
+
+    private var borderColor: Color {
+        if !isCurrentWorkspace {
+            return Color.orange.opacity(isSelected ? 0.40 : 0.18)
+        }
+
+        return Color.primary.opacity(isSelected ? 0.12 : 0.06)
+    }
+
+    private var profileFont: Font {
+        isCurrentWorkspace ? .headline.weight(.semibold) : .subheadline.weight(.semibold)
+    }
+
+    private var hostFont: Font {
+        isCurrentWorkspace ? .caption : .caption2
+    }
+
+    private var horizontalPadding: CGFloat {
+        isCurrentWorkspace ? 12 : 9
+    }
+
+    private var verticalPadding: CGFloat {
+        isCurrentWorkspace ? 7 : 5
+    }
+
+    private var closeButtonReserveWidth: CGFloat {
+        24
     }
 }
 

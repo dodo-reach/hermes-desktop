@@ -4,6 +4,8 @@ struct RemoteDiscovery: Codable {
     let ok: Bool
     let remoteHome: String
     let hermesHome: String
+    let activeProfile: RemoteHermesProfile
+    let availableProfiles: [RemoteHermesProfile]
     let paths: RemoteHermesPaths
     let exists: RemoteHermesPathExistence
     let sessionStore: RemoteSessionStore?
@@ -12,9 +14,27 @@ struct RemoteDiscovery: Codable {
         case ok
         case remoteHome = "remote_home"
         case hermesHome = "hermes_home"
+        case activeProfile = "active_profile"
+        case availableProfiles = "available_profiles"
         case paths
         case exists
         case sessionStore = "session_store"
+    }
+}
+
+struct RemoteHermesProfile: Codable, Identifiable {
+    let name: String
+    let path: String
+    let isDefault: Bool
+    let exists: Bool
+
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case path
+        case isDefault = "is_default"
+        case exists
     }
 }
 

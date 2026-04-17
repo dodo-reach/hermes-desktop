@@ -13,6 +13,7 @@ final class UsageBrowserService: @unchecked Sendable {
     ) async throws -> UsageSummary {
         let script = try RemotePythonScript.wrap(
             UsageSummaryRequest(
+                hermesHome: connection.remoteHermesHomePath,
                 hintedStorePath: hintedSessionStore?.path,
                 hintedSessionTable: hintedSessionStore?.sessionTable
             ),
@@ -29,6 +30,7 @@ final class UsageBrowserService: @unchecked Sendable {
     private var usageSummaryBody: String {
         """
         import json
+        import os
         import pathlib
         import sqlite3
         import sys
@@ -110,6 +112,14 @@ final class UsageBrowserService: @unchecked Sendable {
             if value.startswith("~/"):
                 return home / value[2:]
             return pathlib.Path(value)
+
+        def resolved_hermes_home(request):
+            home = pathlib.Path.home()
+            requested = request.get("hermes_home")
+            expanded = expand_remote_path(requested, home)
+            if expanded is not None:
+                return expanded
+            return home / ".hermes"
 
         def emit_candidate(candidate, seen):
             if candidate is None:
@@ -237,7 +247,7 @@ final class UsageBrowserService: @unchecked Sendable {
 
         try:
             home = pathlib.Path.home()
-            hermes_home = home / ".hermes"
+            hermes_home = resolved_hermes_home(request)
 
             store = discover_session_store(
                 hermes_home,
@@ -285,20 +295,26 @@ final class UsageBrowserService: @unchecked Sendable {
                     missing_columns.append("output_tokens")
 
                 if "cache_read_tokens" in lowered_columns:
+                    cache_read_expression = f"COALESCE(SUM({quote_ident(lowered_columns['cache_read_tokens'])}), 0)"
                     cache_read_value_expression = f"COALESCE({quote_ident(lowered_columns['cache_read_tokens'])}, 0)"
                 else:
+                    cache_read_expression = "0"
                     cache_read_value_expression = "0"
                     missing_columns.append("cache_read_tokens")
 
                 if "cache_write_tokens" in lowered_columns:
+                    cache_write_expression = f"COALESCE(SUM({quote_ident(lowered_columns['cache_write_tokens'])}), 0)"
                     cache_write_value_expression = f"COALESCE({quote_ident(lowered_columns['cache_write_tokens'])}, 0)"
                 else:
+                    cache_write_expression = "0"
                     cache_write_value_expression = "0"
                     missing_columns.append("cache_write_tokens")
 
                 if "reasoning_tokens" in lowered_columns:
+                    reasoning_expression = f"COALESCE(SUM({quote_ident(lowered_columns['reasoning_tokens'])}), 0)"
                     reasoning_value_expression = f"COALESCE({quote_ident(lowered_columns['reasoning_tokens'])}, 0)"
                 else:
+                    reasoning_expression = "0"
                     reasoning_value_expression = "0"
                     missing_columns.append("reasoning_tokens")
 
@@ -321,9 +337,10 @@ final class UsageBrowserService: @unchecked Sendable {
                 )
 
                 row = connection.execute(
-                    f"SELECT COUNT(*), {input_expression}, {output_expression} "
+                    f"SELECT COUNT(*), {input_expression}, {output_expression}, "
+                    f"{cache_read_expression}, {cache_write_expression}, {reasoning_expression} "
                     f"FROM {quote_ident(store['session_table'])}"
-                ).fetchone() or (0, 0, 0)
+                ).fetchone() or (0, 0, 0, 0, 0, 0)
 
                 top_sessions = []
                 top_models = []
@@ -447,6 +464,9 @@ final class UsageBrowserService: @unchecked Sendable {
                     "session_count": int(row[0] or 0),
                     "input_tokens": int(row[1] or 0),
                     "output_tokens": int(row[2] or 0),
+                    "cache_read_tokens": int(row[3] or 0),
+                    "cache_write_tokens": int(row[4] or 0),
+                    "reasoning_tokens": int(row[5] or 0),
                     "top_sessions": top_sessions,
                     "top_models": top_models,
                     "recent_sessions": recent_sessions,
@@ -464,10 +484,12 @@ final class UsageBrowserService: @unchecked Sendable {
 }
 
 private struct UsageSummaryRequest: Encodable {
+    let hermesHome: String
     let hintedStorePath: String?
     let hintedSessionTable: String?
 
     enum CodingKeys: String, CodingKey {
+        case hermesHome = "hermes_home"
         case hintedStorePath = "hinted_store_path"
         case hintedSessionTable = "hinted_session_table"
     }

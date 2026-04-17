@@ -14,7 +14,12 @@ final class SessionBrowserService: @unchecked Sendable {
         query: String
     ) async throws -> SessionListPage {
         let script = try RemotePythonScript.wrap(
-            SessionPageRequest(offset: offset, limit: limit, query: query),
+            SessionPageRequest(
+                offset: offset,
+                limit: limit,
+                query: query,
+                hermesHome: connection.remoteHermesHomePath
+            ),
             body: sessionListBody
         )
 
@@ -30,7 +35,10 @@ final class SessionBrowserService: @unchecked Sendable {
         sessionID: String
     ) async throws -> [SessionMessage] {
         let script = try RemotePythonScript.wrap(
-            SessionDetailRequest(sessionID: sessionID),
+            SessionDetailRequest(
+                sessionID: sessionID,
+                hermesHome: connection.remoteHermesHomePath
+            ),
             body: sessionDetailBody
         )
 
@@ -51,6 +59,7 @@ final class SessionBrowserService: @unchecked Sendable {
         let script = try RemotePythonScript.wrap(
             SessionDeleteRequest(
                 sessionID: sessionID,
+                hermesHome: connection.remoteHermesHomePath,
                 hintedStorePath: hintedSessionStore?.path,
                 hintedSessionTable: hintedSessionStore?.sessionTable,
                 hintedMessageTable: hintedSessionStore?.messageTable
@@ -77,7 +86,10 @@ final class SessionBrowserService: @unchecked Sendable {
             if context is None:
                 items = build_jsonl_session_summaries()
                 if not items:
-                    fail("No readable SQLite session store was discovered under ~/.hermes, and no JSONL session artifacts were found under ~/.hermes/sessions.")
+                    fail(
+                        f"No readable SQLite session store was discovered under {display_hermes_home()}, "
+                        f"and no JSONL session artifacts were found under {display_hermes_home()}/sessions."
+                    )
             else:
                 session_rows = context["connection"].execute(
                     f"SELECT * FROM {quote_ident(context['session_table'])}"
@@ -374,6 +386,20 @@ final class SessionBrowserService: @unchecked Sendable {
                 return value.decode("utf-8", errors="replace")
             return str(value)
 
+        def resolved_hermes_home():
+            home = pathlib.Path.home()
+            requested = payload.get("hermes_home")
+            expanded = expand_remote_path(requested, home)
+            if expanded is not None:
+                return expanded
+            return home / ".hermes"
+
+        def display_hermes_home():
+            requested = stringify(payload.get("hermes_home"))
+            if requested:
+                return requested
+            return "~/.hermes"
+
         def normalize_json_value(value):
             if value is None:
                 return None
@@ -582,7 +608,7 @@ final class SessionBrowserService: @unchecked Sendable {
                         yield candidate
 
         def discover_jsonl_artifacts():
-            sessions_dir = pathlib.Path.home() / ".hermes" / "sessions"
+            sessions_dir = resolved_hermes_home() / "sessions"
             if not sessions_dir.exists():
                 return []
 
@@ -594,7 +620,7 @@ final class SessionBrowserService: @unchecked Sendable {
 
         def discover_store_location(hinted_path=None, hinted_session_table=None, hinted_message_table=None):
             home = pathlib.Path.home()
-            hermes_home = home / ".hermes"
+            hermes_home = resolved_hermes_home()
             if not hermes_home.exists():
                 return None, None, None
 
@@ -809,24 +835,36 @@ private struct SessionPageRequest: Encodable {
     let offset: Int
     let limit: Int
     let query: String
+    let hermesHome: String
+
+    enum CodingKeys: String, CodingKey {
+        case offset
+        case limit
+        case query
+        case hermesHome = "hermes_home"
+    }
 }
 
 private struct SessionDetailRequest: Encodable {
     let sessionID: String
+    let hermesHome: String
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
+        case hermesHome = "hermes_home"
     }
 }
 
 private struct SessionDeleteRequest: Encodable {
     let sessionID: String
+    let hermesHome: String
     let hintedStorePath: String?
     let hintedSessionTable: String?
     let hintedMessageTable: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
+        case hermesHome = "hermes_home"
         case hintedStorePath = "hinted_store_path"
         case hintedSessionTable = "hinted_session_table"
         case hintedMessageTable = "hinted_message_table"

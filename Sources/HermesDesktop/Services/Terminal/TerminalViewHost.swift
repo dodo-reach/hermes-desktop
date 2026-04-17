@@ -7,6 +7,7 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
     private weak var session: TerminalSession?
     private let hostView = TerminalHostView()
     private var startedLaunchToken: UUID?
+    private var scheduledLaunchToken: UUID?
     private var appliedAppearance: TerminalThemeAppearance?
 
     override init() {
@@ -28,7 +29,7 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
         container.mount(hostView)
         applyAppearance(appearance)
         setActive(isActive)
-        startIfNeeded(for: session)
+        scheduleStartIfNeeded(for: session)
     }
 
     func unmount(from container: TerminalMountContainerView) {
@@ -59,11 +60,23 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
         }
     }
 
-    private func startIfNeeded(for session: TerminalSession) {
+    private func scheduleStartIfNeeded(for session: TerminalSession) {
         let launchToken = session.launchToken
         guard startedLaunchToken != launchToken else { return }
+        guard scheduledLaunchToken != launchToken else { return }
+        scheduledLaunchToken = launchToken
+
+        Task { @MainActor [weak self, weak session] in
+            guard let self, let session else { return }
+            self.startIfNeeded(for: session, launchToken: launchToken)
+        }
+    }
+
+    private func startIfNeeded(for session: TerminalSession, launchToken: UUID) {
+        scheduledLaunchToken = nil
+        guard self.session === session else { return }
+        guard startedLaunchToken != launchToken else { return }
         startedLaunchToken = launchToken
-        session.markStarted()
 
         let environment = [
             "TERM=xterm-256color",
@@ -76,6 +89,7 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
             environment: environment,
             execName: "ssh"
         )
+        session.markStarted()
     }
 
     private func applyAppearance(_ appearance: TerminalThemeAppearance) {
@@ -94,6 +108,7 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
     @MainActor
     @objc
     private func terminateOnMainThread() {
+        scheduledLaunchToken = nil
         hostView.terminalView.terminate()
     }
 }

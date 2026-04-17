@@ -7,23 +7,12 @@ struct RootView: View {
         HSplitView {
             List(selection: sectionSelection) {
                 if let activeConnection = appState.activeConnection {
-                    Section("Active Connection") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(activeConnection.label)
-                                .font(.headline)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Text(activeConnection.displayDestination)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        .padding(.vertical, 4)
+                    Section("Workspace") {
+                        WorkspaceSidebarCard(connection: activeConnection)
                     }
                 }
 
-                Section("Workspace") {
+                Section("Sections") {
                     ForEach(availableSections) { section in
                         Label(section.title, systemImage: section.systemImage)
                             .tag(section)
@@ -84,19 +73,8 @@ struct RootView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        ZStack(alignment: .topLeading) {
-            activeDetailContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            if appState.activeConnection != nil {
-                // Keep the terminal mounted so section switches do not tear down the SSH process.
-                TerminalWorkspaceView(workspace: appState.terminalWorkspace)
-                    .opacity(appState.selectedSection == .terminal ? 1 : 0)
-                    .allowsHitTesting(appState.selectedSection == .terminal)
-                    .zIndex(appState.selectedSection == .terminal ? 1 : 0)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        activeDetailContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
@@ -117,7 +95,92 @@ struct RootView: View {
         case .skills:
             SkillsView()
         case .terminal:
-            Color.clear
+            TerminalWorkspaceView(workspace: appState.terminalWorkspace)
         }
+    }
+}
+
+private struct WorkspaceSidebarCard: View {
+    @EnvironmentObject private var appState: AppState
+
+    let connection: ConnectionProfile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Hermes Profile")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if availableProfiles.count > 1 {
+                Menu {
+                    ForEach(availableProfiles) { profile in
+                        Button {
+                            Task {
+                                await appState.switchHermesProfile(to: profile.name)
+                            }
+                        } label: {
+                            if profile.name == connection.resolvedHermesProfileName {
+                                Label(profile.name, systemImage: "checkmark")
+                            } else {
+                                Text(profile.name)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(connection.resolvedHermesProfileName)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+
+                        Spacer(minLength: 6)
+
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(appState.isRefreshingOverview || appState.isBusy)
+            } else {
+                Text(connection.resolvedHermesProfileName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(connection.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Text(connection.displayDestination)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var availableProfiles: [RemoteHermesProfile] {
+        if let overview = appState.overview, !overview.availableProfiles.isEmpty {
+            return overview.availableProfiles
+        }
+
+        return [
+            RemoteHermesProfile(
+                name: connection.resolvedHermesProfileName,
+                path: connection.remoteHermesHomePath,
+                isDefault: connection.usesDefaultHermesProfile,
+                exists: true
+            )
+        ]
     }
 }

@@ -6,6 +6,9 @@ struct UsageSummary: Codable {
     let sessionCount: Int
     let inputTokens: Int64
     let outputTokens: Int64
+    let cacheReadTokens: Int64
+    let cacheWriteTokens: Int64
+    let reasoningTokens: Int64
     let topSessions: [UsageTopSession]
     let topModels: [UsageTopModel]
     let recentSessions: [UsageRecentSession]
@@ -20,6 +23,9 @@ struct UsageSummary: Codable {
         case sessionCount = "session_count"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case cacheReadTokens = "cache_read_tokens"
+        case cacheWriteTokens = "cache_write_tokens"
+        case reasoningTokens = "reasoning_tokens"
         case topSessions = "top_sessions"
         case topModels = "top_models"
         case recentSessions = "recent_sessions"
@@ -94,9 +100,80 @@ enum UsageSummaryState: String, Codable {
     case unavailable
 }
 
+struct UsageProfileBreakdown: Hashable {
+    let profiles: [UsageProfileSlice]
+
+    var readableProfiles: [UsageProfileSlice] {
+        profiles.filter { $0.state == .available }
+    }
+
+    var chartProfiles: [UsageProfileSlice] {
+        readableProfiles.filter { $0.allTokenCategoriesTotal > 0 }
+    }
+
+    var hostWideAllTokenCategoriesTotal: Int64 {
+        readableProfiles.reduce(into: 0) { partialResult, profile in
+            partialResult += profile.allTokenCategoriesTotal
+        }
+    }
+
+    var hostWideInputTokens: Int64 {
+        readableProfiles.reduce(into: 0) { $0 += $1.inputTokens }
+    }
+
+    var hostWideOutputTokens: Int64 {
+        readableProfiles.reduce(into: 0) { $0 += $1.outputTokens }
+    }
+
+    var hostWideCacheTokens: Int64 {
+        readableProfiles.reduce(into: 0) { $0 += $1.cacheTokensTotal }
+    }
+
+    var hostWideReasoningTokens: Int64 {
+        readableProfiles.reduce(into: 0) { $0 += $1.reasoningTokens }
+    }
+
+    var unavailableProfiles: [UsageProfileSlice] {
+        profiles.filter { $0.state == .unavailable }
+    }
+}
+
+struct UsageProfileSlice: Identifiable, Hashable {
+    let profileName: String
+    let hermesHomePath: String
+    let state: UsageSummaryState
+    let sessionCount: Int
+    let inputTokens: Int64
+    let outputTokens: Int64
+    let cacheReadTokens: Int64
+    let cacheWriteTokens: Int64
+    let reasoningTokens: Int64
+    let databasePath: String?
+    let message: String?
+    let isActiveProfile: Bool
+
+    var id: String { profileName }
+
+    var cacheTokensTotal: Int64 {
+        cacheReadTokens + cacheWriteTokens
+    }
+
+    var allTokenCategoriesTotal: Int64 {
+        inputTokens + outputTokens + cacheTokensTotal + reasoningTokens
+    }
+}
+
 extension UsageSummary {
     var totalTokens: Int64 {
         inputTokens + outputTokens
+    }
+
+    var cacheTokensTotal: Int64 {
+        cacheReadTokens + cacheWriteTokens
+    }
+
+    var allTokenCategoriesTotal: Int64 {
+        totalTokens + cacheTokensTotal + reasoningTokens
     }
 
     var averageTokensPerSession: Int64 {

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TerminalTabContainer: View {
+    @EnvironmentObject private var appState: AppState
     @ObservedObject var session: TerminalSession
     let appearance: TerminalThemeAppearance
     let isActive: Bool
@@ -8,8 +9,20 @@ struct TerminalTabContainer: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(session.connection.displayDestination)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(session.connection.resolvedHermesProfileName)
+                            .font(.headline)
+
+                        if isDifferentFromActiveWorkspace {
+                            HermesBadge(text: "Other Profile", tint: .orange)
+                        }
+                    }
+
+                    Text(session.connection.displayDestination)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 if let currentDirectory = session.currentDirectory {
                     Text(currentDirectory)
@@ -41,5 +54,10 @@ struct TerminalTabContainer: View {
                 .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var isDifferentFromActiveWorkspace: Bool {
+        guard let activeConnection = appState.activeConnection else { return false }
+        return activeConnection.workspaceScopeFingerprint != session.connection.workspaceScopeFingerprint
     }
 }

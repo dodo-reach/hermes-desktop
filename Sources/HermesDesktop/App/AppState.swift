@@ -23,6 +23,7 @@ final class AppState: ObservableObject {
     @Published var totalSessionsCount = 0
     @Published private(set) var sessionSearchQuery = ""
     @Published var usageSummary: UsageSummary?
+    @Published var usageProfileBreakdown: UsageProfileBreakdown?
     @Published var usageError: String?
     @Published var isLoadingUsage = false
     @Published var isRefreshingUsage = false
@@ -33,6 +34,7 @@ final class AppState: ObservableObject {
     @Published var isLoadingSkills = false
     @Published var isRefreshingSkills = false
     @Published var isLoadingSkillDetail = false
+    @Published var isSavingSkillDraft = false
     @Published var cronJobs: [CronJob] = []
     @Published var selectedCronJobID: String?
     @Published var cronJobsError: String?
@@ -133,7 +135,7 @@ final class AppState: ObservableObject {
     }
 
     func connect(to profile: ConnectionProfile) {
-        let isSwitchingConnection = activeConnectionID != profile.id
+        let isSwitchingConnection = activeConnection?.workspaceScopeFingerprint != profile.workspaceScopeFingerprint
 
         if isSwitchingConnection {
             resetWorkspaceStateForConnectionChange()
@@ -150,6 +152,60 @@ final class AppState: ObservableObject {
         Task {
             await prepareWorkspaceForActiveConnection()
         }
+    }
+
+    func saveConnection(_ profile: ConnectionProfile) {
+        let normalized = profile.updated()
+        let previous = connectionStore.connections.first(where: { $0.id == normalized.id })
+        let isActiveConnection = activeConnectionID == normalized.id
+        let isChangingWorkspaceScope = previous?.workspaceScopeFingerprint != normalized.workspaceScopeFingerprint
+
+        if isActiveConnection && isChangingWorkspaceScope && hasUnsavedFileChanges {
+            activeAlert = AppAlert(
+                title: "Unsaved file edits",
+                message: "Save or discard USER.md, MEMORY.md, and SOUL.md before switching the Hermes profile for the active host."
+            )
+            return
+        }
+
+        connectionStore.upsert(normalized)
+
+        guard isActiveConnection else { return }
+        guard isChangingWorkspaceScope else { return }
+
+        resetWorkspaceStateForConnectionChange()
+        selectedSection = .overview
+        setStatusMessage("Refreshing \(normalized.label)…")
+
+        Task {
+            await prepareWorkspaceForActiveConnection()
+        }
+    }
+
+    func switchHermesProfile(to profileName: String) async {
+        guard let activeConnection else { return }
+        guard activeConnection.resolvedHermesProfileName != profileName else { return }
+
+        if hasUnsavedFileChanges {
+            activeAlert = AppAlert(
+                title: "Unsaved file edits",
+                message: "Save or discard USER.md, MEMORY.md, and SOUL.md before switching Hermes profiles."
+            )
+            return
+        }
+
+        let updatedConnection = activeConnection.applyingHermesProfile(named: profileName)
+        let shouldCarryTerminalWorkspace = selectedSection == .terminal || terminalWorkspace.hasTabs
+
+        if shouldCarryTerminalWorkspace {
+            terminalWorkspace.ensureInitialTab(for: updatedConnection)
+        }
+
+        connectionStore.upsert(updatedConnection)
+        await reloadWorkspaceScope(
+            section: selectedSection,
+            statusMessage: "Switching to \(profileName)…"
+        )
     }
 
     func reconnectActiveConnection() {
@@ -275,7 +331,11 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            let snapshot = try await fileEditorService.read(file: trackedFile, connection: profile)
+            let snapshot = try await fileEditorService.read(
+                file: trackedFile,
+                remotePath: resolvedRemotePath(for: trackedFile, connection: profile),
+                connection: profile
+            )
             document.content = snapshot.content
             document.originalContent = snapshot.content
             document.remoteContentHash = snapshot.contentHash
@@ -301,6 +361,7 @@ final class AppState: ObservableObject {
         do {
             let saveResult = try await fileEditorService.write(
                 file: trackedFile,
+                remotePath: resolvedRemotePath(for: trackedFile, connection: profile),
                 content: document.content,
                 expectedContentHash: document.remoteContentHash,
                 connection: profile
@@ -436,16 +497,27 @@ final class AppState: ObservableObject {
 
         isLoadingUsage = true
         usageError = nil
+        usageProfileBreakdown = nil
 
         do {
             usageSummary = try await usageBrowserService.loadUsage(
                 connection: profile,
                 hintedSessionStore: overview?.sessionStore
             )
+
+            if let overview,
+               overview.availableProfiles.count > 1 {
+                usageProfileBreakdown = try await loadUsageProfileBreakdown(
+                    using: profile,
+                    discoveredProfiles: overview.availableProfiles
+                )
+            }
+
             isLoadingUsage = false
         } catch {
             isLoadingUsage = false
             usageSummary = nil
+            usageProfileBreakdown = nil
             usageError = error.localizedDescription
             setStatusMessage("Unable to load usage")
         }
@@ -511,6 +583,85 @@ final class AppState: ObservableObject {
             isLoadingSkillDetail = false
             skillsError = error.localizedDescription
             setStatusMessage("Unable to load skill detail")
+        }
+    }
+
+    func createSkill(_ draft: SkillDraft) async -> Bool {
+        guard let profile = activeConnection else { return false }
+        guard !isSavingSkillDraft else { return false }
+
+        if let validationError = draft.validationError {
+            skillsError = validationError
+            setStatusMessage(validationError)
+            return false
+        }
+
+        isSavingSkillDraft = true
+        skillsError = nil
+        setStatusMessage("Creating skill…")
+
+        do {
+            let detail = try await skillBrowserService.createSkill(
+                connection: profile,
+                draft: draft
+            )
+            await loadSkills(reset: true)
+            selectedSkillID = detail.id
+            selectedSkillDetail = detail
+            isSavingSkillDraft = false
+            setStatusMessage("\(draft.normalizedName) created")
+            return true
+        } catch {
+            isSavingSkillDraft = false
+            skillsError = error.localizedDescription
+            setStatusMessage("Unable to create skill")
+            return false
+        }
+    }
+
+    func updateSkill(
+        _ detail: SkillDetail,
+        markdownContent: String,
+        ensureReferencesFolder: Bool,
+        ensureScriptsFolder: Bool,
+        ensureTemplatesFolder: Bool
+    ) async -> Bool {
+        guard let profile = activeConnection else { return false }
+        guard !isSavingSkillDraft else { return false }
+
+        let normalizedContent = markdownContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedContent.isEmpty else {
+            let message = "SKILL.md content cannot be empty."
+            skillsError = message
+            setStatusMessage(message)
+            return false
+        }
+
+        isSavingSkillDraft = true
+        skillsError = nil
+        setStatusMessage("Updating \(detail.resolvedName)…")
+
+        do {
+            let updatedDetail = try await skillBrowserService.updateSkill(
+                connection: profile,
+                relativePath: detail.id,
+                markdownContent: normalizedContent + "\n",
+                expectedContentHash: detail.contentHash,
+                ensureReferencesFolder: ensureReferencesFolder,
+                ensureScriptsFolder: ensureScriptsFolder,
+                ensureTemplatesFolder: ensureTemplatesFolder
+            )
+            await loadSkills(reset: true)
+            selectedSkillID = updatedDetail.id
+            selectedSkillDetail = updatedDetail
+            isSavingSkillDraft = false
+            setStatusMessage("\(updatedDetail.resolvedName) updated")
+            return true
+        } catch {
+            isSavingSkillDraft = false
+            skillsError = error.localizedDescription
+            setStatusMessage("Unable to update skill")
+            return false
         }
     }
 
@@ -689,9 +840,10 @@ final class AppState: ObservableObject {
 
     func deleteConnection(_ profile: ConnectionProfile) {
         connectionStore.delete(profile)
+        terminalWorkspace.closeTabs(forConnectionID: profile.id)
         if activeConnectionID == profile.id {
             activeConnectionID = nil
-            resetWorkspaceStateForConnectionChange()
+            resetWorkspaceStateForConnectionChange(closeTerminalTabs: false)
             selectedSection = .connections
         }
     }
@@ -739,6 +891,10 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func resolvedRemotePath(for trackedFile: RemoteTrackedFile, connection: ConnectionProfile) -> String {
+        trackedFile.resolvedRemotePath(using: overview?.paths) ?? connection.remotePath(for: trackedFile)
+    }
+
     private func setDocument(_ document: FileEditorDocument) {
         switch document.trackedFile {
         case .user:
@@ -748,6 +904,87 @@ final class AppState: ObservableObject {
         case .soul:
             soulDocument = document
         }
+    }
+
+    private func reloadWorkspaceScope(section: AppSection, statusMessage: String) async {
+        resetWorkspaceStateForConnectionChange(closeTerminalTabs: false)
+        selectedSection = section
+        setStatusMessage(statusMessage)
+        await prepareWorkspaceForActiveConnection()
+        await reloadSectionAfterScopeChange(section)
+    }
+
+    private func reloadSectionAfterScopeChange(_ section: AppSection) async {
+        switch section {
+        case .connections, .overview:
+            break
+        case .files:
+            await ensureInitialFileLoads()
+        case .sessions:
+            await loadSessions(reset: true)
+        case .cronjobs:
+            await loadCronJobs()
+        case .usage:
+            await loadUsage(forceRefresh: true)
+        case .skills:
+            await loadSkills(reset: true)
+        case .terminal:
+            ensureTerminalSession()
+        }
+    }
+
+    private func loadUsageProfileBreakdown(
+        using connection: ConnectionProfile,
+        discoveredProfiles: [RemoteHermesProfile]
+    ) async throws -> UsageProfileBreakdown {
+        var slices: [UsageProfileSlice] = []
+
+        for discoveredProfile in discoveredProfiles {
+            let scopedConnection = connection.applyingHermesProfile(named: discoveredProfile.name)
+
+            do {
+                let summary = try await usageBrowserService.loadUsage(
+                    connection: scopedConnection,
+                    hintedSessionStore: nil
+                )
+
+                slices.append(
+                    UsageProfileSlice(
+                        profileName: discoveredProfile.name,
+                        hermesHomePath: discoveredProfile.path,
+                        state: summary.state,
+                        sessionCount: summary.sessionCount,
+                        inputTokens: summary.inputTokens,
+                        outputTokens: summary.outputTokens,
+                        cacheReadTokens: summary.cacheReadTokens,
+                        cacheWriteTokens: summary.cacheWriteTokens,
+                        reasoningTokens: summary.reasoningTokens,
+                        databasePath: summary.databasePath,
+                        message: summary.message,
+                        isActiveProfile: discoveredProfile.name == connection.resolvedHermesProfileName
+                    )
+                )
+            } catch {
+                slices.append(
+                    UsageProfileSlice(
+                        profileName: discoveredProfile.name,
+                        hermesHomePath: discoveredProfile.path,
+                        state: .unavailable,
+                        sessionCount: 0,
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        cacheReadTokens: 0,
+                        cacheWriteTokens: 0,
+                        reasoningTokens: 0,
+                        databasePath: nil,
+                        message: error.localizedDescription,
+                        isActiveProfile: discoveredProfile.name == connection.resolvedHermesProfileName
+                    )
+                )
+            }
+        }
+
+        return UsageProfileBreakdown(profiles: slices)
     }
 
     private func prepareWorkspaceForActiveConnection() async {
@@ -762,6 +999,7 @@ final class AppState: ObservableObject {
             isLoadingSessions = false
             isRefreshingSessions = false
             usageSummary = nil
+            usageProfileBreakdown = nil
             usageError = nil
             isLoadingUsage = false
             isRefreshingUsage = false
@@ -772,6 +1010,7 @@ final class AppState: ObservableObject {
             isLoadingSkills = false
             isRefreshingSkills = false
             isLoadingSkillDetail = false
+            isSavingSkillDraft = false
             cronJobs = []
             selectedCronJobID = nil
             cronJobsError = nil
@@ -788,7 +1027,7 @@ final class AppState: ObservableObject {
         await loadSessions(reset: true)
     }
 
-    private func resetWorkspaceStateForConnectionChange() {
+    private func resetWorkspaceStateForConnectionChange(closeTerminalTabs: Bool = true) {
         overview = nil
         overviewError = nil
         isRefreshingOverview = false
@@ -804,6 +1043,7 @@ final class AppState: ObservableObject {
         sessionOffset = 0
         sessionSearchQuery = ""
         usageSummary = nil
+        usageProfileBreakdown = nil
         usageError = nil
         isLoadingUsage = false
         isRefreshingUsage = false
@@ -814,6 +1054,7 @@ final class AppState: ObservableObject {
         isLoadingSkills = false
         isRefreshingSkills = false
         isLoadingSkillDetail = false
+        isSavingSkillDraft = false
         cronJobs = []
         selectedCronJobID = nil
         cronJobsError = nil
@@ -823,7 +1064,9 @@ final class AppState: ObservableObject {
         operatingCronJobID = nil
         isSavingCronJobDraft = false
         resetDocuments()
-        terminalWorkspace.closeAllTabs()
+        if closeTerminalTabs {
+            terminalWorkspace.closeAllTabs()
+        }
     }
 
     private func resetDocuments() {

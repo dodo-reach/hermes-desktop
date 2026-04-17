@@ -10,7 +10,7 @@ struct UsageView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HermesPageHeader(
                     title: "Usage",
-                    subtitle: "See the total input and output tokens consumed across the Hermes sessions stored on the active host."
+                    subtitle: "The main cards and charts on this page are for the active Hermes profile. When more than one profile is discovered on the same host, a separate panel shows total token consumption across all profiles."
                 ) {
                     HermesRefreshButton(isRefreshing: appState.isRefreshingUsage) {
                         Task { await appState.refreshUsage() }
@@ -85,6 +85,8 @@ struct UsageView: View {
 
     private func availableUsageView(summary: UsageSummary) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            activeProfileScopePanel(summary: summary)
+
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 16) {
                     UsageMetricCard(
@@ -119,6 +121,11 @@ struct UsageView: View {
                         systemImage: "arrow.up.circle.fill"
                     )
                 }
+            }
+
+            if let usageProfileBreakdown = appState.usageProfileBreakdown,
+               usageProfileBreakdown.profiles.count > 1 {
+                profileBreakdownPanel(usageProfileBreakdown)
             }
 
             usageHighlightsPanel(summary: summary)
@@ -142,10 +149,180 @@ struct UsageView: View {
         }
     }
 
+    private func activeProfileScopePanel(summary: UsageSummary) -> some View {
+        HermesSurfacePanel(
+            title: "Active Profile",
+            subtitle: "Everything below stays scoped to the currently selected Hermes profile."
+        ) {
+            HStack(alignment: .top, spacing: 12) {
+                HermesInsetSurface {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Profile")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(appState.activeConnection?.resolvedHermesProfileName ?? "default")
+                            .font(.headline)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                HermesInsetSurface {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Current Total")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(UsageNumberFormatter.string(for: summary.totalTokens))
+                            .font(.headline)
+                            .monospacedDigit()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func profileBreakdownPanel(_ breakdown: UsageProfileBreakdown) -> some View {
+        HermesSurfacePanel(
+            title: "All Profiles Total Tokens",
+            subtitle: "This panel is host-wide. It combines total token consumption across all readable Hermes profiles on the active host, including input, output, cache, and reasoning. The other cards on this page remain scoped to the active profile."
+        ) {
+            if breakdown.chartProfiles.count < 2 {
+                ContentUnavailableView(
+                    "Not enough profile data yet",
+                    systemImage: "chart.pie",
+                    description: Text("At least two profiles need readable usage data before the cross-profile breakdown becomes meaningful.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 260)
+            } else {
+                VStack(alignment: .leading, spacing: 18) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 16) {
+                            UsageProfileDonutChart(
+                                breakdown: breakdown,
+                                colors: profileBreakdownColors
+                            )
+                            .frame(width: 300, height: 300)
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                profileBreakdownHighlights(breakdown)
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(Array(breakdown.chartProfiles.enumerated()), id: \.element.id) { index, profile in
+                                        UsageProfileLegendRow(
+                                            profile: profile,
+                                            total: breakdown.hostWideAllTokenCategoriesTotal,
+                                            color: profileBreakdownColors[index % profileBreakdownColors.count]
+                                        )
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        VStack(alignment: .leading, spacing: 16) {
+                            UsageProfileDonutChart(
+                                breakdown: breakdown,
+                                colors: profileBreakdownColors
+                            )
+                            .frame(height: 320)
+
+                            profileBreakdownHighlights(breakdown)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(Array(breakdown.chartProfiles.enumerated()), id: \.element.id) { index, profile in
+                                    UsageProfileLegendRow(
+                                        profile: profile,
+                                        total: breakdown.hostWideAllTokenCategoriesTotal,
+                                        color: profileBreakdownColors[index % profileBreakdownColors.count]
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if !breakdown.unavailableProfiles.isEmpty {
+                        HermesInsetSurface {
+                            Text("Unavailable profiles are excluded from the donut: \(breakdown.unavailableProfiles.map(\.profileName).joined(separator: ", ")).")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func profileBreakdownHighlights(_ breakdown: UsageProfileBreakdown) -> some View {
+        let activeProfile = breakdown.readableProfiles.first { $0.isActiveProfile }
+        let activeShare = activeProfile.map {
+            breakdown.hostWideAllTokenCategoriesTotal > 0
+                ? Double($0.allTokenCategoriesTotal) / Double(breakdown.hostWideAllTokenCategoriesTotal)
+                : 0
+        } ?? 0
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                UsageMiniStat(
+                    title: "Readable Profiles",
+                    valueText: UsageNumberFormatter.string(for: breakdown.readableProfiles.count),
+                    tint: .secondary
+                )
+                .frame(maxWidth: .infinity)
+
+                UsageMiniStat(
+                    title: "Host-wide Total",
+                    valueText: UsageNumberFormatter.string(for: breakdown.hostWideAllTokenCategoriesTotal),
+                    tint: .primary
+                )
+                .frame(maxWidth: .infinity)
+
+                UsageMiniStat(
+                    title: "Active Profile Share",
+                    valueText: UsageNumberFormatter.percentString(for: activeShare),
+                    tint: .secondary
+                )
+                .frame(maxWidth: .infinity)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                UsageMiniStat(
+                    title: "Readable Profiles",
+                    valueText: UsageNumberFormatter.string(for: breakdown.readableProfiles.count),
+                    tint: .secondary
+                )
+
+                UsageMiniStat(
+                    title: "Host-wide Total",
+                    valueText: UsageNumberFormatter.string(for: breakdown.hostWideAllTokenCategoriesTotal),
+                    tint: .primary
+                )
+
+                UsageMiniStat(
+                    title: "Active Profile Share",
+                    valueText: UsageNumberFormatter.percentString(for: activeShare),
+                    tint: .secondary
+                )
+            }
+        }
+    }
+
+    private var profileBreakdownColors: [Color] {
+        [
+            Color(red: 0.84, green: 0.33, blue: 0.27),
+            Color(red: 0.91, green: 0.66, blue: 0.24),
+            Color(red: 0.30, green: 0.58, blue: 0.85),
+            Color(red: 0.30, green: 0.68, blue: 0.47),
+            Color(red: 0.56, green: 0.42, blue: 0.79),
+            Color(red: 0.80, green: 0.43, blue: 0.60)
+        ]
+    }
+
     private func usageHighlightsPanel(summary: UsageSummary) -> some View {
         HermesSurfacePanel(
-            title: "Highlights",
-            subtitle: "A compact summary of stored session usage, with one visual comparison for input and output."
+            title: "Active Profile Totals",
+            subtitle: "A compact summary of stored session usage for the currently selected Hermes profile."
         ) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
@@ -478,6 +655,109 @@ private struct UsageMetricCard: View {
                 .strokeBorder(borderTint.opacity(0.10), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+    }
+}
+
+private struct UsageProfileDonutChart: View {
+    let breakdown: UsageProfileBreakdown
+    let colors: [Color]
+
+    var body: some View {
+        Chart(Array(breakdown.chartProfiles.enumerated()), id: \.element.id) { index, profile in
+            SectorMark(
+                angle: .value("All Tokens", profile.allTokenCategoriesTotal),
+                innerRadius: .ratio(0.62),
+                angularInset: 2
+            )
+            .cornerRadius(6)
+            .foregroundStyle(colors[index % colors.count])
+            .accessibilityLabel(profile.profileName)
+            .accessibilityValue("\(UsageNumberFormatter.string(for: profile.allTokenCategoriesTotal)) total tokens")
+        }
+        .chartLegend(.hidden)
+        .overlay {
+            VStack(spacing: 6) {
+                Text("Host-wide")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(UsageNumberFormatter.shortString(for: breakdown.hostWideAllTokenCategoriesTotal))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                Text("all profiles total")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(12)
+        }
+    }
+}
+
+private struct UsageProfileLegendRow: View {
+    let profile: UsageProfileSlice
+    let total: Int64
+    let color: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(color)
+                .frame(width: 10, height: 10)
+                .padding(.top, 5)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(profile.profileName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    if profile.isActiveProfile {
+                        HermesBadge(text: "Active", tint: .accentColor)
+                    }
+                }
+
+                Text(profileBreakdownLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(UsageNumberFormatter.string(for: profile.allTokenCategoriesTotal))
+                    .font(.headline)
+                    .monospacedDigit()
+
+                Text(UsageNumberFormatter.percentString(for: total > 0 ? Double(profile.allTokenCategoriesTotal) / Double(total) : 0))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+    }
+
+    private var profileBreakdownLine: String {
+        [
+            "Input \(UsageNumberFormatter.shortString(for: profile.inputTokens))",
+            "Output \(UsageNumberFormatter.shortString(for: profile.outputTokens))",
+            "Cache \(UsageNumberFormatter.shortString(for: profile.cacheTokensTotal))",
+            "Reasoning \(UsageNumberFormatter.shortString(for: profile.reasoningTokens))"
+        ].joined(separator: " · ")
     }
 }
 

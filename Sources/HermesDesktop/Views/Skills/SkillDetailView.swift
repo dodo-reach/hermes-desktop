@@ -5,6 +5,8 @@ struct SkillDetailView: View {
     let detail: SkillDetail?
     let errorMessage: String?
     let isLoading: Bool
+    let onCreate: () -> Void
+    let onEdit: () -> Void
 
     private let metadataColumns = [
         GridItem(.adaptive(minimum: 180), alignment: .topLeading)
@@ -71,12 +73,21 @@ struct SkillDetailView: View {
                     }
                 } else {
                     HermesSurfacePanel {
-                        ContentUnavailableView(
-                            "Select a skill",
-                            systemImage: "book.closed",
-                            description: Text("Choose a Hermes skill from the active host to inspect its metadata and full SKILL.md.")
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 320)
+                        VStack(alignment: .leading, spacing: 18) {
+                            ContentUnavailableView(
+                                "Select a skill",
+                                systemImage: "book.closed",
+                                description: Text("Choose a Hermes skill from the active host to inspect its metadata and full SKILL.md.")
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 240)
+
+                            Button {
+                                onCreate()
+                            } label: {
+                                Label("Create New Skill", systemImage: "plus")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
                     }
                 }
             }
@@ -102,8 +113,15 @@ struct SkillDetailView: View {
 
                     Spacer(minLength: 12)
 
-                    if let category = detail.category {
-                        HermesBadge(text: category, tint: .secondary)
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if let category = detail.category {
+                            HermesBadge(text: category, tint: .secondary)
+                        }
+
+                        Button("Edit SKILL.md") {
+                            onEdit()
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
 
@@ -172,6 +190,305 @@ struct SkillDetailView: View {
                 }
             }
         }
+    }
+}
+
+struct SkillEditorView: View {
+    @EnvironmentObject private var appState: AppState
+
+    let mode: SkillEditorMode
+    @Binding var draft: SkillDraft
+    @Binding var rawMarkdownContent: String
+    let detail: SkillDetail?
+    let errorMessage: String?
+    let isSaving: Bool
+    let onCancel: () -> Void
+    let onSave: () async -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                headerPanel
+
+                if let errorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                switch mode {
+                case .create:
+                    createBasicsPanel
+                    createMetadataPanel
+                    createInstructionsPanel
+                    generatedPreviewPanel
+                case .edit:
+                    editScopePanel
+                    rawMarkdownPanel
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 22)
+        }
+        .onChange(of: draft.name) { _, _ in
+            guard mode == .create else { return }
+            draft.refreshSuggestedSlug()
+        }
+    }
+
+    private var headerPanel: some View {
+        HermesSurfacePanel {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(mode.title)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    Text(headerSubtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 10) {
+                    Button(mode.actionTitle) {
+                        Task { await onSave() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isSaving || saveDisabled)
+
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.bordered)
+                        .disabled(isSaving)
+
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    private var createBasicsPanel: some View {
+        HermesSurfacePanel(
+            title: "Basics",
+            subtitle: "Use plain language. The app will turn these fields into the right SKILL.md frontmatter and folder path."
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                SkillFormField(label: "Skill Name") {
+                    TextField("Remote debugging, Deploy to VPS, Research notes", text: $draft.name)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                SkillFormField(label: "Short Description") {
+                    TextField("When Hermes should use this skill and what it helps it do.", text: $draft.description, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...3)
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 14) {
+                        SkillFormField(label: "Category Path") {
+                            TextField("Optional: agent-workflows, ssh/tools", text: $draft.categoryPath)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        SkillFormField(label: "Folder Name") {
+                            TextField("deploy-to-vps", text: $draft.slug)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 14) {
+                        SkillFormField(label: "Category Path") {
+                            TextField("Optional: agent-workflows, ssh/tools", text: $draft.categoryPath)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        SkillFormField(label: "Folder Name") {
+                            TextField("deploy-to-vps", text: $draft.slug)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    }
+                }
+
+                SkillFormField(label: "Version") {
+                    TextField("Optional: 1.0.0", text: $draft.version)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                HermesInsetSurface {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Remote path")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(generatedRemoteSkillPath)
+                            .font(.system(.subheadline, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    private var createMetadataPanel: some View {
+        HermesSurfacePanel(
+            title: "Metadata",
+            subtitle: "Optional tags and related skills help Hermes and the user understand the role of the skill."
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                SkillFormField(label: "Tags") {
+                    TextField("Comma-separated: ssh, deploy, troubleshooting", text: $draft.tagsText)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                SkillFormField(label: "Related Skills") {
+                    TextField("Comma-separated slugs: playwright, security-best-practices", text: $draft.relatedSkillsText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Companion Folders")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Toggle("Create references/ for longer docs or domain notes", isOn: $draft.includeReferencesFolder)
+                    Toggle("Create scripts/ for deterministic helpers", isOn: $draft.includeScriptsFolder)
+                    Toggle("Create templates/ for reusable output files", isOn: $draft.includeTemplatesFolder)
+                }
+            }
+        }
+    }
+
+    private var createInstructionsPanel: some View {
+        HermesSurfacePanel(
+            title: "Instructions",
+            subtitle: "Write the actual guidance Hermes should follow once the skill triggers."
+        ) {
+            TextEditor(text: $draft.instructions)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 300)
+                .padding(8)
+                .background(Color(NSColor.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var generatedPreviewPanel: some View {
+        HermesSurfacePanel(
+            title: "Generated Preview",
+            subtitle: "This is the SKILL.md the app will write on the remote Hermes host."
+        ) {
+            HermesInsetSurface {
+                Text(draft.generatedMarkdown)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var editScopePanel: some View {
+        HermesSurfacePanel(
+            title: "Editing Scope",
+            subtitle: "The existing skill path stays fixed while you edit the raw SKILL.md source."
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                HermesInsetSurface {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Remote path")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(existingRemoteSkillPath)
+                            .font(.system(.subheadline, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Companion Folders")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Toggle("Ensure references/ exists", isOn: $draft.includeReferencesFolder)
+                    Toggle("Ensure scripts/ exists", isOn: $draft.includeScriptsFolder)
+                    Toggle("Ensure templates/ exists", isOn: $draft.includeTemplatesFolder)
+                }
+            }
+        }
+    }
+
+    private var rawMarkdownPanel: some View {
+        HermesSurfacePanel(
+            title: "SKILL.md",
+            subtitle: "Edit the existing skill source directly. Saves are atomic and checked against the last loaded remote version."
+        ) {
+            TextEditor(text: $rawMarkdownContent)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 420)
+                .padding(8)
+                .background(Color(NSColor.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch mode {
+        case .create:
+            return "Create a new Hermes skill from a guided form instead of writing YAML frontmatter and folder structure by hand."
+        case .edit:
+            return "Update the existing SKILL.md directly while keeping the remote path fixed and protected by a conflict check."
+        }
+    }
+
+    private var generatedRemoteSkillPath: String {
+        let root = appState.activeConnection?.remoteSkillsPath ?? "~/.hermes/skills"
+        let relativePath = draft.relativePath.isEmpty ? "<folder-name>" : draft.relativePath
+        return "\(root)/\(relativePath)/SKILL.md"
+    }
+
+    private var existingRemoteSkillPath: String {
+        let root = appState.activeConnection?.remoteSkillsPath ?? "~/.hermes/skills"
+        let relativePath = detail?.id ?? "<selected-skill>"
+        return "\(root)/\(relativePath)/SKILL.md"
+    }
+
+    private var saveDisabled: Bool {
+        switch mode {
+        case .create:
+            return draft.validationError != nil
+        case .edit:
+            return rawMarkdownContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+}
+
+private struct SkillFormField<Content: View>: View {
+    let label: String
+    let content: Content
+
+    init(label: String, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

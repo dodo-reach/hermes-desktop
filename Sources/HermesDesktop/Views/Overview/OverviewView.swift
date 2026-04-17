@@ -156,9 +156,15 @@ struct OverviewView: View {
     private func workspacePanel(_ overview: RemoteDiscovery) -> some View {
         OverviewPanel(
             title: "Workspace",
-            subtitle: "The base folders Hermes uses on the active host."
+            subtitle: "The active Hermes profile and the folders it resolves to on the current host."
         ) {
             VStack(alignment: .leading, spacing: 14) {
+                OverviewDetailBlock(
+                    label: "Active profile",
+                    value: overview.activeProfile.name,
+                    emphasizeValue: true
+                )
+
                 OverviewDetailBlock(
                     label: "Home folder",
                     value: overview.remoteHome,
@@ -171,6 +177,23 @@ struct OverviewView: View {
                     isMonospaced: true,
                     emphasizeValue: true
                 )
+
+                if !overview.availableProfiles.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Discovered profiles")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 8) {
+                            ForEach(overview.availableProfiles) { profile in
+                                OverviewBadge(
+                                    text: profile.name,
+                                    tint: profile.name == overview.activeProfile.name ? .accentColor : .secondary
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -337,6 +360,11 @@ struct OverviewView: View {
 
     private func makeStatusItems(for overview: RemoteDiscovery) -> [OverviewStatusItem] {
         [
+            OverviewStatusItem(
+                id: "profile",
+                title: "Selected profile home",
+                isReady: overview.activeProfile.exists
+            ),
             OverviewStatusItem(
                 id: "files",
                 title: "Workspace files",

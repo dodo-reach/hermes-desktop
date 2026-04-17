@@ -8,7 +8,13 @@ final class CronBrowserService: @unchecked Sendable {
     }
 
     func listJobs(connection: ConnectionProfile) async throws -> [CronJob] {
-        let script = try RemotePythonScript.wrap(EmptyCronRequest(), body: listJobsBody)
+        let script = try RemotePythonScript.wrap(
+            EmptyCronRequest(
+                hermesHome: connection.remoteHermesHomePath,
+                profileName: connection.resolvedHermesProfileName
+            ),
+            body: listJobsBody
+        )
         let result = try await sshTransport.execute(
             on: connection,
             remoteCommand: "python3 -",
@@ -40,6 +46,8 @@ final class CronBrowserService: @unchecked Sendable {
             connection: connection,
             request: CronMutationRequest(
                 action: .create,
+                hermesHome: connection.remoteHermesHomePath,
+                profileName: connection.resolvedHermesProfileName,
                 draft: CronMutationDraft(draft: draft)
             )
         )
@@ -57,6 +65,8 @@ final class CronBrowserService: @unchecked Sendable {
             request: CronMutationRequest(
                 action: .update,
                 jobID: jobID,
+                hermesHome: connection.remoteHermesHomePath,
+                profileName: connection.resolvedHermesProfileName,
                 draft: CronMutationDraft(draft: draft)
             )
         )
@@ -80,7 +90,12 @@ final class CronBrowserService: @unchecked Sendable {
         command: CronCommand
     ) async throws {
         let script = try RemotePythonScript.wrap(
-            CronCommandRequest(jobID: jobID, command: command.rawValue),
+            CronCommandRequest(
+                jobID: jobID,
+                command: command.rawValue,
+                hermesHome: connection.remoteHermesHomePath,
+                profileName: connection.resolvedHermesProfileName
+            ),
             body: commandBody
         )
 
@@ -137,6 +152,18 @@ final class CronBrowserService: @unchecked Sendable {
                 "error": message,
             }, ensure_ascii=False))
             sys.exit(1)
+
+        def resolved_hermes_home():
+            requested = payload.get("hermes_home")
+            home = pathlib.Path.home()
+
+            if requested == "~":
+                return home
+            if isinstance(requested, str) and requested.startswith("~/"):
+                return home / requested[2:]
+            if requested:
+                return pathlib.Path(requested)
+            return home / ".hermes"
 
         def normalize_text(value):
             if value is None:
@@ -355,7 +382,7 @@ final class CronBrowserService: @unchecked Sendable {
             }
 
         try:
-            jobs_path = pathlib.Path.home() / ".hermes" / "cron" / "jobs.json"
+            jobs_path = resolved_hermes_home() / "cron" / "jobs.json"
             if not jobs_path.exists():
                 print(json.dumps({
                     "ok": True,
@@ -433,9 +460,15 @@ final class CronBrowserService: @unchecked Sendable {
         if hermes_binary is None:
             fail("Hermes CLI was not found on the active host.")
 
+        profile_name = str(payload.get("profile_name") or "").strip()
+        command_args = [hermes_binary]
+        if profile_name and profile_name.lower() != "default":
+            command_args.extend(["-p", profile_name])
+        command_args.extend(["cron", command, job_id])
+
         try:
             completed = subprocess.run(
-                [hermes_binary, "cron", command, job_id],
+                command_args,
                 capture_output=True,
                 text=True,
             )
@@ -468,6 +501,18 @@ final class CronBrowserService: @unchecked Sendable {
                 "error": message,
             }, ensure_ascii=False))
             sys.exit(1)
+
+        def resolved_hermes_home():
+            requested = payload.get("hermes_home")
+            home = pathlib.Path.home()
+
+            if requested == "~":
+                return home
+            if isinstance(requested, str) and requested.startswith("~/"):
+                return home / requested[2:]
+            if requested:
+                return pathlib.Path(requested)
+            return home / ".hermes"
 
         def normalize_text(value):
             if value is None:
@@ -574,7 +619,7 @@ final class CronBrowserService: @unchecked Sendable {
         if delivery is None:
             fail("A delivery target is required.")
 
-        jobs_path = pathlib.Path.home() / ".hermes" / "cron" / "jobs.json"
+        jobs_path = resolved_hermes_home() / "cron" / "jobs.json"
         jobs, container_kind, container_key = load_container(jobs_path)
 
         if action == "create":
@@ -695,15 +740,27 @@ final class CronBrowserService: @unchecked Sendable {
     }
 }
 
-private struct EmptyCronRequest: Encodable {}
+private struct EmptyCronRequest: Encodable {
+    let hermesHome: String
+    let profileName: String
+
+    enum CodingKeys: String, CodingKey {
+        case hermesHome = "hermes_home"
+        case profileName = "profile_name"
+    }
+}
 
 private struct CronCommandRequest: Encodable {
     let jobID: String
     let command: String
+    let hermesHome: String
+    let profileName: String
 
     enum CodingKeys: String, CodingKey {
         case jobID = "job_id"
         case command
+        case hermesHome = "hermes_home"
+        case profileName = "profile_name"
     }
 }
 
@@ -715,11 +772,15 @@ private struct CronCommandResponse: Decodable {
 private struct CronMutationRequest: Encodable {
     let action: CronMutationAction
     var jobID: String?
+    let hermesHome: String
+    let profileName: String
     let draft: CronMutationDraft
 
     enum CodingKeys: String, CodingKey {
         case action
         case jobID = "job_id"
+        case hermesHome = "hermes_home"
+        case profileName = "profile_name"
         case draft
     }
 }
