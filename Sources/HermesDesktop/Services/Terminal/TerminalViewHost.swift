@@ -86,15 +86,10 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
         guard startedLaunchToken != request.launchToken else { return }
         startedLaunchToken = request.launchToken
 
-        let environment = [
-            "TERM=xterm-256color",
-            "COLORTERM=truecolor"
-        ]
-
         hostView.terminalView.startProcess(
             executable: "/usr/bin/ssh",
             args: request.sshArguments,
-            environment: environment,
+            environment: request.terminalEnvironment,
             execName: "ssh"
         )
         onProcessStart?()
@@ -125,6 +120,7 @@ final class TerminalViewHost: NSObject, LocalProcessTerminalViewDelegate {
 struct TerminalLaunchRequest {
     let sshArguments: [String]
     let launchToken: UUID
+    let terminalEnvironment: [String]
 }
 
 final class TerminalMountContainerView: NSView {
