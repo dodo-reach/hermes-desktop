@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes Desktop</title>
+  <meta name="description" content="Hermes Desktop is a native macOS workspace for Hermes Agent over SSH. Real terminal, real files, real host state, no gateway layer.">
+  <style>
+    :root {
+      --bg: #f3efe7;
+      --paper: #ece5d9;
+      --ink: #111111;
+      --muted: #5f5a54;
+      --line: #111111;
+      --accent: #ef4023;
+      --accent-ink: #fff8f1;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(239, 64, 35, 0.06), transparent 16rem),
+        var(--bg);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", "Aptos", "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    img { display: block; max-width: 100%; }
+
+    a {
+      color: inherit;
+      text-decoration-thickness: 2px;
+      text-underline-offset: 0.18em;
+    }
+
+    .shell {
+      width: min(1200px, calc(100vw - 2rem));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+      background: rgba(243, 239, 231, 0.86);
+      border-bottom: 3px solid var(--line);
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      justify-content: space-between;
+      padding: 0.9rem 0;
+    }
+
+    .brand {
+      font-family: "IBM Plex Mono", "SF Mono", monospace;
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+
+    .brand span { color: var(--accent); }
+
+    .topnav {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .topnav a {
+      font-family: "IBM Plex Mono", "SF Mono", monospace;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      text-decoration: none;
+    }
+
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      padding: 0.95rem 1.3rem;
+      border: 3px solid var(--line);
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-family: "IBM Plex Mono", "SF Mono", monospace;
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      text-decoration: none;
+      box-shadow: 8px 8px 0 var(--line);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    .cta:hover,
+    .cta:focus-visible {
+      transform: translate(3px, 3px);
+      box-shadow: 5px 5px 0 var(--line);
+    }
+
+    .cta.secondary {
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    .hero {
+      padding: 3rem 0 1.5rem;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 1.2rem;
+    }
+
+    .hero-panel,
+    .card,
+    .quote,
+    .shot,
+    .footer-box {
+      border: 3px solid var(--line);
+      background: var(--paper);
+      box-shadow: 10px 10px 0 var(--line);
+    }
+
+    .hero-copy {
+      padding: 1.6rem;
+      background: linear-gradient(180deg, #141414 0%, #1c1c1c 100%);
+      color: #fff8f1;
+    }
+
+    .kicker,
+    .micro {
+      font-family: "IBM Plex Mono", "SF Mono", monospace;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .kicker { color: #ff9d8d; }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+      font-weight: 900;
+      text-transform: uppercase;
+      line-height: 0.9;
+      letter-spacing: 0.02em;
+    }
+
+    h1 {
+      font-size: clamp(3.8rem, 10vw, 7.6rem);
+      margin-top: 1rem;
+    }
+
+    .hero-copy p {
+      margin: 1.3rem 0 0;
+      max-width: 42rem;
+      font-size: 1.05rem;
+      color: #efe4d7;
+    }
+
+    .hero-accent { color: var(--accent); }
+
+    .hero-actions {
+      margin-top: 1.6rem;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .hero-side {
+      display: grid;
+      gap: 1.2rem;
+    }
+
+    .hero-stat {
+      padding: 1.3rem;
+      min-height: 11rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: repeating-linear-gradient(
+        -45deg,
+        #ece5d9,
+        #ece5d9 18px,
+        #e3dacd 18px,
+        #e3dacd 36px
+      );
+    }
+
+    .hero-stat strong {
+      display: block;
+      font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+      font-size: clamp(2.1rem, 5vw, 3.4rem);
+      line-height: 0.92;
+      text-transform: uppercase;
+    }
+
+    .hero-stat p {
+      margin: 0.8rem 0 0;
+      font-size: 0.98rem;
+      color: var(--muted);
+    }
+
+    section { padding: 1.5rem 0; }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: 0.7fr 1.3fr;
+      gap: 1.2rem;
+      align-items: stretch;
+      margin-bottom: 1.2rem;
+    }
+
+    .section-head > * { padding: 1.3rem; }
+
+    .section-head .card:first-child {
+      background: var(--ink);
+      color: #fff8f1;
+    }
+
+    .section-head p {
+      margin: 0.9rem 0 0;
+      font-size: 1rem;
+    }
+
+    .thesis-grid,
+    .feature-grid,
+    .proof-grid,
+    .steps,
+    .gallery {
+      display: grid;
+      gap: 1.2rem;
+    }
+
+    .thesis-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .feature-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .proof-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .steps {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .gallery {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .card {
+      padding: 1.3rem;
+    }
+
+    .card h3 {
+      font-size: 2rem;
+      margin-top: 0.8rem;
+    }
+
+    .card p,
+    .card li {
+      font-size: 0.97rem;
+      color: var(--muted);
+    }
+
+    .card ul {
+      margin: 1rem 0 0;
+      padding-left: 1.15rem;
+    }
+
+    .quote {
+      padding: 1.4rem;
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .quote p {
+      margin: 0.9rem 0 0;
+      font-size: 1.15rem;
+      line-height: 1.45;
+      max-width: 55rem;
+    }
+
+    .shot {
+      overflow: hidden;
+      background: #131313;
+    }
+
+    .shot img {
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+    }
+
+    .shot-copy {
+      padding: 1rem 1.15rem 1.2rem;
+      background: var(--paper);
+    }
+
+    .shot-copy h3 {
+      font-size: 1.6rem;
+      margin-top: 0.55rem;
+    }
+
+    .shot-copy p {
+      margin: 0.7rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .proof-grid .card:first-child {
+      background: #181818;
+      color: #fff8f1;
+    }
+
+    .proof-grid .card:first-child p,
+    .proof-grid .card:first-child li {
+      color: #ddd0c0;
+    }
+
+    code {
+      font-family: "IBM Plex Mono", "SF Mono", monospace;
+      font-size: 0.92em;
+      background: rgba(17, 17, 17, 0.08);
+      padding: 0.12rem 0.35rem;
+    }
+
+    .terminal {
+      margin-top: 1rem;
+      padding: 1rem;
+      border: 3px solid currentColor;
+      font-family: "IBM Plex Mono", "SF Mono", monospace;
+      background: rgba(0, 0, 0, 0.18);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .footer-box {
+      margin: 2rem 0 3rem;
+      padding: 1.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .footer-box p {
+      margin: 0.5rem 0 0;
+      color: var(--muted);
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .section-head,
+      .thesis-grid,
+      .feature-grid,
+      .proof-grid,
+      .steps,
+      .gallery {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar-inner {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .topnav {
+        justify-content: flex-start;
+      }
+
+      .cta {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="#top">Hermes<span> Desktop</span></a>
+      <nav class="topnav" aria-label="Primary">
+        <a href="#thesis">Thesis</a>
+        <a href="#features">Features</a>
+        <a href="#proof">Proof</a>
+        <a href="#gallery">Views</a>
+        <a href="https://github.com/dodo-reach/hermes-desktop/releases">Releases</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top" class="shell">
+    <section class="hero">
+      <div class="hero-panel hero-copy">
+        <div class="kicker">Native macOS workspace for Hermes Agent</div>
+        <h1>Stay close to the <span class="hero-accent">host</span>.</h1>
+        <p>
+          Hermes Desktop is a native Mac app for Hermes built around a direct,
+          host-first SSH connection model. Real terminal. Real files. Real
+          session data. No browser wrapper. No gateway API. No daemon. No
+          extra sync layer slowly drifting away from the machine that actually
+          matters.
+        </p>
+        <div class="hero-actions">
+          <a class="cta" href="https://github.com/dodo-reach/hermes-desktop/releases">Download Release</a>
+          <a class="cta secondary" href="https://github.com/dodo-reach/hermes-desktop">View Source</a>
+        </div>
+      </div>
+
+      <div class="hero-side">
+        <div class="hero-panel hero-stat">
+          <div class="micro">Product stance</div>
+          <strong>One host.<br>One truth.</strong>
+          <p>
+            The host stays authoritative. Hermes Desktop helps you work there
+            more calmly on macOS without inventing a second transport model.
+          </p>
+        </div>
+
+        <div class="hero-panel hero-stat">
+          <div class="micro">What it brings together</div>
+          <strong>Sessions, files, cron, skills, terminal.</strong>
+          <p>
+            The workflows you actually live in, resolved against the canonical
+            remote state.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="thesis">
+      <div class="section-head">
+        <div class="card">
+          <div class="micro">Core thesis</div>
+          <h2>Direct.<br>Native.<br>Legible.</h2>
+        </div>
+        <div class="card">
+          <div class="micro">Why this exists</div>
+          <p>
+            Hermes Desktop is not trying to hide the host behind a softer
+            abstraction. It is for the side of Hermes you want to live in on a
+            Mac: direct SSH, canonical files, real sessions, real cron state,
+            and a real terminal that stays honest about where your work lives.
+          </p>
+        </div>
+      </div>
+
+      <div class="thesis-grid">
+        <div class="card">
+          <div class="micro">Transport</div>
+          <h3>SSH first</h3>
+          <p>
+            If <code>ssh your-host</code> already works from Terminal, Hermes
+            Desktop can usually meet you there.
+          </p>
+        </div>
+        <div class="card">
+          <div class="micro">State model</div>
+          <h3>No shadow world</h3>
+          <p>
+            No local mirror. No custom sync protocol. No silent background
+            state that drifts away from the host over time.
+          </p>
+        </div>
+        <div class="card">
+          <div class="micro">User promise</div>
+          <h3>You know where you are</h3>
+          <p>
+            Host, profile, canonical paths, session store, and scheduler
+            source stay visible and understandable.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="section-head">
+        <div class="card">
+          <div class="micro">What you get</div>
+          <h2>Daily<br>workflow,<br>native.</h2>
+        </div>
+        <div class="card">
+          <div class="micro">Scope</div>
+          <p>
+            The app focuses on the workflows that matter when Hermes is already
+            part of how you work: host overview, canonical file editing,
+            sessions, usage, skills, cron, and an embedded SSH terminal with
+            multiple tabs across hosts and profiles.
+          </p>
+        </div>
+      </div>
+
+      <div class="feature-grid">
+        <div class="card">
+          <div class="micro">Profiles</div>
+          <h3>SSH profiles</h3>
+          <p>
+            Multiple named SSH targets plus Hermes profile awareness on the same
+            host, with state resolved against the active selection.
+          </p>
+        </div>
+        <div class="card">
+          <div class="micro">Terminal</div>
+          <h3>Real shell</h3>
+          <p>
+            Embedded SSH terminal with tabs, appearance controls, and room for
+            genuinely parallel host workflows without inventing a second model.
+          </p>
+        </div>
+        <div class="card">
+          <div class="micro">Canonical files</div>
+          <h3>Conflict-aware editing</h3>
+          <p>
+            Edit <code>USER.md</code>, <code>MEMORY.md</code>, and
+            <code>SOUL.md</code> on the host with remote conflict checks before
+            save.
+          </p>
+        </div>
+        <div class="card">
+          <div class="micro">Sessions</div>
+          <h3>Real session store</h3>
+          <p>
+            Browse and search the canonical remote SQLite store, with fallback
+            only when the live store is unavailable.
+          </p>
+        </div>
+        <div class="card">
+          <div class="micro">Skills + cron</div>
+          <h3>Host workflows together</h3>
+          <p>
+            Skills and cron jobs live next to the rest of the host workflow
+            instead of being split into a separate product surface.
+          </p>
+        </div>
+        <div class="card">
+          <div class="micro">Packaging</div>
+          <h3>One macOS build</h3>
+          <p>
+            Universal packaging for Apple Silicon and Intel from the same build
+            flow, with release artifacts published on GitHub.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="quote">
+        <div class="micro">Positioning</div>
+        <p>
+          Hermes Desktop is not competing with “more abstraction”. It is the
+          native Mac workspace for people who want Hermes to stay direct,
+          inspectable, and anchored to the host.
+        </p>
+      </div>
+    </section>
+
+    <section id="proof">
+      <div class="proof-grid">
+        <div class="card">
+          <div class="micro">Before you download</div>
+          <h2>Simple setup rule.</h2>
+          <p>
+            If this Mac can already reach the Hermes host over SSH without a
+            password prompt or host key confirmation, the app is usually ready.
+          </p>
+          <div class="terminal">ssh your-host</div>
+          <ul>
+            <li>macOS 14 or newer</li>
+            <li><code>python3</code> available on the Hermes host</li>
+            <li>Hermes data under the remote user’s <code>~/.hermes</code></li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="micro">Trust model</div>
+          <h2>Easy to reason about.</h2>
+          <p>
+            The architecture stays legible because it does less. No helper
+            service on the host. No gateway API requirement. No local cache that
+            quietly becomes authoritative by accident.
+          </p>
+          <p>
+            That restraint is part of the product quality, not a missing
+            feature.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="gallery">
+      <div class="section-head">
+        <div class="card">
+          <div class="micro">App views</div>
+          <h2>Live host.<br>Real UI.</h2>
+        </div>
+        <div class="card">
+          <div class="micro">Preview</div>
+          <p>
+            Screenshots from the actual app, kept public-safe for the repo.
+            These are enough to make the repository feel real without
+            overselling unfinished surfaces.
+          </p>
+        </div>
+      </div>
+
+      <div class="gallery">
+        <article class="shot">
+          <img src="assets/CRON-JOBS.png" alt="Hermes Desktop Cron Jobs view">
+          <div class="shot-copy">
+            <div class="micro">Cron jobs</div>
+            <h3>Scheduler state on the host</h3>
+            <p>Browse, edit, pause, resume, run now, and inspect the real remote cron definitions.</p>
+          </div>
+        </article>
+        <article class="shot">
+          <img src="assets/USAGE.png" alt="Hermes Desktop Usage view">
+          <div class="shot-copy">
+            <div class="micro">Usage</div>
+            <h3>Cross-profile visibility</h3>
+            <p>Aggregate totals, session trends, top models, and host-wide usage where readable.</p>
+          </div>
+        </article>
+        <article class="shot">
+          <img src="assets/SKILLS.png" alt="Hermes Desktop Skills view">
+          <div class="shot-copy">
+            <div class="micro">Skills</div>
+            <h3>Canonical skill paths</h3>
+            <p>Browse recursive skill trees and edit them on the live host with a clear write model.</p>
+          </div>
+        </article>
+        <article class="shot">
+          <img src="assets/TERMINALE.png" alt="Hermes Desktop Terminal view">
+          <div class="shot-copy">
+            <div class="micro">Terminal</div>
+            <h3>Shell-first, not shell-themed</h3>
+            <p>Multiple tabs across hosts and profiles, still grounded in direct SSH instead of a second transport layer.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="steps">
+        <div class="card">
+          <div class="micro">01</div>
+          <h3>Add host</h3>
+          <p>Use an SSH alias from <code>~/.ssh/config</code> or fill host details directly.</p>
+        </div>
+        <div class="card">
+          <div class="micro">02</div>
+          <h3>Select profile</h3>
+          <p>Target the default Hermes home or a named profile on the same host.</p>
+        </div>
+        <div class="card">
+          <div class="micro">03</div>
+          <h3>Work on the real thing</h3>
+          <p>Sessions, files, skills, usage, cron, and terminal all resolve against the canonical remote state.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-box">
+      <div>
+        <div class="micro">Hermes Desktop</div>
+        <h3>Open source. Native. Host-first.</h3>
+        <p>Public repo, public releases, and a product story that stays consistent with the app architecture.</p>
+      </div>
+      <div class="hero-actions">
+        <a class="cta" href="https://github.com/dodo-reach/hermes-desktop">GitHub</a>
+        <a class="cta secondary" href="https://github.com/dodo-reach/hermes-desktop/releases">Releases</a>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,6 +1,7 @@
 .DS_Store
 /AGENTS.md
 /.build
+/.build-tests
 /dist
 /docs/
 /private/
