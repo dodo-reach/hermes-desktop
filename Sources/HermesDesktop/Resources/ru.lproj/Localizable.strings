@@ -1,0 +1,400 @@
+/* =====================================================
+   Hermes Desktop — Русский (Russian) Localizable Strings
+   ===================================================== */
+
+/* AppSection titles (используются через NSLocalizedString в AppSection.swift) */
+"section.connections" = "Подключения";
+"section.overview" = "Обзор";
+"section.files" = "Файлы";
+"section.sessions" = "Сессии";
+"section.cronjobs" = "Задания Cron";
+"section.usage" = "Использование";
+"section.skills" = "Навыки";
+"section.terminal" = "Терминал";
+
+/* Боковая панель */
+"Workspace" = "Рабочее пространство";
+"Sections" = "Разделы";
+"Hermes Profile" = "Профиль Hermes";
+
+/* Общие действия */
+"OK" = "ОК";
+"Cancel" = "Отмена";
+"Save" = "Сохранить";
+"Discard" = "Отменить";
+"Stay" = "Остаться";
+"Refresh" = "Обновить";
+"Refreshing…" = "Обновление…";
+"Edit" = "Изменить";
+"Remove" = "Удалить";
+"New" = "Создать";
+"Default" = "По умолчанию";
+"Not set" = "Не задан";
+"Ready" = "Готово";
+"Missing" = "Отсутствует";
+"Delete" = "Удалить";
+"Reload" = "Обновить";
+
+/* Предупреждения главного экрана */
+"Discard unsaved changes?" = "Отменить несохранённые изменения?";
+"USER.md, MEMORY.md, or SOUL.md has unsaved edits." = "В USER.md, MEMORY.md или SOUL.md есть несохранённые правки.";
+"Switching away will drop the unsaved edits in the current file." = "При переключении несохранённые правки в текущем файле будут потеряны.";
+
+/* ==================== Подключения ==================== */
+"Hosts" = "Хосты";
+"Alias-first SSH profiles for every Hermes workspace, from a Raspberry Pi to another Mac or a remote VPS." = "SSH-профили для каждого рабочего пространства Hermes: от Raspberry Pi до удалённого Mac или VPS.";
+"Add Host" = "Добавить хост";
+"Add First Host" = "Добавить первый хост";
+"Use Host" = "Использовать";
+"Test" = "Проверить";
+"No hosts yet" = "Хосты не добавлены";
+"Create your first SSH profile to connect Hermes Desktop to a Raspberry Pi, another Mac, a VPS, or this Mac via localhost." = "Создайте первый SSH-профиль, чтобы подключить Hermes Desktop к Raspberry Pi, другому Mac, VPS или к этому Mac через localhost.";
+"Saved Hosts" = "Сохранённые хосты";
+"Choose the active host for discovery, files, sessions and terminal access." = "Выберите активный хост для обнаружения, работы с файлами, сессиями и терминалом.";
+"Connection Guide" = "Руководство по подключению";
+"Keep the setup technical, but easy to scan and reason about." = "Технические детали в удобном формате.";
+"Recommended" = "Рекомендуется";
+"Use an SSH alias whenever possible. It keeps the system SSH config as the source of truth and makes profiles easier to move between machines." = "По возможности используйте псевдоним SSH. Это позволяет держать системный SSH-конфиг в качестве источника истины и упрощает перенос профилей между машинами.";
+"Authentication" = "Аутентификация";
+"Profiles work best when SSH already works from this Mac without prompts. Password login may still exist on the host, but the app expects a non-interactive SSH path such as keys or ssh-agent." = "Профили работают лучше всего, когда SSH уже работает с этого Mac без дополнительных запросов. Приложение ожидает неинтерактивный SSH-путь: ключи или ssh-agent.";
+"The Mac and Hermes host do not need to share the same Wi-Fi. What matters is that normal ssh from this Mac can reach the host over LAN, public IP, VPN, or Tailscale." = "Mac и хост Hermes не обязаны быть в одной Wi-Fi сети. Главное, чтобы ssh с этого Mac достигал хоста через LAN, публичный IP, VPN или Tailscale.";
+"Active" = "Активен";
+"Alias" = "Псевдоним";
+"Direct host" = "Прямой хост";
+"Target" = "Цель";
+"SSH user" = "Пользователь SSH";
+"Port" = "Порт";
+"Hermes profile" = "Профиль Hermes";
+"Last connected %@" = "Последнее подключение %@";
+"Hostname" = "Имя хоста";
+"LAN or public IP" = "LAN или публичный IP";
+"Same Mac" = "Тот же Mac";
+
+/* Редактор подключения */
+"Edit Host" = "Изменить хост";
+"New Host" = "Новый хост";
+"Set the SSH details Hermes Desktop should use for discovery, file editing, sessions and terminal access." = "Укажите SSH-данные, которые Hermes Desktop будет использовать для обнаружения, редактирования файлов, сессий и терминала.";
+"Connection Details" = "Параметры подключения";
+"Give the host a clear name, then prefer an SSH alias whenever you have one." = "Дайте хосту понятное имя и по возможности используйте псевдоним SSH.";
+"Name" = "Имя";
+"SSH alias" = "Псевдоним SSH";
+"Host or IP address" = "Хост или IP-адрес";
+"SSH port" = "Порт SSH";
+"How Hermes Connects" = "Как Hermes подключается";
+"The goal is to keep the profile understandable without hiding the technical model." = "Цель — сохранить профиль понятным, не скрывая техническую модель.";
+"Preferred setup" = "Рекомендуется";
+"Use an SSH alias when possible. It keeps the system SSH config as the source of truth." = "По возможности используйте псевдоним SSH — это сохраняет системный SSH-конфиг в качестве источника истины.";
+"If Hermes runs on this Mac, stay with the SSH model and use localhost, the local hostname, or a local SSH alias." = "Если Hermes работает на этом Mac, оставайтесь в SSH-модели и используйте localhost, локальное имя хоста или локальный псевдоним SSH.";
+"SSH must already work from this Mac without interactive prompts. Password login may still exist on the host, but Hermes Desktop expects keys, an SSH agent, or another non-interactive SSH path for the actual connection it uses." = "SSH уже должен работать с этого Mac без интерактивных запросов. Hermes Desktop ожидает ключи, SSH-агент или другой неинтерактивный SSH-путь.";
+"Network path" = "Сетевой путь";
+"The Mac and Hermes host do not need to be on the same Wi-Fi. Local network, public IP, VPN, or Tailscale all work as long as standard ssh from this Mac reaches the host." = "Mac и хост Hermes не обязаны быть в одной Wi-Fi сети. Локальная сеть, публичный IP, VPN или Tailscale подойдут, если ssh с этого Mac достигает хоста.";
+"Overrides" = "Переопределения";
+"SSH user and port are optional. Leave them empty to keep the remote defaults." = "Пользователь SSH и порт необязательны. Оставьте пустыми для использования удалённых значений по умолчанию.";
+"The SSH alias currently takes priority over Host. The Host value is preserved in the profile, but it will be ignored while the alias is present." = "Псевдоним SSH имеет приоритет над полем «Хост». Значение «Хост» сохраняется в профиле, но игнорируется, пока задан псевдоним.";
+"Leave it empty for the default Hermes home at `~/.hermes`. Set a profile name like `researcher` to target `~/.hermes/profiles/researcher` on the same host." = "Оставьте пустым для домашнего каталога Hermes по умолчанию (`~/.hermes`). Укажите имя профиля, например `researcher`, чтобы использовать `~/.hermes/profiles/researcher`.";
+"Examples" = "Примеры";
+"A few common patterns that work well with Hermes Desktop." = "Несколько распространённых сценариев, хорошо работающих с Hermes Desktop.";
+"Raspberry Pi" = "Raspberry Pi";
+"Remote Mac" = "Удалённый Mac";
+"VPS" = "VPS";
+"Alias `hermes-home` or host `raspberrypi.local`" = "Псевдоним `hermes-home` или хост `raspberrypi.local`";
+"Host `mac-studio.local`" = "Хост `mac-studio.local`";
+"Host `vps.example.com` or `203.0.113.10`" = "Хост `vps.example.com` или `203.0.113.10`";
+"Host `localhost` or a local SSH alias" = "Хост `localhost` или локальный псевдоним SSH";
+
+/* ==================== Обзор ==================== */
+"See which host Hermes is connected to, where its files live, and which source powers Sessions, Cron Jobs, and Usage." = "Посмотрите, к какому хосту подключён Hermes, где находятся его файлы и какой источник используется для сессий, заданий Cron и статистики.";
+"Discovering the active Hermes workspace…" = "Обнаружение активного рабочего пространства Hermes…";
+"Discovery failed" = "Обнаружение не удалось";
+"Current Host" = "Текущий хост";
+"The active SSH connection for this workspace." = "Активное SSH-подключение для этого рабочего пространства.";
+"The active Hermes profile and the folders it resolves to on the current host." = "Активный профиль Hermes и папки, которые он разрешает на текущем хосте.";
+"Status" = "Состояние";
+"Quick checks to confirm the active host is ready for files, sessions, usage, and terminal access." = "Быстрые проверки готовности активного хоста для работы с файлами, сессиями, статистикой и терминалом.";
+"Workspace Files" = "Файлы рабочего пространства";
+"Expected Hermes files and folders on the active host." = "Ожидаемые файлы и папки Hermes на активном хосте.";
+"Session History" = "История сессий";
+"The source Hermes uses for Sessions and Usage on the active host." = "Источник, который Hermes использует для сессий и статистики на активном хосте.";
+"Connection" = "Соединение";
+"Last connected" = "Последнее подключение";
+"Active profile" = "Активный профиль";
+"Home folder" = "Домашняя папка";
+"Hermes home" = "Домашняя папка Hermes";
+"Discovered profiles" = "Обнаруженные профили";
+"Needs attention" = "Требует внимания";
+"All %lld checks passed" = "Все %lld проверки пройдены";
+"%lld of %lld checks passed" = "%lld из %lld проверок пройдено";
+"Selected profile home" = "Домашняя папка выбранного профиля";
+"Workspace files" = "Файлы рабочего пространства";
+"Sessions/Usage source" = "Источник сессий и статистики";
+"User file" = "Пользовательский файл";
+"Memory file" = "Файл памяти";
+"Soul file" = "Файл души";
+"Session artifacts" = "Артефакты сессий";
+"Cron jobs registry" = "Реестр заданий Cron";
+"SQLite database detected" = "Обнаружена база данных SQLite";
+"Hermes can read structured session and message records directly." = "Hermes может напрямую читать структурированные записи сессий и сообщений.";
+"Using transcript files" = "Используются файлы транскриптов";
+"No SQLite database was found, so Hermes will fall back to session transcript artifacts when available." = "База данных SQLite не найдена. Hermes будет использовать артефакты транскриптов сессий, если они доступны.";
+"Database path" = "Путь к базе данных";
+"Sessions table" = "Таблица сессий";
+"Messages table" = "Таблица сообщений";
+"Transcript folder" = "Папка транскриптов";
+
+/* ==================== Сессии ==================== */
+"Browse the recent Hermes conversations discovered on the active host." = "Просматривайте последние разговоры Hermes, обнаруженные на активном хосте.";
+"Loading sessions…" = "Загрузка сессий…";
+"Unable to load sessions" = "Не удалось загрузить сессии";
+"No matching sessions" = "Совпадений не найдено";
+"Try searching by session name, ID, or preview text." = "Попробуйте искать по имени сессии, идентификатору или тексту.";
+"No sessions found" = "Сессии не найдены";
+"No readable Hermes sessions were discovered yet for this SSH target." = "Читаемые сессии Hermes для этого SSH-хоста ещё не обнаружены.";
+"Select a session to inspect its transcript, metadata and last activity." = "Выберите сессию для просмотра транскрипта, метаданных и последней активности.";
+"Load More" = "Загрузить ещё";
+"Search sessions" = "Поиск сессий";
+"%lld messages" = "%lld сообщений";
+"Started %@" = "Начата %@";
+"Active %@" = "Активна %@";
+"Stored Sessions (%lld)" = "Сохранённые сессии (%lld)";
+"Matching Sessions (%lld)" = "Найденные сессии (%lld)";
+"Started" = "Начата";
+"Last active" = "Последняя активность";
+"No transcript entries" = "Транскрипт пуст";
+"This session has no readable message rows yet." = "В этой сессии ещё нет читаемых строк сообщений.";
+"Transcript" = "Транскрипт";
+"Messages are shown in the order Hermes stored them for this session." = "Сообщения отображаются в том порядке, в котором Hermes их сохранил для этой сессии.";
+"Select a session" = "Выберите сессию";
+"Choose a Hermes session from the active host to inspect its transcript." = "Выберите сессию Hermes с активного хоста для просмотра транскрипта.";
+"No text payload" = "Нет текстового содержимого";
+"Metadata" = "Метаданные";
+"Delete session" = "Удалить сессию";
+"Delete this session?" = "Удалить эту сессию?";
+"\"%@\" will be removed from Hermes Desktop and deleted on the remote Hermes host as well. This action cannot be undone." = "«%@» будет удалена из Hermes Desktop и удалена на удалённом хосте Hermes. Это действие нельзя отменить.";
+
+/* Роли сообщений (используются через NSLocalizedString в SessionModels.swift) */
+"role.assistant" = "Ассистент";
+"role.user" = "Пользователь";
+"role.system" = "Система";
+"role.event" = "Событие";
+
+/* ==================== Файлы ==================== */
+"Canonical Files" = "Канонические файлы";
+"Edits are written remotely with atomic replace semantics and conflict checks over SSH." = "Правки записываются удалённо с атомарной заменой и проверкой конфликтов через SSH.";
+"File" = "Файл";
+"Reload from Remote" = "Обновить с удалённого хоста";
+"Unsaved changes" = "Несохранённые изменения";
+"Saved %@" = "Сохранено %@";
+"Discard unsaved edits in this file?" = "Отменить несохранённые правки в этом файле?";
+"Reload from remote and discard local edits?" = "Загрузить с удалённого хоста и отменить локальные правки?";
+"This will replace the local unsaved changes with the current remote file content." = "Локальные несохранённые изменения будут заменены текущим содержимым удалённого файла.";
+
+/* ==================== Навыки ==================== */
+"Browse the Hermes skill library discovered on the active host." = "Просматривайте библиотеку навыков Hermes, обнаруженную на активном хосте.";
+"Loading skills…" = "Загрузка навыков…";
+"Unable to load skills" = "Не удалось загрузить навыки";
+"No skills found" = "Навыки не найдены";
+"No readable SKILL.md files were discovered under %@ on this SSH target." = "Читаемые файлы SKILL.md не обнаружены в %@ на этом SSH-хосте.";
+"Select a skill to inspect its metadata, related assets and full SKILL.md content." = "Выберите навык для просмотра метаданных, связанных ресурсов и содержимого SKILL.md.";
+"No matching skills" = "Совпадений не найдено";
+"Try searching by skill name or category." = "Попробуйте искать по имени навыка или категории.";
+"Search skills" = "Поиск навыков";
+"Discovered Skills (%lld)" = "Обнаруженные навыки (%lld)";
+"Discovered Skills (%lld of %lld)" = "Обнаруженные навыки (%lld из %lld)";
+"No description in frontmatter" = "Описание в метаданных отсутствует";
+"Description" = "Описание";
+"Frontmatter summary for the selected skill." = "Краткое описание из метаданных выбранного навыка.";
+"SKILL.md" = "SKILL.md";
+"Full source content loaded from the active host." = "Полное содержимое, загруженное с активного хоста.";
+"Optional frontmatter fields and companion directories discovered for this skill." = "Необязательные поля метаданных и сопутствующие каталоги, обнаруженные для этого навыка.";
+"Loading skill detail…" = "Загрузка деталей навыка…";
+"Unable to load skill detail" = "Не удалось загрузить детали навыка";
+"Select a skill" = "Выберите навык";
+"Choose a Hermes skill from the active host to inspect its metadata and full SKILL.md." = "Выберите навык Hermes с активного хоста для просмотра метаданных и содержимого SKILL.md.";
+"Create New Skill" = "Создать новый навык";
+"Edit SKILL.md" = "Редактировать SKILL.md";
+"Slug" = "Идентификатор";
+"Category" = "Категория";
+"Relative path" = "Относительный путь";
+"Version" = "Версия";
+"Root" = "Корень";
+"Tags" = "Теги";
+"Related skills" = "Связанные навыки";
+"Companion directories" = "Сопутствующие каталоги";
+"Basics" = "Основное";
+"Use plain language. The app will turn these fields into the right SKILL.md frontmatter and folder path." = "Используйте понятный язык. Приложение преобразует эти поля в правильные метаданные SKILL.md и путь к папке.";
+"Skill Name" = "Название навыка";
+"Short Description" = "Краткое описание";
+"Category Path" = "Путь категории";
+"Folder Name" = "Имя папки";
+"Remote path" = "Удалённый путь";
+"Optional tags and related skills help Hermes and the user understand the role of the skill." = "Необязательные теги и связанные навыки помогают Hermes и пользователю понять роль навыка.";
+"Related Skills" = "Связанные навыки";
+"Companion Folders" = "Сопутствующие папки";
+"Create references/ for longer docs or domain notes" = "Создать references/ для длинных документов или заметок";
+"Create scripts/ for deterministic helpers" = "Создать scripts/ для детерминированных вспомогательных скриптов";
+"Create templates/ for reusable output files" = "Создать templates/ для повторно используемых файлов";
+"Ensure references/ exists" = "Убедиться, что references/ существует";
+"Ensure scripts/ exists" = "Убедиться, что scripts/ существует";
+"Ensure templates/ exists" = "Убедиться, что templates/ существует";
+"Instructions" = "Инструкции";
+"Write the actual guidance Hermes should follow once the skill triggers." = "Напишите конкретные рекомендации, которым должен следовать Hermes при срабатывании навыка.";
+"Generated Preview" = "Предварительный просмотр";
+"This is the SKILL.md the app will write on the remote Hermes host." = "Это SKILL.md, который приложение запишет на удалённый хост Hermes.";
+"Editing Scope" = "Область редактирования";
+"The existing skill path stays fixed while you edit the raw SKILL.md source." = "Существующий путь навыка остаётся фиксированным при редактировании исходного кода SKILL.md.";
+"Edit the existing skill source directly. Saves are atomic and checked against the last loaded remote version." = "Редактируйте исходный код навыка напрямую. Сохранения атомарны и проверяются на соответствие последней загруженной удалённой версии.";
+"Create a new Hermes skill from a guided form instead of writing YAML frontmatter and folder structure by hand." = "Создайте новый навык Hermes с помощью формы вместо ручного написания YAML-метаданных и структуры папок.";
+"Update the existing SKILL.md directly while keeping the remote path fixed and protected by a conflict check." = "Редактируйте существующий SKILL.md напрямую, сохраняя фиксированный удалённый путь с проверкой конфликтов.";
+"Create Skill" = "Создать навык";
+
+/* ==================== Задания Cron ==================== */
+"Browse, create and maintain Hermes jobs discovered on the active host." = "Просматривайте, создавайте и управляйте заданиями Hermes на активном хосте.";
+"All" = "Все";
+"Filter" = "Фильтр";
+"Create a new cron job" = "Создать новое задание Cron";
+"Search jobs" = "Поиск заданий";
+"Loading cron jobs…" = "Загрузка заданий Cron…";
+"Unable to load cron jobs" = "Не удалось загрузить задания Cron";
+"No cron jobs found" = "Задания Cron не найдены";
+"No saved Hermes cron jobs were discovered under %@ on this SSH target." = "Сохранённые задания Cron Hermes не обнаружены в %@ на этом SSH-хосте.";
+"Select a job to inspect its schedule, payload and recent activity." = "Выберите задание для просмотра расписания, нагрузки и последней активности.";
+"No matching cron jobs" = "Совпадений не найдено";
+"Try searching by title, schedule, skill, model, delivery target or prompt text." = "Попробуйте искать по заголовку, расписанию, навыку, модели, адресату или тексту запроса.";
+"Remove cron job?" = "Удалить задание Cron?";
+"\"%@\" will be removed from the remote Hermes scheduler. This cannot be undone." = "«%@» будет удалено из удалённого планировщика Hermes. Это действие нельзя отменить.";
+"Last run %@" = "Последний запуск %@";
+"Next run %@" = "Следующий запуск %@";
+"Cron Jobs (%lld)" = "Задания Cron (%lld)";
+"Cron Jobs (%lld of %lld)" = "Задания Cron (%lld из %lld)";
+"Select a cron job" = "Выберите задание Cron";
+"Choose a Hermes cron job from the active host to inspect it, or create a new one." = "Выберите задание Cron Hermes с активного хоста для просмотра или создайте новое.";
+"Create Cron Job" = "Создать задание Cron";
+"Last Error" = "Последняя ошибка";
+"Most recent execution failure reported by Hermes." = "Последняя ошибка выполнения, сообщённая Hermes.";
+"Details" = "Подробности";
+"Schedule metadata and recent execution markers reported by Hermes." = "Метаданные расписания и маркеры последнего выполнения, сообщённые Hermes.";
+"Skills" = "Навыки";
+"Skills attached to this cron job payload." = "Навыки, подключённые к этому заданию Cron.";
+"Prompt" = "Запрос";
+"Payload Hermes will run for this scheduled job." = "Нагрузка, которую Hermes выполнит для этого запланированного задания.";
+"No prompt payload saved for this job." = "Запрос для этого задания не сохранён.";
+"Schedule" = "Расписание";
+"Timezone" = "Часовой пояс";
+"Next run" = "Следующий запуск";
+"Last run" = "Последний запуск";
+"Created" = "Создано";
+"Last status" = "Последний статус";
+"Provider" = "Провайдер";
+"Base URL" = "Базовый URL";
+"Delivery" = "Доставка";
+"Remaining runs" = "Оставшиеся запуски";
+"Planned runs" = "Запланированные запуски";
+"Origin" = "Источник";
+"Delivery error" = "Ошибка доставки";
+"Run Now" = "Запустить сейчас";
+"Resume" = "Возобновить";
+"Pause" = "Приостановить";
+"New Cron Job" = "Новое задание Cron";
+"Edit Cron Job" = "Изменить задание Cron";
+"Create Job" = "Создать задание";
+"Save Changes" = "Сохранить изменения";
+"The app will write the right cron job structure into `%@` on the active host." = "Приложение запишет структуру задания Cron в `%@` на активном хосте.";
+"Define what this cron job should do." = "Определите, что должно делать это задание Cron.";
+"Choose whether Hermes should run this once or on a recurring cadence." = "Выберите, запускать ли Hermes однократно или по регулярному расписанию.";
+"Delivery is required. Skills and model overrides remain optional." = "Доставка обязательна. Навыки и переопределения модели необязательны.";
+"Title" = "Заголовок";
+"Frequency" = "Частота";
+"Delay" = "Задержка";
+"Unit" = "Единица";
+"Run At" = "Запустить в";
+"Every" = "Каждые";
+"Minute" = "Минута";
+"Hour" = "Час";
+"Day" = "День";
+"Day of Month" = "День месяца";
+"Preview" = "Предпросмотр";
+"Custom Target" = "Произвольный адресат";
+"Model" = "Модель";
+"Use full Hermes target syntax such as `telegram:-1001234567890`, `telegram:-1001234567890:17585`, or another supported platform target." = "Используйте полный синтаксис адресата Hermes: `telegram:-1001234567890`, `telegram:-1001234567890:17585` или другую поддерживаемую платформу.";
+"`Local Only` saves cron output under `%@` on the active host." = "«Только локально» сохраняет вывод Cron в `%@` на активном хосте.";
+
+/* Состояния заданий Cron (используются через NSLocalizedString в CronJobModels.swift) */
+"cron.state.active" = "Активно";
+"cron.state.paused" = "Приостановлено";
+"cron.state.running" = "Выполняется";
+"cron.state.failed" = "Ошибка";
+"cron.state.error" = "Сбой";
+"cron.state.active.disabled" = "Приостановлено";
+
+/* Предустановки расписания Cron (через NSLocalizedString) */
+"cron.preset.once_after" = "Однократно через";
+"cron.preset.once_at" = "Однократно в";
+"cron.preset.every" = "Каждые";
+"cron.preset.hourly" = "Ежечасно";
+"cron.preset.daily" = "Ежедневно";
+"cron.preset.weekdays" = "По будням";
+"cron.preset.weekly" = "Еженедельно";
+"cron.preset.monthly" = "Ежемесячно";
+"cron.preset.custom" = "Произвольно";
+
+/* Единицы интервала */
+"cron.unit.minutes" = "Минут";
+"cron.unit.hours" = "Часов";
+"cron.unit.days" = "Дней";
+
+/* Предустановки доставки */
+"cron.delivery.local" = "Только локально";
+"cron.delivery.origin" = "В исходный чат";
+"cron.delivery.telegram" = "Telegram";
+"cron.delivery.discord" = "Discord";
+"cron.delivery.slack" = "Slack";
+"cron.delivery.whatsapp" = "WhatsApp";
+
+/* ==================== Терминал ==================== */
+"New Tab" = "Новая вкладка";
+"No terminal tab" = "Нет вкладок терминала";
+"Create a tab to start a real SSH shell for the active host." = "Создайте вкладку для запуска SSH-сессии с активным хостом.";
+"Other Profile" = "Другой профиль";
+"Close tab" = "Закрыть вкладку";
+"Customize terminal colors" = "Настроить цвета терминала";
+"Theme" = "Тема";
+"Terminal Theme" = "Тема терминала";
+"Pick a preset for a coherent terminal look, then fine-tune background and text colors live if you want." = "Выберите предустановку для согласованного внешнего вида терминала, затем при желании настройте цвета.";
+"Quick Presets" = "Быстрые предустановки";
+"Use System" = "Системная тема";
+"Custom Colors" = "Пользовательские цвета";
+"ANSI accents follow %@." = "Цвета ANSI соответствуют палитре «%@».";
+"Custom colors update the running terminal immediately. Preset ANSI colors stay anchored so git output, prompts, and tools keep a readable palette." = "Пользовательские цвета сразу обновляются в запущенном терминале. Предустановленные цвета ANSI остаются фиксированными.";
+"Background" = "Фон";
+"Text" = "Текст";
+
+/* ==================== Использование ==================== */
+"The main cards and charts on this page are for the active Hermes profile. When more than one profile is discovered on the same host, a separate panel shows total token consumption across all profiles." = "Основные карточки и диаграммы относятся к активному профилю Hermes. Если обнаружено несколько профилей, отдельная панель показывает общее потребление токенов.";
+"Loading usage totals…" = "Загрузка статистики…";
+"Unable to load usage" = "Не удалось загрузить статистику";
+"Usage unavailable" = "Статистика недоступна";
+"No readable Hermes session database is currently available for the active host." = "Читаемая база данных сессий Hermes в настоящее время недоступна для активного хоста.";
+"Active Profile" = "Активный профиль";
+"Everything below stays scoped to the currently selected Hermes profile." = "Все данные ниже относятся к выбранному профилю Hermes.";
+"Profile" = "Профиль";
+"Current Total" = "Текущий итог";
+"Input Tokens" = "Входящие токены";
+"Output Tokens" = "Исходящие токены";
+"All Profiles Total Tokens" = "Токены по всем профилям";
+"This panel is host-wide. It combines total token consumption across all readable Hermes profiles on the active host, including input, output, cache, and reasoning. The other cards on this page remain scoped to the active profile." = "Эта панель охватывает весь хост. В ней суммируется общее потребление токенов по всем профилям Hermes, включая входящие, исходящие, кэш и рассуждения.";
+"Not enough profile data yet" = "Недостаточно данных по профилям";
+"At least two profiles need readable usage data before the cross-profile breakdown becomes meaningful." = "Для появления сводки необходимо, чтобы минимум два профиля имели читаемые данные использования.";
+"Readable Profiles" = "Читаемые профили";
+"Host-wide Total" = "Итого по хосту";
+"Active Profile Share" = "Доля активного профиля";
+"Search" = "Поиск";
+"Close search" = "Закрыть поиск";
+
+/* Skill source badges */
+"skill.source.local" = "Локальный";
+"skill.source.external" = "Внешний";
+
+/* Skill detail — external/remote skill info */
+"Source" = "Источник";
+"Remote path" = "Удалённый путь";
+"External skill directories are discovery-only in Hermes. This skill is available to inspect here, but edits still belong in the local Hermes skills store." = "Внешние каталоги навыков доступны только для просмотра. Этот навык можно изучить, но редактирование возможно только в локальном хранилище навыков Hermes.";

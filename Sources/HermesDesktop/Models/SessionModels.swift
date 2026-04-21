@@ -136,16 +136,18 @@ enum SessionMessageRole: Codable, Hashable {
     var displayTitle: String {
         switch self {
         case .assistant:
-            return "Assistant"
+            return NSLocalizedString("role.assistant", comment: "Assistant message role")
         case .user:
-            return "User"
+            return NSLocalizedString("role.user", comment: "User message role")
         case .system:
-            return "System"
+            return NSLocalizedString("role.system", comment: "System message role")
         case .event:
-            return "Event"
+            return NSLocalizedString("role.event", comment: "Event message role")
         case .custom(let value):
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return "Event" }
+            guard !trimmed.isEmpty else {
+                return NSLocalizedString("role.event", comment: "Event message role")
+            }
             return trimmed.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct HermesPageHeader<Accessory: View>: View {
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let accessory: Accessory
 
     init(
-        title: String,
-        subtitle: String,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey,
         @ViewBuilder accessory: () -> Accessory
     ) {
         self.title = title
@@ -15,7 +15,7 @@ struct HermesPageHeader<Accessory: View>: View {
         self.accessory = accessory()
     }
 
-    init(title: String, subtitle: String) where Accessory == EmptyView {
+    init(title: LocalizedStringKey, subtitle: LocalizedStringKey) where Accessory == EmptyView {
         self.title = title
         self.subtitle = subtitle
         self.accessory = EmptyView()
@@ -42,13 +42,13 @@ struct HermesPageHeader<Accessory: View>: View {
 }
 
 struct HermesSurfacePanel<Content: View>: View {
-    let title: String?
-    let subtitle: String?
+    let title: LocalizedStringKey?
+    let subtitle: LocalizedStringKey?
     let content: Content
 
     init(
-        title: String? = nil,
-        subtitle: String? = nil,
+        title: LocalizedStringKey? = nil,
+        subtitle: LocalizedStringKey? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -110,7 +110,7 @@ struct HermesInsetSurface<Content: View>: View {
 }
 
 struct HermesLoadingState: View {
-    let label: String
+    let label: LocalizedStringKey
     var minHeight: CGFloat = 300
 
     var body: some View {
@@ -180,7 +180,7 @@ struct HermesBadge: View {
 }
 
 struct HermesLabeledValue: View {
-    let label: String
+    let label: LocalizedStringKey
     let value: String
     var isMonospaced = false
     var emphasizeValue = false
@@ -211,7 +211,7 @@ struct HermesLabeledValue: View {
 struct HermesExpandableSearchField: View {
     @Binding var text: String
 
-    var prompt = "Search"
+    var prompt: LocalizedStringKey = "Search"
     var collapsedWidth: CGFloat = 34
     var expandedWidth: CGFloat = 240
 

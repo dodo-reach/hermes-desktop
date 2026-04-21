@@ -226,7 +226,7 @@ struct CronJobsView: View {
         }
     }
 
-    private var panelTitle: String {
+    private var panelTitle: LocalizedStringKey {
         let total = appState.cronJobs.count
         let filtered = filteredJobs.count
         let isFiltering = filterMode != .all || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -287,7 +287,7 @@ private enum CronEditorMode: Equatable {
     case create
     case edit(jobID: String)
 
-    var title: String {
+    var title: LocalizedStringKey {
         switch self {
         case .create:
             return "New Cron Job"
@@ -296,7 +296,7 @@ private enum CronEditorMode: Equatable {
         }
     }
 
-    var actionTitle: String {
+    var actionTitle: LocalizedStringKey {
         switch self {
         case .create:
             return "Create Job"

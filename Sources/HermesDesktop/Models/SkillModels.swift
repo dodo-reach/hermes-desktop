@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 struct SkillListResponse: Codable {
     let ok: Bool
@@ -139,9 +140,9 @@ extension SkillSource {
     var badgeTitle: String {
         switch kind {
         case .local:
-            return "Local"
+            return NSLocalizedString("skill.source.local", comment: "Local skill source badge")
         case .external:
-            return "External"
+            return NSLocalizedString("skill.source.external", comment: "External skill source badge")
         }
     }
 }
@@ -169,16 +170,16 @@ enum SkillEditorMode: Identifiable, Equatable {
         }
     }
 
-    var title: String {
+    var title: LocalizedStringKey {
         switch self {
         case .create:
-            return "New Skill"
+            return "Create New Skill"
         case .edit:
             return "Edit SKILL.md"
         }
     }
 
-    var actionTitle: String {
+    var actionTitle: LocalizedStringKey {
         switch self {
         case .create:
             return "Create Skill"

@@ -151,19 +151,21 @@ enum CronJobState: Codable, Hashable {
     func displayTitle(isEnabled: Bool) -> String {
         switch self {
         case .scheduled:
-            return "Active"
+            return NSLocalizedString("cron.state.active", comment: "Cron job active state")
         case .paused:
-            return "Paused"
+            return NSLocalizedString("cron.state.paused", comment: "Cron job paused state")
         case .running:
-            return "Running"
+            return NSLocalizedString("cron.state.running", comment: "Cron job running state")
         case .failed:
-            return "Failed"
+            return NSLocalizedString("cron.state.failed", comment: "Cron job failed state")
         case .error:
-            return "Error"
+            return NSLocalizedString("cron.state.error", comment: "Cron job error state")
         case .other(let value):
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                return isEnabled ? "Active" : "Paused"
+                return isEnabled
+                    ? NSLocalizedString("cron.state.active", comment: "Cron job active state")
+                    : NSLocalizedString("cron.state.active.disabled", comment: "Cron job disabled state")
             }
             return trimmed.replacingOccurrences(of: "_", with: " ").capitalized
         }
@@ -238,23 +240,23 @@ enum CronSchedulePreset: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .afterDelay:
-            return "One Time After"
+            return NSLocalizedString("cron.preset.once_after", comment: "One time after delay")
         case .atDateTime:
-            return "One Time At"
+            return NSLocalizedString("cron.preset.once_at", comment: "One time at datetime")
         case .everyInterval:
-            return "Every"
+            return NSLocalizedString("cron.preset.every", comment: "Every interval")
         case .hourly:
-            return "Hourly"
+            return NSLocalizedString("cron.preset.hourly", comment: "Hourly schedule")
         case .daily:
-            return "Daily"
+            return NSLocalizedString("cron.preset.daily", comment: "Daily schedule")
         case .weekdays:
-            return "Weekdays"
+            return NSLocalizedString("cron.preset.weekdays", comment: "Weekdays schedule")
         case .weekly:
-            return "Weekly"
+            return NSLocalizedString("cron.preset.weekly", comment: "Weekly schedule")
         case .monthly:
-            return "Monthly"
+            return NSLocalizedString("cron.preset.monthly", comment: "Monthly schedule")
         case .custom:
-            return "Custom"
+            return NSLocalizedString("cron.preset.custom", comment: "Custom schedule")
         }
     }
 }
@@ -280,11 +282,11 @@ enum CronIntervalUnit: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .minutes:
-            return "Minutes"
+            return NSLocalizedString("cron.unit.minutes", comment: "Minutes unit")
         case .hours:
-            return "Hours"
+            return NSLocalizedString("cron.unit.hours", comment: "Hours unit")
         case .days:
-            return "Days"
+            return NSLocalizedString("cron.unit.days", comment: "Days unit")
         }
     }
 
@@ -315,21 +317,21 @@ enum CronDeliveryPreset: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .local:
-            return "Local Only"
+            return NSLocalizedString("cron.delivery.local", comment: "Local only delivery")
         case .origin:
-            return "Origin Chat"
+            return NSLocalizedString("cron.delivery.origin", comment: "Origin chat delivery")
         case .telegram:
-            return "Telegram Home"
+            return NSLocalizedString("cron.delivery.telegram", comment: "Telegram delivery")
         case .discord:
-            return "Discord Home"
+            return NSLocalizedString("cron.delivery.discord", comment: "Discord delivery")
         case .slack:
-            return "Slack Home"
+            return NSLocalizedString("cron.delivery.slack", comment: "Slack delivery")
         case .whatsapp:
-            return "WhatsApp Home"
+            return NSLocalizedString("cron.delivery.whatsapp", comment: "WhatsApp delivery")
         case .email:
             return "Email"
         case .custom:
-            return "Custom Target"
+            return NSLocalizedString("Custom Target", comment: "Custom delivery target")
         }
     }
 

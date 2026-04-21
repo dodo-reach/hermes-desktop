@@ -260,11 +260,11 @@ private struct ConnectionCard: View {
             .buttonStyle(.borderless)
     }
 
-    private func metadataRow(label: String, value: String) -> some View {
+    private func metadataRow(label: LocalizedStringKey, value: String) -> some View {
         HermesLabeledValue(
             label: label,
             value: value,
-            isMonospaced: label != "SSH user" || value != "Default"
+            isMonospaced: true
         )
     }
 
