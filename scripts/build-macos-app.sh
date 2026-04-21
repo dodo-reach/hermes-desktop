@@ -195,6 +195,16 @@ cp "$PLIST_PATH" "$CONTENTS_PATH/Info.plist"
 stamp_plist_versions "$CONTENTS_PATH/Info.plist"
 cp "$ICNS_PATH" "$RESOURCES_PATH/AppIcon.icns"
 cp "$SHADER_SOURCE_PATH" "$RESOURCES_PATH/Shaders.metal"
+
+# Copy localization bundles from the first available arch build output
+LPROJ_SOURCE_ARCH="${BUILD_ARCHES[0]}"
+LPROJ_BUNDLE="$SCRATCH_PATH/${LPROJ_SOURCE_ARCH}-apple-macosx/release/${APP_NAME}_${APP_NAME}.bundle"
+if [[ -d "$LPROJ_BUNDLE" ]]; then
+    for lproj_dir in "$LPROJ_BUNDLE"/*.lproj; do
+        [[ -d "$lproj_dir" ]] && cp -r "$lproj_dir" "$RESOURCES_PATH/"
+    done
+fi
+
 codesign --force --deep --sign - "$BUNDLE_PATH" >/dev/null
 codesign --verify --deep --strict "$BUNDLE_PATH" >/dev/null
 
