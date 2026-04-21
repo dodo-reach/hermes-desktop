@@ -389,3 +389,12 @@
 "Active Profile Share" = "Доля активного профиля";
 "Search" = "Поиск";
 "Close search" = "Закрыть поиск";
+
+/* Skill source badges */
+"skill.source.local" = "Локальный";
+"skill.source.external" = "Внешний";
+
+/* Skill detail — external/remote skill info */
+"Source" = "Источник";
+"Remote path" = "Удалённый путь";
+"External skill directories are discovery-only in Hermes. This skill is available to inspect here, but edits still belong in the local Hermes skills store." = "Внешние каталоги навыков доступны только для просмотра. Этот навык можно изучить, но редактирование возможно только в локальном хранилище навыков Hermes.";

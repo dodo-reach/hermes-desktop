@@ -140,9 +140,9 @@ extension SkillSource {
     var badgeTitle: String {
         switch kind {
         case .local:
-            return "Local"
+            return NSLocalizedString("skill.source.local", comment: "Local skill source badge")
         case .external:
-            return "External"
+            return NSLocalizedString("skill.source.external", comment: "External skill source badge")
         }
     }
 }
