@@ -15,21 +15,21 @@ enum AppSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .connections:
-            "Connections"
+            NSLocalizedString("section.connections", comment: "Connections section title")
         case .overview:
-            "Overview"
+            NSLocalizedString("section.overview", comment: "Overview section title")
         case .files:
-            "Files"
+            NSLocalizedString("section.files", comment: "Files section title")
         case .sessions:
-            "Sessions"
+            NSLocalizedString("section.sessions", comment: "Sessions section title")
         case .cronjobs:
-            "Cron Jobs"
+            NSLocalizedString("section.cronjobs", comment: "Cron Jobs section title")
         case .usage:
-            "Usage"
+            NSLocalizedString("section.usage", comment: "Usage section title")
         case .skills:
-            "Skills"
+            NSLocalizedString("section.skills", comment: "Skills section title")
         case .terminal:
-            "Terminal"
+            NSLocalizedString("section.terminal", comment: "Terminal section title")
         }
     }
 

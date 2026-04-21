@@ -1,0 +1,391 @@
+/* =====================================================
+   Hermes Desktop — English (Base) Localizable Strings
+   ===================================================== */
+
+/* AppSection titles (used via NSLocalizedString in AppSection.swift) */
+"section.connections" = "Connections";
+"section.overview" = "Overview";
+"section.files" = "Files";
+"section.sessions" = "Sessions";
+"section.cronjobs" = "Cron Jobs";
+"section.usage" = "Usage";
+"section.skills" = "Skills";
+"section.terminal" = "Terminal";
+
+/* Sidebar */
+"Workspace" = "Workspace";
+"Sections" = "Sections";
+"Hermes Profile" = "Hermes Profile";
+
+/* Common actions */
+"OK" = "OK";
+"Cancel" = "Cancel";
+"Save" = "Save";
+"Discard" = "Discard";
+"Stay" = "Stay";
+"Refresh" = "Refresh";
+"Refreshing…" = "Refreshing…";
+"Edit" = "Edit";
+"Remove" = "Remove";
+"New" = "New";
+"Default" = "Default";
+"Not set" = "Not set";
+"Ready" = "Ready";
+"Missing" = "Missing";
+"Delete" = "Delete";
+"Reload" = "Reload";
+
+/* Root view alerts */
+"Discard unsaved changes?" = "Discard unsaved changes?";
+"USER.md, MEMORY.md, or SOUL.md has unsaved edits." = "USER.md, MEMORY.md, or SOUL.md has unsaved edits.";
+"Switching away will drop the unsaved edits in the current file." = "Switching away will drop the unsaved edits in the current file.";
+
+/* ==================== Connections ==================== */
+"Hosts" = "Hosts";
+"Alias-first SSH profiles for every Hermes workspace, from a Raspberry Pi to another Mac or a remote VPS." = "Alias-first SSH profiles for every Hermes workspace, from a Raspberry Pi to another Mac or a remote VPS.";
+"Add Host" = "Add Host";
+"Add First Host" = "Add First Host";
+"Use Host" = "Use Host";
+"Test" = "Test";
+"No hosts yet" = "No hosts yet";
+"Create your first SSH profile to connect Hermes Desktop to a Raspberry Pi, another Mac, a VPS, or this Mac via localhost." = "Create your first SSH profile to connect Hermes Desktop to a Raspberry Pi, another Mac, a VPS, or this Mac via localhost.";
+"Saved Hosts" = "Saved Hosts";
+"Choose the active host for discovery, files, sessions and terminal access." = "Choose the active host for discovery, files, sessions and terminal access.";
+"Connection Guide" = "Connection Guide";
+"Keep the setup technical, but easy to scan and reason about." = "Keep the setup technical, but easy to scan and reason about.";
+"Recommended" = "Recommended";
+"Use an SSH alias whenever possible. It keeps the system SSH config as the source of truth and makes profiles easier to move between machines." = "Use an SSH alias whenever possible. It keeps the system SSH config as the source of truth and makes profiles easier to move between machines.";
+"Authentication" = "Authentication";
+"Profiles work best when SSH already works from this Mac without prompts. Password login may still exist on the host, but the app expects a non-interactive SSH path such as keys or ssh-agent." = "Profiles work best when SSH already works from this Mac without prompts. Password login may still exist on the host, but the app expects a non-interactive SSH path such as keys or ssh-agent.";
+"The Mac and Hermes host do not need to share the same Wi-Fi. What matters is that normal ssh from this Mac can reach the host over LAN, public IP, VPN, or Tailscale." = "The Mac and Hermes host do not need to share the same Wi-Fi. What matters is that normal ssh from this Mac can reach the host over LAN, public IP, VPN, or Tailscale.";
+"Active" = "Active";
+"Alias" = "Alias";
+"Direct host" = "Direct host";
+"Target" = "Target";
+"SSH user" = "SSH user";
+"Port" = "Port";
+"Hermes profile" = "Hermes profile";
+"Last connected %@" = "Last connected %@";
+"Hostname" = "Hostname";
+"LAN or public IP" = "LAN or public IP";
+"Same Mac" = "Same Mac";
+
+/* Connection Editor */
+"Edit Host" = "Edit Host";
+"New Host" = "New Host";
+"Set the SSH details Hermes Desktop should use for discovery, file editing, sessions and terminal access." = "Set the SSH details Hermes Desktop should use for discovery, file editing, sessions and terminal access.";
+"Connection Details" = "Connection Details";
+"Give the host a clear name, then prefer an SSH alias whenever you have one." = "Give the host a clear name, then prefer an SSH alias whenever you have one.";
+"Name" = "Name";
+"SSH alias" = "SSH alias";
+"Host or IP address" = "Host or IP address";
+"SSH port" = "SSH port";
+"How Hermes Connects" = "How Hermes Connects";
+"The goal is to keep the profile understandable without hiding the technical model." = "The goal is to keep the profile understandable without hiding the technical model.";
+"Preferred setup" = "Preferred setup";
+"Use an SSH alias when possible. It keeps the system SSH config as the source of truth." = "Use an SSH alias when possible. It keeps the system SSH config as the source of truth.";
+"If Hermes runs on this Mac, stay with the SSH model and use localhost, the local hostname, or a local SSH alias." = "If Hermes runs on this Mac, stay with the SSH model and use localhost, the local hostname, or a local SSH alias.";
+"SSH must already work from this Mac without interactive prompts. Password login may still exist on the host, but Hermes Desktop expects keys, an SSH agent, or another non-interactive SSH path for the actual connection it uses." = "SSH must already work from this Mac without interactive prompts. Password login may still exist on the host, but Hermes Desktop expects keys, an SSH agent, or another non-interactive SSH path for the actual connection it uses.";
+"Network path" = "Network path";
+"The Mac and Hermes host do not need to be on the same Wi-Fi. Local network, public IP, VPN, or Tailscale all work as long as standard ssh from this Mac reaches the host." = "The Mac and Hermes host do not need to be on the same Wi-Fi. Local network, public IP, VPN, or Tailscale all work as long as standard ssh from this Mac reaches the host.";
+"Overrides" = "Overrides";
+"SSH user and port are optional. Leave them empty to keep the remote defaults." = "SSH user and port are optional. Leave them empty to keep the remote defaults.";
+"The SSH alias currently takes priority over Host. The Host value is preserved in the profile, but it will be ignored while the alias is present." = "The SSH alias currently takes priority over Host. The Host value is preserved in the profile, but it will be ignored while the alias is present.";
+"Leave it empty for the default Hermes home at `~/.hermes`. Set a profile name like `researcher` to target `~/.hermes/profiles/researcher` on the same host." = "Leave it empty for the default Hermes home at `~/.hermes`. Set a profile name like `researcher` to target `~/.hermes/profiles/researcher` on the same host.";
+"Examples" = "Examples";
+"A few common patterns that work well with Hermes Desktop." = "A few common patterns that work well with Hermes Desktop.";
+"Raspberry Pi" = "Raspberry Pi";
+"Remote Mac" = "Remote Mac";
+"VPS" = "VPS";
+"Alias `hermes-home` or host `raspberrypi.local`" = "Alias `hermes-home` or host `raspberrypi.local`";
+"Host `mac-studio.local`" = "Host `mac-studio.local`";
+"Host `vps.example.com` or `203.0.113.10`" = "Host `vps.example.com` or `203.0.113.10`";
+"Host `localhost` or a local SSH alias" = "Host `localhost` or a local SSH alias";
+
+/* ==================== Overview ==================== */
+"See which host Hermes is connected to, where its files live, and which source powers Sessions, Cron Jobs, and Usage." = "See which host Hermes is connected to, where its files live, and which source powers Sessions, Cron Jobs, and Usage.";
+"Discovering the active Hermes workspace…" = "Discovering the active Hermes workspace…";
+"Discovery failed" = "Discovery failed";
+"Current Host" = "Current Host";
+"The active SSH connection for this workspace." = "The active SSH connection for this workspace.";
+"The active Hermes profile and the folders it resolves to on the current host." = "The active Hermes profile and the folders it resolves to on the current host.";
+"Status" = "Status";
+"Quick checks to confirm the active host is ready for files, sessions, usage, and terminal access." = "Quick checks to confirm the active host is ready for files, sessions, usage, and terminal access.";
+"Workspace Files" = "Workspace Files";
+"Expected Hermes files and folders on the active host." = "Expected Hermes files and folders on the active host.";
+"Session History" = "Session History";
+"The source Hermes uses for Sessions and Usage on the active host." = "The source Hermes uses for Sessions and Usage on the active host.";
+"Connection" = "Connection";
+"Last connected" = "Last connected";
+"Active profile" = "Active profile";
+"Home folder" = "Home folder";
+"Hermes home" = "Hermes home";
+"Discovered profiles" = "Discovered profiles";
+"Needs attention" = "Needs attention";
+"All %lld checks passed" = "All %lld checks passed";
+"%lld of %lld checks passed" = "%lld of %lld checks passed";
+"Selected profile home" = "Selected profile home";
+"Workspace files" = "Workspace files";
+"Sessions/Usage source" = "Sessions/Usage source";
+"User file" = "User file";
+"Memory file" = "Memory file";
+"Soul file" = "Soul file";
+"Session artifacts" = "Session artifacts";
+"Cron jobs registry" = "Cron jobs registry";
+"SQLite database detected" = "SQLite database detected";
+"Hermes can read structured session and message records directly." = "Hermes can read structured session and message records directly.";
+"Using transcript files" = "Using transcript files";
+"No SQLite database was found, so Hermes will fall back to session transcript artifacts when available." = "No SQLite database was found, so Hermes will fall back to session transcript artifacts when available.";
+"Database path" = "Database path";
+"Sessions table" = "Sessions table";
+"Messages table" = "Messages table";
+"Transcript folder" = "Transcript folder";
+
+/* ==================== Sessions ==================== */
+"Browse the recent Hermes conversations discovered on the active host." = "Browse the recent Hermes conversations discovered on the active host.";
+"Loading sessions…" = "Loading sessions…";
+"Unable to load sessions" = "Unable to load sessions";
+"No matching sessions" = "No matching sessions";
+"Try searching by session name, ID, or preview text." = "Try searching by session name, ID, or preview text.";
+"No sessions found" = "No sessions found";
+"No readable Hermes sessions were discovered yet for this SSH target." = "No readable Hermes sessions were discovered yet for this SSH target.";
+"Select a session to inspect its transcript, metadata and last activity." = "Select a session to inspect its transcript, metadata and last activity.";
+"Load More" = "Load More";
+"Search sessions" = "Search sessions";
+"%lld messages" = "%lld messages";
+"Started %@" = "Started %@";
+"Active %@" = "Active %@";
+"Stored Sessions (%lld)" = "Stored Sessions (%lld)";
+"Matching Sessions (%lld)" = "Matching Sessions (%lld)";
+"Started" = "Started";
+"Last active" = "Last active";
+"No transcript entries" = "No transcript entries";
+"This session has no readable message rows yet." = "This session has no readable message rows yet.";
+"Transcript" = "Transcript";
+"Messages are shown in the order Hermes stored them for this session." = "Messages are shown in the order Hermes stored them for this session.";
+"Select a session" = "Select a session";
+"Choose a Hermes session from the active host to inspect its transcript." = "Choose a Hermes session from the active host to inspect its transcript.";
+"No text payload" = "No text payload";
+"Metadata" = "Metadata";
+"Delete session" = "Delete session";
+"Delete this session?" = "Delete this session?";
+"\"%@\" will be removed from Hermes Desktop and deleted on the remote Hermes host as well. This action cannot be undone." = "\"%@\" will be removed from Hermes Desktop and deleted on the remote Hermes host as well. This action cannot be undone.";
+
+/* Session roles (used via NSLocalizedString in SessionModels.swift) */
+"role.assistant" = "Assistant";
+"role.user" = "User";
+"role.system" = "System";
+"role.event" = "Event";
+
+/* ==================== Files ==================== */
+"Canonical Files" = "Canonical Files";
+"Edits are written remotely with atomic replace semantics and conflict checks over SSH." = "Edits are written remotely with atomic replace semantics and conflict checks over SSH.";
+"File" = "File";
+"Reload from Remote" = "Reload from Remote";
+"Unsaved changes" = "Unsaved changes";
+"Saved %@" = "Saved %@";
+"Discard unsaved edits in this file?" = "Discard unsaved edits in this file?";
+"Reload from remote and discard local edits?" = "Reload from remote and discard local edits?";
+"This will replace the local unsaved changes with the current remote file content." = "This will replace the local unsaved changes with the current remote file content.";
+
+/* ==================== Skills ==================== */
+"Browse the Hermes skill library discovered on the active host." = "Browse the Hermes skill library discovered on the active host.";
+"Loading skills…" = "Loading skills…";
+"Unable to load skills" = "Unable to load skills";
+"No skills found" = "No skills found";
+"No readable SKILL.md files were discovered under %@ on this SSH target." = "No readable SKILL.md files were discovered under %@ on this SSH target.";
+"Select a skill to inspect its metadata, related assets and full SKILL.md content." = "Select a skill to inspect its metadata, related assets and full SKILL.md content.";
+"No matching skills" = "No matching skills";
+"Try searching by skill name or category." = "Try searching by skill name or category.";
+"Search skills" = "Search skills";
+"Discovered Skills (%lld)" = "Discovered Skills (%lld)";
+"Discovered Skills (%lld of %lld)" = "Discovered Skills (%lld of %lld)";
+"No description in frontmatter" = "No description in frontmatter";
+"Description" = "Description";
+"Frontmatter summary for the selected skill." = "Frontmatter summary for the selected skill.";
+"SKILL.md" = "SKILL.md";
+"Full source content loaded from the active host." = "Full source content loaded from the active host.";
+"Optional frontmatter fields and companion directories discovered for this skill." = "Optional frontmatter fields and companion directories discovered for this skill.";
+"Loading skill detail…" = "Loading skill detail…";
+"Unable to load skill detail" = "Unable to load skill detail";
+"Select a skill" = "Select a skill";
+"Choose a Hermes skill from the active host to inspect its metadata and full SKILL.md." = "Choose a Hermes skill from the active host to inspect its metadata and full SKILL.md.";
+"Create New Skill" = "Create New Skill";
+"Edit SKILL.md" = "Edit SKILL.md";
+"Slug" = "Slug";
+"Category" = "Category";
+"Relative path" = "Relative path";
+"Version" = "Version";
+"Root" = "Root";
+"Tags" = "Tags";
+"Related skills" = "Related skills";
+"Companion directories" = "Companion directories";
+"Basics" = "Basics";
+"Use plain language. The app will turn these fields into the right SKILL.md frontmatter and folder path." = "Use plain language. The app will turn these fields into the right SKILL.md frontmatter and folder path.";
+"Skill Name" = "Skill Name";
+"Short Description" = "Short Description";
+"Category Path" = "Category Path";
+"Folder Name" = "Folder Name";
+"Remote path" = "Remote path";
+"Optional tags and related skills help Hermes and the user understand the role of the skill." = "Optional tags and related skills help Hermes and the user understand the role of the skill.";
+"Related Skills" = "Related Skills";
+"Companion Folders" = "Companion Folders";
+"Create references/ for longer docs or domain notes" = "Create references/ for longer docs or domain notes";
+"Create scripts/ for deterministic helpers" = "Create scripts/ for deterministic helpers";
+"Create templates/ for reusable output files" = "Create templates/ for reusable output files";
+"Ensure references/ exists" = "Ensure references/ exists";
+"Ensure scripts/ exists" = "Ensure scripts/ exists";
+"Ensure templates/ exists" = "Ensure templates/ exists";
+"Instructions" = "Instructions";
+"Write the actual guidance Hermes should follow once the skill triggers." = "Write the actual guidance Hermes should follow once the skill triggers.";
+"Generated Preview" = "Generated Preview";
+"This is the SKILL.md the app will write on the remote Hermes host." = "This is the SKILL.md the app will write on the remote Hermes host.";
+"Editing Scope" = "Editing Scope";
+"The existing skill path stays fixed while you edit the raw SKILL.md source." = "The existing skill path stays fixed while you edit the raw SKILL.md source.";
+"Edit the existing skill source directly. Saves are atomic and checked against the last loaded remote version." = "Edit the existing skill source directly. Saves are atomic and checked against the last loaded remote version.";
+"Create a new Hermes skill from a guided form instead of writing YAML frontmatter and folder structure by hand." = "Create a new Hermes skill from a guided form instead of writing YAML frontmatter and folder structure by hand.";
+"Update the existing SKILL.md directly while keeping the remote path fixed and protected by a conflict check." = "Update the existing SKILL.md directly while keeping the remote path fixed and protected by a conflict check.";
+"Create Skill" = "Create Skill";
+
+/* ==================== Cron Jobs ==================== */
+"Browse, create and maintain Hermes jobs discovered on the active host." = "Browse, create and maintain Hermes jobs discovered on the active host.";
+"All" = "All";
+"Filter" = "Filter";
+"Create a new cron job" = "Create a new cron job";
+"Search jobs" = "Search jobs";
+"Loading cron jobs…" = "Loading cron jobs…";
+"Unable to load cron jobs" = "Unable to load cron jobs";
+"No cron jobs found" = "No cron jobs found";
+"No saved Hermes cron jobs were discovered under %@ on this SSH target." = "No saved Hermes cron jobs were discovered under %@ on this SSH target.";
+"Select a job to inspect its schedule, payload and recent activity." = "Select a job to inspect its schedule, payload and recent activity.";
+"No matching cron jobs" = "No matching cron jobs";
+"Try searching by title, schedule, skill, model, delivery target or prompt text." = "Try searching by title, schedule, skill, model, delivery target or prompt text.";
+"Remove cron job?" = "Remove cron job?";
+"\"%@\" will be removed from the remote Hermes scheduler. This cannot be undone." = "\"%@\" will be removed from the remote Hermes scheduler. This cannot be undone.";
+"Last run %@" = "Last run %@";
+"Next run %@" = "Next run %@";
+"Cron Jobs (%lld)" = "Cron Jobs (%lld)";
+"Cron Jobs (%lld of %lld)" = "Cron Jobs (%lld of %lld)";
+"Select a cron job" = "Select a cron job";
+"Choose a Hermes cron job from the active host to inspect it, or create a new one." = "Choose a Hermes cron job from the active host to inspect it, or create a new one.";
+"Create Cron Job" = "Create Cron Job";
+"Last Error" = "Last Error";
+"Most recent execution failure reported by Hermes." = "Most recent execution failure reported by Hermes.";
+"Details" = "Details";
+"Schedule metadata and recent execution markers reported by Hermes." = "Schedule metadata and recent execution markers reported by Hermes.";
+"Skills" = "Skills";
+"Skills attached to this cron job payload." = "Skills attached to this cron job payload.";
+"Prompt" = "Prompt";
+"Payload Hermes will run for this scheduled job." = "Payload Hermes will run for this scheduled job.";
+"No prompt payload saved for this job." = "No prompt payload saved for this job.";
+"Schedule" = "Schedule";
+"Timezone" = "Timezone";
+"Next run" = "Next run";
+"Last run" = "Last run";
+"Created" = "Created";
+"Last status" = "Last status";
+"Provider" = "Provider";
+"Base URL" = "Base URL";
+"Delivery" = "Delivery";
+"Remaining runs" = "Remaining runs";
+"Planned runs" = "Planned runs";
+"Origin" = "Origin";
+"Delivery error" = "Delivery error";
+"Run Now" = "Run Now";
+"Resume" = "Resume";
+"Pause" = "Pause";
+"New Cron Job" = "New Cron Job";
+"Edit Cron Job" = "Edit Cron Job";
+"Create Job" = "Create Job";
+"Save Changes" = "Save Changes";
+"The app will write the right cron job structure into `%@` on the active host." = "The app will write the right cron job structure into `%@` on the active host.";
+"Define what this cron job should do." = "Define what this cron job should do.";
+"Choose whether Hermes should run this once or on a recurring cadence." = "Choose whether Hermes should run this once or on a recurring cadence.";
+"Delivery is required. Skills and model overrides remain optional." = "Delivery is required. Skills and model overrides remain optional.";
+"Title" = "Title";
+"Frequency" = "Frequency";
+"Delay" = "Delay";
+"Unit" = "Unit";
+"Run At" = "Run At";
+"Every" = "Every";
+"Minute" = "Minute";
+"Hour" = "Hour";
+"Day" = "Day";
+"Day of Month" = "Day of Month";
+"Preview" = "Preview";
+"Custom Target" = "Custom Target";
+"Model" = "Model";
+"Use full Hermes target syntax such as `telegram:-1001234567890`, `telegram:-1001234567890:17585`, or another supported platform target." = "Use full Hermes target syntax such as `telegram:-1001234567890`, `telegram:-1001234567890:17585`, or another supported platform target.";
+"`Local Only` saves cron output under `%@` on the active host." = "`Local Only` saves cron output under `%@` on the active host.";
+
+/* Cron job states (used via NSLocalizedString in CronJobModels.swift) */
+"cron.state.active" = "Active";
+"cron.state.paused" = "Paused";
+"cron.state.running" = "Running";
+"cron.state.failed" = "Failed";
+"cron.state.error" = "Error";
+"cron.state.active.disabled" = "Paused";
+
+/* Cron schedule presets (used via NSLocalizedString) */
+"cron.preset.once_after" = "One Time After";
+"cron.preset.once_at" = "One Time At";
+"cron.preset.every" = "Every";
+"cron.preset.hourly" = "Hourly";
+"cron.preset.daily" = "Daily";
+"cron.preset.weekdays" = "Weekdays";
+"cron.preset.weekly" = "Weekly";
+"cron.preset.monthly" = "Monthly";
+"cron.preset.custom" = "Custom";
+
+/* Cron interval units */
+"cron.unit.minutes" = "Minutes";
+"cron.unit.hours" = "Hours";
+"cron.unit.days" = "Days";
+
+/* Cron delivery */
+"cron.delivery.local" = "Local Only";
+"cron.delivery.origin" = "Origin Chat";
+"cron.delivery.telegram" = "Telegram Home";
+"cron.delivery.discord" = "Discord Home";
+"cron.delivery.slack" = "Slack Home";
+"cron.delivery.whatsapp" = "WhatsApp Home";
+
+/* ==================== Terminal ==================== */
+"New Tab" = "New Tab";
+"No terminal tab" = "No terminal tab";
+"Create a tab to start a real SSH shell for the active host." = "Create a tab to start a real SSH shell for the active host.";
+"Other Profile" = "Other Profile";
+"Close tab" = "Close tab";
+"Customize terminal colors" = "Customize terminal colors";
+"Theme" = "Theme";
+"Terminal Theme" = "Terminal Theme";
+"Pick a preset for a coherent terminal look, then fine-tune background and text colors live if you want." = "Pick a preset for a coherent terminal look, then fine-tune background and text colors live if you want.";
+"Quick Presets" = "Quick Presets";
+"Use System" = "Use System";
+"Custom Colors" = "Custom Colors";
+"ANSI accents follow %@." = "ANSI accents follow %@.";
+"Custom colors update the running terminal immediately. Preset ANSI colors stay anchored so git output, prompts, and tools keep a readable palette." = "Custom colors update the running terminal immediately. Preset ANSI colors stay anchored so git output, prompts, and tools keep a readable palette.";
+"Background" = "Background";
+"Text" = "Text";
+
+/* ==================== Usage ==================== */
+"The main cards and charts on this page are for the active Hermes profile. When more than one profile is discovered on the same host, a separate panel shows total token consumption across all profiles." = "The main cards and charts on this page are for the active Hermes profile. When more than one profile is discovered on the same host, a separate panel shows total token consumption across all profiles.";
+"Loading usage totals…" = "Loading usage totals…";
+"Unable to load usage" = "Unable to load usage";
+"Usage unavailable" = "Usage unavailable";
+"No readable Hermes session database is currently available for the active host." = "No readable Hermes session database is currently available for the active host.";
+"Active Profile" = "Active Profile";
+"Everything below stays scoped to the currently selected Hermes profile." = "Everything below stays scoped to the currently selected Hermes profile.";
+"Profile" = "Profile";
+"Current Total" = "Current Total";
+"Input Tokens" = "Input Tokens";
+"Output Tokens" = "Output Tokens";
+"All Profiles Total Tokens" = "All Profiles Total Tokens";
+"This panel is host-wide. It combines total token consumption across all readable Hermes profiles on the active host, including input, output, cache, and reasoning. The other cards on this page remain scoped to the active profile." = "This panel is host-wide. It combines total token consumption across all readable Hermes profiles on the active host, including input, output, cache, and reasoning. The other cards on this page remain scoped to the active profile.";
+"Not enough profile data yet" = "Not enough profile data yet";
+"At least two profiles need readable usage data before the cross-profile breakdown becomes meaningful." = "At least two profiles need readable usage data before the cross-profile breakdown becomes meaningful.";
+"Readable Profiles" = "Readable Profiles";
+"Host-wide Total" = "Host-wide Total";
+"Active Profile Share" = "Active Profile Share";
+"Search" = "Search";
+"Close search" = "Close search";

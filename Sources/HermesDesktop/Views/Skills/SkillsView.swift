@@ -133,7 +133,7 @@ struct SkillsView: View {
         )
     }
 
-    private var panelTitle: String {
+    private var panelTitle: LocalizedStringKey {
         let total = appState.skills.count
         let filtered = filteredSkills.count
 

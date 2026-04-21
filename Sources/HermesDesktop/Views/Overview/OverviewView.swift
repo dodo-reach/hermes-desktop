@@ -201,8 +201,8 @@ struct OverviewView: View {
     private func statusPanel(for overview: RemoteDiscovery) -> some View {
         let statusItems = makeStatusItems(for: overview)
         let readyCount = statusItems.filter(\.isReady).count
-        let summaryTitle = readyCount == statusItems.count ? "Ready" : "Needs attention"
-        let summaryDetail = readyCount == statusItems.count
+        let summaryTitle: LocalizedStringKey = readyCount == statusItems.count ? "Ready" : "Needs attention"
+        let summaryDetail: LocalizedStringKey = readyCount == statusItems.count
             ? "All \(statusItems.count) checks passed"
             : "\(readyCount) of \(statusItems.count) checks passed"
 

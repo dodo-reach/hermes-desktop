@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 struct SkillListResponse: Codable {
     let ok: Bool
@@ -169,16 +170,16 @@ enum SkillEditorMode: Identifiable, Equatable {
         }
     }
 
-    var title: String {
+    var title: LocalizedStringKey {
         switch self {
         case .create:
-            return "New Skill"
+            return "Create New Skill"
         case .edit:
             return "Edit SKILL.md"
         }
     }
 
-    var actionTitle: String {
+    var actionTitle: LocalizedStringKey {
         switch self {
         case .create:
             return "Create Skill"

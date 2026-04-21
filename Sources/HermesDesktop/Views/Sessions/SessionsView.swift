@@ -143,7 +143,7 @@ struct SessionsView: View {
         )
     }
 
-    private var panelTitle: String {
+    private var panelTitle: LocalizedStringKey {
         if appState.sessionSearchQuery.isEmpty {
             return "Stored Sessions (\(appState.totalSessionsCount))"
         }
