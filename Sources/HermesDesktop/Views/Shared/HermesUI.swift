@@ -24,11 +24,11 @@ struct HermesPageHeader<Accessory: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(title)
+                Text(L10n.string(title))
                     .font(.largeTitle)
                     .fontWeight(.semibold)
 
-                Text(subtitle)
+                Text(L10n.string(subtitle))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -61,12 +61,12 @@ struct HermesSurfacePanel<Content: View>: View {
             if title != nil || subtitle != nil {
                 VStack(alignment: .leading, spacing: 6) {
                     if let title {
-                        Text(title)
+                        Text(L10n.string(title))
                             .font(.headline)
                     }
 
                     if let subtitle {
-                        Text(subtitle)
+                        Text(L10n.string(subtitle))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -118,7 +118,7 @@ struct HermesLoadingState: View {
             ProgressView()
                 .controlSize(.regular)
 
-            Text(label)
+            Text(L10n.string(label))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -168,7 +168,7 @@ struct HermesBadge: View {
     var isMonospaced = false
 
     var body: some View {
-        Text(text)
+        Text(L10n.string(text))
             .font(isMonospaced ? .system(.caption, design: .monospaced).weight(.semibold) : .caption.weight(.semibold))
             .foregroundStyle(tint)
             .lineLimit(1)
@@ -187,7 +187,7 @@ struct HermesLabeledValue: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label)
+            Text(L10n.string(label))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

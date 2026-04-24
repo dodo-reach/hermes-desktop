@@ -155,7 +155,7 @@ private struct GuideRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label)
+            Text(L10n.string(label))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

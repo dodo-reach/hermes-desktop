@@ -225,7 +225,7 @@ private struct EditorField<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label)
+            Text(L10n.string(label))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -242,10 +242,10 @@ private struct ConnectionHintRow: View {
     var body: some View {
         HermesInsetSurface {
             VStack(alignment: .leading, spacing: 6) {
-                Text(title)
+                Text(L10n.string(title))
                     .font(.headline)
 
-                Text(detail)
+                Text(L10n.string(detail))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -261,7 +261,7 @@ private struct ExampleValueRow: View {
     var body: some View {
         HermesInsetSurface {
             VStack(alignment: .leading, spacing: 4) {
-                Text(label)
+                Text(L10n.string(label))
                     .font(.headline)
 
                 Text(value)

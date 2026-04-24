@@ -16,6 +16,7 @@ ICONSET_PATH="$ROOT_DIR/packaging/AppIcon.iconset"
 ICNS_PATH="$ROOT_DIR/packaging/HermesDesktop.icns"
 PLIST_PATH="$ROOT_DIR/packaging/Info.plist"
 SHADER_SOURCE_PATH="$ROOT_DIR/Vendor/SwiftTerm/Sources/SwiftTerm/Apple/Metal/Shaders.metal"
+LOCALIZATION_SOURCE_PATH="$ROOT_DIR/Sources/HermesDesktop/Resources"
 UNIVERSAL_EXECUTABLE_PATH="$SCRATCH_PATH/${APP_NAME}-universal"
 
 if [[ -n "${HERMES_MAC_ARCHS:-}" ]]; then
@@ -195,6 +196,9 @@ cp "$PLIST_PATH" "$CONTENTS_PATH/Info.plist"
 stamp_plist_versions "$CONTENTS_PATH/Info.plist"
 cp "$ICNS_PATH" "$RESOURCES_PATH/AppIcon.icns"
 cp "$SHADER_SOURCE_PATH" "$RESOURCES_PATH/Shaders.metal"
+if [[ -d "$LOCALIZATION_SOURCE_PATH" ]]; then
+    find "$LOCALIZATION_SOURCE_PATH" -maxdepth 1 -name "*.lproj" -type d -exec cp -R {} "$RESOURCES_PATH/" \;
+fi
 codesign --force --deep --sign - "$BUNDLE_PATH" >/dev/null
 codesign --verify --deep --strict "$BUNDLE_PATH" >/dev/null
 

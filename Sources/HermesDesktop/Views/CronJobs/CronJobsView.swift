@@ -1079,7 +1079,7 @@ private struct CronFormField<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label)
+            Text(L10n.string(label))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1113,7 +1113,7 @@ private struct CronMetaLabel: View {
     let text: String
 
     var body: some View {
-        Text(text)
+        Text(L10n.string(text))
             .font(.caption)
             .foregroundStyle(.secondary)
     }
