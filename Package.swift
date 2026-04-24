@@ -23,7 +23,10 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ],
-            path: "Sources/HermesDesktop"
+            path: "Sources/HermesDesktop",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "HermesDesktopTests",

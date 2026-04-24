@@ -397,10 +397,10 @@ private struct OverviewPanel<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(title)
+                Text(L10n.string(title))
                     .font(.headline)
 
-                Text(subtitle)
+                Text(L10n.string(subtitle))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -430,7 +430,7 @@ private struct OverviewDetailBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label)
+            Text(L10n.string(label))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -459,7 +459,7 @@ private struct OverviewPathRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                Text(title)
+                Text(L10n.string(title))
                     .font(.headline)
 
                 OverviewBadge(text: badge, tint: .secondary)
@@ -499,12 +499,12 @@ private struct OverviewStatusRow: View {
             Image(systemName: item.isReady ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                 .foregroundStyle(item.isReady ? .green : .orange)
 
-            Text(item.title)
+            Text(L10n.string(item.title))
                 .font(.subheadline)
 
             Spacer()
 
-            Text(item.isReady ? "Ready" : "Missing")
+            Text(L10n.string(item.isReady ? "Ready" : "Missing"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(item.isReady ? .green : .orange)
         }
@@ -516,7 +516,7 @@ private struct OverviewBadge: View {
     let tint: Color
 
     var body: some View {
-        Text(text)
+        Text(L10n.string(text))
             .font(.caption.weight(.semibold))
             .foregroundStyle(tint)
             .padding(.horizontal, 8)

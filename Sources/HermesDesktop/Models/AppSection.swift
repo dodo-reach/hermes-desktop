@@ -13,6 +13,10 @@ enum AppSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
+        L10n.string(rawTitle)
+    }
+
+    private var rawTitle: String {
         switch self {
         case .connections:
             "Connections"

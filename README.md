@@ -84,6 +84,8 @@ for the public README.
 - cron job browsing, creation, editing, pause, resume, run-now, and deletion
   for the canonical remote scheduler state in `~/.hermes/cron/jobs.json`,
   including schedule, model, attached skills, and delivery target details
+- app localization resources for English, Simplified Chinese, and Russian in a
+  single macOS bundle that follows the user's preferred system language
 - universal packaging for Apple Silicon and Intel Macs from the same build flow
 
 If Hermes runs there and SSH already works, Hermes Desktop will usually meet you
@@ -452,6 +454,8 @@ source of truth.
 - [x] native cron job workflows for the canonical remote scheduler state
 - [x] a real embedded SSH terminal with tabs, appearance controls, and coherent
   multi-profile workspace behavior
+- [x] English, Simplified Chinese, and Russian localization resources packaged
+  in the app bundle
 - [x] universal macOS release packaging for Apple Silicon and Intel, with
   bundle version stamping in the packaging flow
 
