@@ -244,7 +244,10 @@ struct UsageView: View {
 
                     if !breakdown.unavailableProfiles.isEmpty {
                         HermesInsetSurface {
-                            Text("Unavailable profiles are excluded from the donut: \(breakdown.unavailableProfiles.map(\.profileName).joined(separator: ", ")).")
+                            Text(L10n.string(
+                                "Unavailable profiles are excluded from the donut: %@.",
+                                breakdown.unavailableProfiles.map(\.profileName).joined(separator: ", ")
+                            ))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -372,10 +375,10 @@ struct UsageView: View {
             HermesInsetSurface {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Input vs Output")
+                        Text(L10n.string("Input vs Output"))
                             .font(.headline)
 
-                        Text("The visual balance between stored input and output token consumption.")
+                        Text(L10n.string("The visual balance between stored input and output token consumption."))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -513,7 +516,10 @@ struct UsageView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                     .foregroundStyle(color(for: session.totalTokens, maxTokens: maxTokens))
                     .accessibilityLabel(session.title ?? session.id)
-                    .accessibilityValue("\(UsageNumberFormatter.string(for: session.totalTokens)) total tokens")
+                    .accessibilityValue(L10n.string(
+                        "%@ total tokens",
+                        UsageNumberFormatter.string(for: session.totalTokens)
+                    ))
                 }
                 .chartXAxis {
                     AxisMarks(values: .stride(by: 10)) { value in
@@ -543,8 +549,8 @@ struct UsageView: View {
                         }
                     }
                 }
-                .chartXAxisLabel("Recent sessions", position: .bottom, alignment: .center)
-                .chartYAxisLabel("Tokens", position: .leading)
+                .chartXAxisLabel(L10n.string("Recent sessions"), position: .bottom, alignment: .center)
+                .chartYAxisLabel(L10n.string("Tokens"), position: .leading)
                 .chartLegend(.hidden)
                 .frame(height: 260)
 
@@ -567,7 +573,7 @@ struct UsageView: View {
 
                         Spacer(minLength: 12)
 
-                        Text("Older on the left, newer on the right")
+                        Text(L10n.string("Older on the left, newer on the right"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -665,19 +671,22 @@ private struct UsageProfileDonutChart: View {
     var body: some View {
         Chart(Array(breakdown.chartProfiles.enumerated()), id: \.element.id) { index, profile in
             SectorMark(
-                angle: .value("All Tokens", profile.allTokenCategoriesTotal),
+                angle: .value(L10n.string("All Tokens"), profile.allTokenCategoriesTotal),
                 innerRadius: .ratio(0.62),
                 angularInset: 2
             )
             .cornerRadius(6)
             .foregroundStyle(colors[index % colors.count])
             .accessibilityLabel(profile.profileName)
-            .accessibilityValue("\(UsageNumberFormatter.string(for: profile.allTokenCategoriesTotal)) total tokens")
+            .accessibilityValue(L10n.string(
+                "%@ total tokens",
+                UsageNumberFormatter.string(for: profile.allTokenCategoriesTotal)
+            ))
         }
         .chartLegend(.hidden)
         .overlay {
             VStack(spacing: 6) {
-                Text("Host-wide")
+                Text(L10n.string("Host-wide"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
@@ -687,7 +696,7 @@ private struct UsageProfileDonutChart: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
 
-                Text("all profiles total")
+                Text(L10n.string("all profiles total"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -753,10 +762,10 @@ private struct UsageProfileLegendRow: View {
 
     private var profileBreakdownLine: String {
         [
-            "Input \(UsageNumberFormatter.shortString(for: profile.inputTokens))",
-            "Output \(UsageNumberFormatter.shortString(for: profile.outputTokens))",
-            "Cache \(UsageNumberFormatter.shortString(for: profile.cacheTokensTotal))",
-            "Reasoning \(UsageNumberFormatter.shortString(for: profile.reasoningTokens))"
+            L10n.string("Input %@", UsageNumberFormatter.shortString(for: profile.inputTokens)),
+            L10n.string("Output %@", UsageNumberFormatter.shortString(for: profile.outputTokens)),
+            L10n.string("Cache %@", UsageNumberFormatter.shortString(for: profile.cacheTokensTotal)),
+            L10n.string("Reasoning %@", UsageNumberFormatter.shortString(for: profile.reasoningTokens))
         ].joined(separator: " · ")
     }
 }
@@ -768,7 +777,7 @@ private struct UsageMiniStat: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
+            Text(L10n.string(title))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(tint == .primary ? .secondary : tint)
 
@@ -799,7 +808,7 @@ private struct UsageSharePill: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
+            Text(L10n.string(title))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -893,7 +902,7 @@ private struct UsageTopSessionRow: View {
                     .font(.headline)
                     .monospacedDigit()
 
-                Text("tokens")
+                Text(L10n.string("tokens"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -924,7 +933,7 @@ private struct UsageTopSessionPlaceholderRow: View {
                 .frame(width: 24, height: 24)
                 .background(Color.secondary.opacity(0.08), in: Circle())
 
-            Text(title)
+            Text(L10n.string(title))
                 .font(.headline)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -937,7 +946,7 @@ private struct UsageTopSessionPlaceholderRow: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
 
-                Text("tokens")
+                Text(L10n.string("tokens"))
                     .font(.caption)
                     .foregroundStyle(.secondary.opacity(0.8))
             }
@@ -966,13 +975,16 @@ private struct UsageTopModelRow: View {
 
     private var accessoryText: String? {
         if model.cacheAndReasoningTokens > 0 {
-            return "+\(UsageNumberFormatter.shortString(for: model.cacheAndReasoningTokens)) cache/reasoning"
+            return L10n.string("+%@ cache/reasoning", UsageNumberFormatter.shortString(for: model.cacheAndReasoningTokens))
         }
         return nil
     }
 
     private var metadataText: String {
-        var parts = [providerText, "\(UsageNumberFormatter.string(for: model.sessionCount)) sessions"]
+        var parts = [
+            providerText,
+            L10n.string("%@ sessions", UsageNumberFormatter.string(for: model.sessionCount))
+        ]
         if let accessoryText {
             parts.append(accessoryText)
         }
@@ -980,7 +992,7 @@ private struct UsageTopModelRow: View {
     }
 
     private var valueDetailText: String {
-        "tokens · \(UsageNumberFormatter.usdString(for: model.estimatedCostUSD))"
+        L10n.string("tokens · %@", UsageNumberFormatter.usdString(for: model.estimatedCostUSD))
     }
 
     var body: some View {
@@ -1045,7 +1057,7 @@ private struct UsageTopModelPlaceholderRow: View {
                 .background(Color.secondary.opacity(0.08), in: Circle())
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(title)
+                Text(L10n.string(title))
                     .font(.headline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1063,7 +1075,7 @@ private struct UsageTopModelPlaceholderRow: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
 
-                Text("tokens · -")
+                Text(L10n.string("tokens · -"))
                     .font(.caption)
                     .foregroundStyle(.secondary.opacity(0.8))
             }
@@ -1092,7 +1104,7 @@ private struct UsageChartLegendItem: View {
                 .fill(color)
                 .frame(width: 16, height: 8)
 
-            Text(title)
+            Text(L10n.string(title))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

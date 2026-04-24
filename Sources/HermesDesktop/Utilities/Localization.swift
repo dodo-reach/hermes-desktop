@@ -9,4 +9,8 @@ enum L10n {
 
         return NSLocalizedString(key, bundle: .module, value: key, comment: "")
     }
+
+    static func string(_ key: String, _ arguments: CVarArg...) -> String {
+        String(format: string(key), arguments: arguments)
+    }
 }
