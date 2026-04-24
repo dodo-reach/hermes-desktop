@@ -220,7 +220,7 @@ private struct ConnectionCard: View {
                 }
 
                 if let lastConnectedAt = connection.lastConnectedAt {
-                    Text("Last connected \(DateFormatters.relativeFormatter().localizedString(for: lastConnectedAt, relativeTo: .now))")
+                    Text(L10n.string("Last connected %@", DateFormatters.relativeFormatter().localizedString(for: lastConnectedAt, relativeTo: .now)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

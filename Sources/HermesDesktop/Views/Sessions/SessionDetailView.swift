@@ -35,7 +35,7 @@ struct SessionDetailView: View {
                                     }
 
                                     if let count = session.messageCount {
-                                        HermesBadge(text: "\(count) messages", tint: .accentColor)
+                                        HermesBadge(text: L10n.string("%@ messages", "\(count)"), tint: .accentColor)
                                     }
 
                                     Button {
@@ -57,8 +57,8 @@ struct SessionDetailView: View {
                                         .background(Color.red.opacity(0.12), in: Capsule())
                                     }
                                     .buttonStyle(.plain)
-                                    .help("Delete session")
-                                    .accessibilityLabel("Delete session")
+                                    .help(L10n.string("Delete session"))
+                                    .accessibilityLabel(L10n.string("Delete session"))
                                     .disabled(appState.isDeletingSession)
                                 }
                             }
@@ -149,7 +149,10 @@ struct SessionDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { session in
-            Text("“\(session.resolvedTitle)” will be removed from Hermes Desktop and deleted on the remote Hermes host as well. This action cannot be undone.")
+            Text(L10n.string(
+                "“%@” will be removed from Hermes Desktop and deleted on the remote Hermes host as well. This action cannot be undone.",
+                session.resolvedTitle
+            ))
         }
     }
 }
@@ -181,14 +184,14 @@ private struct MessageCard: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Text("No text payload")
+                    Text(L10n.string("No text payload"))
                         .foregroundStyle(.secondary)
                         .italic()
                 }
 
                 if let metadata = message.displayMetadata, !metadata.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Metadata")
+                        Text(L10n.string("Metadata"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 

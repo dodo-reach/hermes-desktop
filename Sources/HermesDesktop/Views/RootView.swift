@@ -40,7 +40,7 @@ struct RootView: View {
             Alert(
                 title: Text(alert.title),
                 message: Text(alert.message),
-                dismissButton: .default(Text("OK"))
+                dismissButton: .default(Text(L10n.string("OK")))
             )
         }
         .alert("Discard unsaved changes?", isPresented: $appState.showDiscardChangesAlert) {
@@ -51,7 +51,7 @@ struct RootView: View {
                 appState.stayOnCurrentSection()
             }
         } message: {
-            Text("USER.md, MEMORY.md, or SOUL.md has unsaved edits.")
+            Text(L10n.string("USER.md, MEMORY.md, or SOUL.md has unsaved edits."))
         }
     }
 
@@ -121,7 +121,7 @@ private struct WorkspaceSidebarCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Hermes Profile")
+            Text(L10n.string("Hermes Profile"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 

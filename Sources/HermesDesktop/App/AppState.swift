@@ -90,10 +90,10 @@ final class AppState: ObservableObject {
             .compactMap { $0 }
             .sink { [weak self] message in
                 self?.activeAlert = AppAlert(
-                    title: "Local storage error",
+                    title: L10n.string("Local storage error"),
                     message: message
                 )
-                self?.setStatusMessage("Local storage error")
+                self?.setStatusMessage(L10n.string("Local storage error"))
             }
             .store(in: &cancellables)
 
@@ -173,8 +173,8 @@ final class AppState: ObservableObject {
 
         if isActiveConnection && isChangingWorkspaceScope && hasUnsavedFileChanges {
             activeAlert = AppAlert(
-                title: "Unsaved file edits",
-                message: "Save or discard USER.md, MEMORY.md, and SOUL.md before switching the Hermes profile for the active host."
+                title: L10n.string("Unsaved file edits"),
+                message: L10n.string("Save or discard USER.md, MEMORY.md, and SOUL.md before switching the Hermes profile for the active host.")
             )
             return
         }
@@ -199,8 +199,8 @@ final class AppState: ObservableObject {
 
         if hasUnsavedFileChanges {
             activeAlert = AppAlert(
-                title: "Unsaved file edits",
-                message: "Save or discard USER.md, MEMORY.md, and SOUL.md before switching Hermes profiles."
+                title: L10n.string("Unsaved file edits"),
+                message: L10n.string("Save or discard USER.md, MEMORY.md, and SOUL.md before switching Hermes profiles.")
             )
             return
         }

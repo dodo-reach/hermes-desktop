@@ -279,17 +279,17 @@ struct SkillEditorView: View {
         HermesSurfacePanel {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(mode.title)
+                    Text(L10n.string(mode.title))
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    Text(headerSubtitle)
+                    Text(L10n.string(headerSubtitle))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
                 HStack(spacing: 10) {
-                    Button(mode.actionTitle) {
+                    Button(L10n.string(mode.actionTitle)) {
                         Task { await onSave() }
                     }
                     .buttonStyle(.borderedProminent)
@@ -517,7 +517,7 @@ private struct SkillFormField<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label)
+            Text(L10n.string(label))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -538,7 +538,7 @@ private struct SkillMetadataSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
+            Text(L10n.string(title))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 

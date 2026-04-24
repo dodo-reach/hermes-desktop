@@ -34,7 +34,7 @@ struct TerminalTabContainer: View {
                 Spacer()
 
                 if let exitCode = session.exitCode {
-                    Text(exitCode == 0 ? "Shell exited" : "Connection ended (\(exitCode))")
+                    Text(exitCode == 0 ? L10n.string("Shell exited") : L10n.string("Connection ended (%@)", "\(exitCode)"))
                         .font(.caption)
                         .foregroundStyle(exitCode == 0 ? Color.secondary : Color.orange)
 

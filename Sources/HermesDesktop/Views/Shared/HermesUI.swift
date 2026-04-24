@@ -151,10 +151,10 @@ struct HermesRefreshButton: View {
                     ProgressView()
                         .controlSize(.small)
 
-                    Text("Refreshing…")
+                    Text(L10n.string("Refreshing…"))
                 }
             } else {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Label(L10n.string("Refresh"), systemImage: "arrow.clockwise")
             }
         }
         .buttonStyle(.borderedProminent)
@@ -258,7 +258,7 @@ struct HermesExpandableSearchField: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close search")
+                .accessibilityLabel(L10n.string("Close search"))
             }
         }
         .padding(.horizontal, 10)

@@ -25,7 +25,7 @@ struct TerminalWorkspaceView: View {
                     Button {
                         requestNewTab(for: activeConnection)
                     } label: {
-                        Label("New Tab", systemImage: "plus")
+                        Label(L10n.string("New Tab"), systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -210,11 +210,11 @@ private struct TerminalAppearanceToolbarButton: View {
                 ThemeSwatch(backgroundColor: appearance.backgroundColor.swiftUIColor, foregroundColor: appearance.foregroundColor.swiftUIColor)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Theme")
+                    Text(L10n.string("Theme"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Text(appearance.name)
+                    Text(L10n.string(appearance.name))
                         .font(.subheadline.weight(.semibold))
                 }
 
@@ -229,7 +229,7 @@ private struct TerminalAppearanceToolbarButton: View {
         .popover(isPresented: $isPresented, arrowEdge: .top) {
             TerminalAppearanceEditor(themePreference: $themePreference)
         }
-        .help("Customize terminal colors")
+        .help(L10n.string("Customize terminal colors"))
     }
 }
 
@@ -246,10 +246,10 @@ private struct TerminalAppearanceEditor: View {
 
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Terminal Theme")
+                Text(L10n.string("Terminal Theme"))
                     .font(.title3.weight(.semibold))
 
-                Text("Pick a preset for a coherent terminal look, then fine-tune background and text colors live if you want.")
+                Text(L10n.string("Pick a preset for a coherent terminal look, then fine-tune background and text colors live if you want."))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -259,12 +259,12 @@ private struct TerminalAppearanceEditor: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Quick Presets")
+                    Text(L10n.string("Quick Presets"))
                         .font(.headline)
 
                     Spacer()
 
-                    Button("Use System") {
+                    Button(L10n.string("Use System")) {
                         themePreference = .defaultValue
                     }
                     .buttonStyle(.borderless)
@@ -288,13 +288,13 @@ private struct TerminalAppearanceEditor: View {
             HermesInsetSurface {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("Custom Colors")
+                        Text(L10n.string("Custom Colors"))
                             .font(.headline)
 
                         Spacer()
 
                         if appearance.isCustom {
-                            Text("ANSI accents follow \(paletteName(for: appearance.paletteStyle)).")
+                            Text(L10n.string("ANSI accents follow %@.", L10n.string(paletteName(for: appearance.paletteStyle))))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -312,7 +312,7 @@ private struct TerminalAppearanceEditor: View {
                         )
                     }
 
-                    Text("Custom colors update the running terminal immediately. Preset ANSI colors stay anchored so git output, prompts, and tools keep a readable palette.")
+                    Text(L10n.string("Custom colors update the running terminal immediately. Preset ANSI colors stay anchored so git output, prompts, and tools keep a readable palette."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -363,7 +363,7 @@ private struct TerminalThemePreviewCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Preview")
+                Text(L10n.string("Preview"))
                     .font(.headline)
 
                 Spacer()
@@ -418,11 +418,11 @@ private struct TerminalPresetCard: View {
             )
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(preset.name)
+                Text(L10n.string(preset.name))
                     .font(.headline)
                     .foregroundStyle(.primary)
 
-                Text(preset.summary)
+                Text(L10n.string(preset.summary))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

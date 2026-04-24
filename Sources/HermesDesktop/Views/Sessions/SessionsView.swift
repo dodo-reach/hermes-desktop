@@ -116,7 +116,7 @@ struct SessionsView: View {
                         }
 
                         if appState.hasMoreSessions {
-                            Button("Load More") {
+                            Button(L10n.string("Load More")) {
                                 Task { await appState.loadSessions(reset: false) }
                             }
                             .buttonStyle(.bordered)
@@ -181,7 +181,7 @@ private struct SessionCardRow: View {
                     Spacer(minLength: 12)
 
                     if let count = session.messageCount {
-                        HermesBadge(text: "\(count) messages", tint: .secondary)
+                        HermesBadge(text: L10n.string("%@ messages", "\(count)"), tint: .secondary)
                     }
                 }
 
@@ -196,21 +196,21 @@ private struct SessionCardRow: View {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 12) {
                         if let startedAt = session.startedAt?.dateValue {
-                            metaLabel("Started \(DateFormatters.relativeFormatter().localizedString(for: startedAt, relativeTo: .now))")
+                            metaLabel(L10n.string("Started %@", DateFormatters.relativeFormatter().localizedString(for: startedAt, relativeTo: .now)))
                         }
 
                         if let lastActive = session.lastActive?.dateValue {
-                            metaLabel("Active \(DateFormatters.relativeFormatter().localizedString(for: lastActive, relativeTo: .now))")
+                            metaLabel(L10n.string("Active %@", DateFormatters.relativeFormatter().localizedString(for: lastActive, relativeTo: .now)))
                         }
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
                         if let startedAt = session.startedAt?.dateValue {
-                            metaLabel("Started \(DateFormatters.relativeFormatter().localizedString(for: startedAt, relativeTo: .now))")
+                            metaLabel(L10n.string("Started %@", DateFormatters.relativeFormatter().localizedString(for: startedAt, relativeTo: .now)))
                         }
 
                         if let lastActive = session.lastActive?.dateValue {
-                            metaLabel("Active \(DateFormatters.relativeFormatter().localizedString(for: lastActive, relativeTo: .now))")
+                            metaLabel(L10n.string("Active %@", DateFormatters.relativeFormatter().localizedString(for: lastActive, relativeTo: .now)))
                         }
                     }
                 }

@@ -53,7 +53,7 @@ struct FilesView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 } else if let lastSavedAt = currentDocument.lastSavedAt {
-                    Text("Saved \(DateFormatters.relativeFormatter().localizedString(for: lastSavedAt, relativeTo: .now))")
+                    Text(L10n.string("Saved %@", DateFormatters.relativeFormatter().localizedString(for: lastSavedAt, relativeTo: .now)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

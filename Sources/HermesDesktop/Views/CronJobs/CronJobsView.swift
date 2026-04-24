@@ -53,7 +53,10 @@ struct CronJobsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             if let jobToDelete {
-                Text("“\(jobToDelete.resolvedName)” will be removed from the remote Hermes scheduler. This cannot be undone.")
+                Text(L10n.string(
+                    "“%@” will be removed from the remote Hermes scheduler. This cannot be undone.",
+                    jobToDelete.resolvedName
+                ))
             }
         }
     }
@@ -62,7 +65,7 @@ struct CronJobsView: View {
         HStack(spacing: 10) {
             Picker("Filter", selection: $filterMode) {
                 ForEach(CronFilterMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
+                    Text(L10n.string(mode.rawValue)).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
@@ -75,7 +78,7 @@ struct CronJobsView: View {
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(.borderedProminent)
-            .help("Create a new cron job")
+            .help(L10n.string("Create a new cron job"))
             .disabled(appState.isSavingCronJobDraft || appState.isOperatingOnCronJob)
 
             Spacer(minLength: 12)
@@ -110,7 +113,7 @@ struct CronJobsView: View {
                 ContentUnavailableView(
                     "No cron jobs found",
                     systemImage: "calendar.badge.exclamationmark",
-                    description: Text("No saved Hermes cron jobs were discovered under \(cronJobsPath) on this SSH target.")
+                    description: Text(L10n.string("No saved Hermes cron jobs were discovered under %@ on this SSH target.", cronJobsPath))
                 )
                 .frame(maxWidth: .infinity, minHeight: 300)
             }
@@ -349,13 +352,9 @@ private struct CronJobCardRow: View {
                         CronMetaLabel(text: job.resolvedScheduleDisplay)
 
                         if let lastRunAt = job.lastRunAt {
-                            CronMetaLabel(
-                                text: "Last run \(DateFormatters.relativeFormatter().localizedString(for: lastRunAt, relativeTo: .now))"
-                            )
+                            CronMetaLabel(text: L10n.string("Last run %@", DateFormatters.relativeFormatter().localizedString(for: lastRunAt, relativeTo: .now)))
                         } else if let nextRunAt = job.nextRunAt {
-                            CronMetaLabel(
-                                text: "Next run \(DateFormatters.relativeFormatter().localizedString(for: nextRunAt, relativeTo: .now))"
-                            )
+                            CronMetaLabel(text: L10n.string("Next run %@", DateFormatters.relativeFormatter().localizedString(for: nextRunAt, relativeTo: .now)))
                         }
                     }
 
@@ -363,13 +362,9 @@ private struct CronJobCardRow: View {
                         CronMetaLabel(text: job.resolvedScheduleDisplay)
 
                         if let lastRunAt = job.lastRunAt {
-                            CronMetaLabel(
-                                text: "Last run \(DateFormatters.relativeFormatter().localizedString(for: lastRunAt, relativeTo: .now))"
-                            )
+                            CronMetaLabel(text: L10n.string("Last run %@", DateFormatters.relativeFormatter().localizedString(for: lastRunAt, relativeTo: .now)))
                         } else if let nextRunAt = job.nextRunAt {
-                            CronMetaLabel(
-                                text: "Next run \(DateFormatters.relativeFormatter().localizedString(for: nextRunAt, relativeTo: .now))"
-                            )
+                            CronMetaLabel(text: L10n.string("Next run %@", DateFormatters.relativeFormatter().localizedString(for: nextRunAt, relativeTo: .now)))
                         }
                     }
                 }
@@ -687,17 +682,17 @@ private struct CronJobEditorView: View {
         HermesSurfacePanel {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(mode.title)
+                    Text(L10n.string(mode.title))
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    Text("The app will write the right cron job structure into `\(cronJobsPath)` on the active host.")
+                    Text(L10n.string("The app will write the right cron job structure into `%@` on the active host.", cronJobsPath))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
                 HStack(spacing: 10) {
-                    Button(mode.actionTitle) {
+                    Button(L10n.string(mode.actionTitle)) {
                         Task { await onSave() }
                     }
                     .buttonStyle(.borderedProminent)
@@ -754,7 +749,7 @@ private struct CronJobEditorView: View {
                 CronFormField(label: "Frequency") {
                     Picker("Frequency", selection: schedulePresetBinding) {
                         ForEach(CronSchedulePreset.allCases) { preset in
-                            Text(preset.title).tag(preset)
+                            Text(L10n.string(preset.title)).tag(preset)
                         }
                     }
                     .pickerStyle(.menu)
@@ -780,7 +775,7 @@ private struct CronJobEditorView: View {
                     CronFormField(label: "Day") {
                         Picker("Day", selection: scheduleWeekdayBinding) {
                             ForEach(Array(CronScheduleFormatter.weekdayPickerLabels.enumerated()), id: \.offset) { index, label in
-                                Text(label).tag(index)
+                                Text(L10n.string(label)).tag(index)
                             }
                         }
                         .pickerStyle(.menu)
@@ -791,7 +786,7 @@ private struct CronJobEditorView: View {
                 if draft.schedule.preset == .monthly {
                     CronFormField(label: "Day of Month") {
                         Stepper(value: scheduleDayOfMonthBinding, in: 1...31) {
-                            Text("Day \(draft.schedule.dayOfMonth)")
+                            Text(L10n.string("Day %@", "\(draft.schedule.dayOfMonth)"))
                         }
                     }
                 }
@@ -805,7 +800,7 @@ private struct CronJobEditorView: View {
 
                 HermesInsetSurface {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Preview")
+                        Text(L10n.string("Preview"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -837,7 +832,7 @@ private struct CronJobEditorView: View {
                 CronFormField(label: "Delivery") {
                     Picker("Delivery", selection: deliveryPresetBinding) {
                         ForEach(CronDeliveryPreset.allCases) { preset in
-                            Text(preset.title).tag(preset)
+                            Text(L10n.string(preset.title)).tag(preset)
                         }
                     }
                     .pickerStyle(.menu)
@@ -851,11 +846,11 @@ private struct CronJobEditorView: View {
                             .font(.system(.body, design: .monospaced))
                     }
 
-                    Text("Use full Hermes target syntax such as `telegram:-1001234567890`, `telegram:-1001234567890:17585`, or another supported platform target.")
+                    Text(L10n.string("Use full Hermes target syntax such as `telegram:-1001234567890`, `telegram:-1001234567890:17585`, or another supported platform target."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if draft.deliveryPreset == .local {
-                    Text("`Local Only` saves cron output under `\(cronOutputPath)` on the active host.")
+                    Text(L10n.string("`Local Only` saves cron output under `%@` on the active host.", cronOutputPath))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -889,7 +884,7 @@ private struct CronJobEditorView: View {
             CronFormField(label: "Unit") {
                 Picker("Unit", selection: scheduleIntervalUnitBinding) {
                     ForEach(CronIntervalUnit.allCases) { unit in
-                        Text(unit.title).tag(unit)
+                        Text(L10n.string(unit.title)).tag(unit)
                     }
                 }
                 .pickerStyle(.menu)
@@ -920,7 +915,7 @@ private struct CronJobEditorView: View {
             CronFormField(label: "Unit") {
                 Picker("Unit", selection: scheduleIntervalUnitBinding) {
                     ForEach(CronIntervalUnit.allCases) { unit in
-                        Text(unit.title).tag(unit)
+                        Text(L10n.string(unit.title)).tag(unit)
                     }
                 }
                 .pickerStyle(.menu)

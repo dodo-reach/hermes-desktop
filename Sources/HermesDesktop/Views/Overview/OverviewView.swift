@@ -44,11 +44,11 @@ struct OverviewView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Overview")
+                Text(L10n.string("Overview"))
                     .font(.largeTitle)
                     .fontWeight(.semibold)
 
-                Text("See which host Hermes is connected to, where its files live, and which source powers Sessions, Cron Jobs, and Usage.")
+                Text(L10n.string("See which host Hermes is connected to, where its files live, and which source powers Sessions, Cron Jobs, and Usage."))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -180,7 +180,7 @@ struct OverviewView: View {
 
                 if !overview.availableProfiles.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Discovered profiles")
+                        Text(L10n.string("Discovered profiles"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -288,10 +288,10 @@ struct OverviewView: View {
                             .foregroundStyle(Color.accentColor)
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("SQLite database detected")
+                            Text(L10n.string("SQLite database detected"))
                                 .font(.headline)
 
-                            Text("Hermes can read structured session and message records directly.")
+                            Text(L10n.string("Hermes can read structured session and message records directly."))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -333,10 +333,10 @@ struct OverviewView: View {
                             .foregroundStyle(.secondary)
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Using transcript files")
+                            Text(L10n.string("Using transcript files"))
                                 .font(.headline)
 
-                            Text("No SQLite database was found, so Hermes will fall back to session transcript artifacts when available.")
+                            Text(L10n.string("No SQLite database was found, so Hermes will fall back to session transcript artifacts when available."))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
