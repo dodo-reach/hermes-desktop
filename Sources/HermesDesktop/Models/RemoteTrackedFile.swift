@@ -4,6 +4,7 @@ enum RemoteTrackedFile: String, CaseIterable, Identifiable {
     case user
     case memory
     case soul
+    case agents
 
     var id: String { rawValue }
 
@@ -15,6 +16,8 @@ enum RemoteTrackedFile: String, CaseIterable, Identifiable {
             "MEMORY.md"
         case .soul:
             "SOUL.md"
+        case .agents:
+            "AGENTS.md"
         }
     }
 
@@ -28,6 +31,8 @@ enum RemoteTrackedFile: String, CaseIterable, Identifiable {
             "memories/MEMORY.md"
         case .soul:
             "SOUL.md"
+        case .agents:
+            "AGENTS.md"
         }
     }
 
@@ -41,6 +46,8 @@ enum RemoteTrackedFile: String, CaseIterable, Identifiable {
             return paths.memory
         case .soul:
             return paths.soul
+        case .agents:
+            return nil
         }
     }
 }
