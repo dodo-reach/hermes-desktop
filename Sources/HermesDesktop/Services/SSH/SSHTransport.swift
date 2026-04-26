@@ -1,4 +1,10 @@
 import Foundation
+import OSLog
+
+private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "HermesDesktop",
+    category: "SSHTransport"
+)
 
 struct SSHCommandResult {
     let stdout: String
@@ -27,6 +33,7 @@ enum SSHTransportError: LocalizedError {
 
 final class SSHTransport: @unchecked Sendable {
     private let paths: AppPaths
+    private let resolvedEnvironment: [String: String]
 
     private enum ConnectionPurpose {
         case service
@@ -35,6 +42,72 @@ final class SSHTransport: @unchecked Sendable {
 
     init(paths: AppPaths) {
         self.paths = paths
+        self.resolvedEnvironment = SSHTransport.buildResolvedEnvironment()
+    }
+
+    // Environment forwarded to terminal SSH subprocesses (SwiftTerm key=value format).
+    var terminalEnvironment: [String] {
+        var vars = ["TERM=xterm-256color", "COLORTERM=truecolor"]
+        for key in ["HOME", "USER", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "PATH"] {
+            if let value = resolvedEnvironment[key] {
+                vars.append("\(key)=\(value)")
+            }
+        }
+        return vars
+    }
+
+    private static func buildResolvedEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        // Always prefer the keychain file: the process environment is frozen at launch and
+        // may point to a stale agent socket from a previous session.
+        if let sock = keychainAuthSock() {
+            logger.info("SSH_AUTH_SOCK from keychain file: \(sock, privacy: .public)")
+            env["SSH_AUTH_SOCK"] = sock
+        } else if let sock = env["SSH_AUTH_SOCK"] {
+            logger.info("SSH_AUTH_SOCK from process environment: \(sock, privacy: .public)")
+        } else {
+            logger.warning("SSH_AUTH_SOCK not found in keychain files or environment — SSH agent auth will not work")
+        }
+        return env
+    }
+
+    // Reads SSH_AUTH_SOCK from funtoo/keychain shell files in ~/.keychain/.
+    // Scans all *-sh files so hostname variations (short vs FQDN) don't matter.
+    private static func keychainAuthSock() -> String? {
+        let keychainDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".keychain")
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: keychainDir, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else {
+            logger.debug("~/.keychain directory not found or unreadable")
+            return nil
+        }
+        let shFiles = entries
+            .filter { $0.lastPathComponent.hasSuffix("-sh") }
+            .sorted {
+                let d1 = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let d2 = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return d1 > d2
+            }
+        for file in shFiles {
+            guard let content = try? String(contentsOf: file, encoding: .utf8) else {
+                logger.debug("Could not read keychain file: \(file.lastPathComponent)")
+                continue
+            }
+            for line in content.components(separatedBy: .newlines) {
+                guard line.hasPrefix("SSH_AUTH_SOCK=") else { continue }
+                var value = String(line.dropFirst("SSH_AUTH_SOCK=".count))
+                    .components(separatedBy: ";").first?
+                    .trimmingCharacters(in: .whitespaces) ?? ""
+                // Strip surrounding quotes written by keychain: SSH_AUTH_SOCK="/path/..."
+                if value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2 {
+                    value = String(value.dropFirst().dropLast())
+                }
+                if !value.isEmpty { return value }
+            }
+            logger.debug("No SSH_AUTH_SOCK found in keychain file: \(file.lastPathComponent)")
+        }
+        return nil
     }
 
     func execute(
@@ -181,6 +254,7 @@ final class SSHTransport: @unchecked Sendable {
 
             process.executableURL = executableURL
             process.arguments = arguments
+            process.environment = resolvedEnvironment
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
 
@@ -218,6 +292,12 @@ final class SSHTransport: @unchecked Sendable {
                     remainingStderr: remainingStderr
                 )
 
+                if process.terminationStatus != 0 {
+                    logger.error("ssh exited \(process.terminationStatus, privacy: .public): \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines), privacy: .public)")
+                } else {
+                    logger.debug("ssh exited 0")
+                }
+
                 guard state.claimResume() else { return }
                 continuation.resume(returning: result)
             }
@@ -225,7 +305,7 @@ final class SSHTransport: @unchecked Sendable {
             do {
                 try process.run()
                 if let standardInput,
-                   let pipe = process.standardInput as? Pipe {
+                    let pipe = process.standardInput as? Pipe {
                     pipe.fileHandleForWriting.write(standardInput)
                     do {
                         try pipe.fileHandleForWriting.close()

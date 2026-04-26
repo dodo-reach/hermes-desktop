@@ -4,6 +4,7 @@ import Foundation
 final class TerminalSession: ObservableObject, @unchecked Sendable {
     let connection: ConnectionProfile
     let sshArguments: [String]
+    let terminalEnvironment: [String]
     private let viewHost = TerminalViewHost()
 
     @Published var terminalTitle: String
@@ -16,6 +17,7 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
     init(connection: ConnectionProfile, sshTransport: SSHTransport) {
         self.connection = connection
         self.sshArguments = sshTransport.shellArguments(for: connection)
+        self.terminalEnvironment = sshTransport.terminalEnvironment
         self.terminalTitle = "\(connection.label) · \(connection.resolvedHermesProfileName)"
         viewHost.setEventHandlers(
             onProcessStart: { [weak self] in
@@ -64,7 +66,8 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
             in: container,
             request: TerminalLaunchRequest(
                 sshArguments: sshArguments,
-                launchToken: launchToken
+                launchToken: launchToken,
+                terminalEnvironment: terminalEnvironment
             ),
             appearance: appearance,
             isActive: isActive
