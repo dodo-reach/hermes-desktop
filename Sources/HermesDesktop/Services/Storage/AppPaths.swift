@@ -30,9 +30,14 @@ struct AppPaths {
     }
 
     func controlPath(for connection: ConnectionProfile) -> String {
-        controlSocketDirectoryURL
+        ensureControlSocketDirectoryExists()
+        return controlSocketDirectoryURL
             .appendingPathComponent(controlSocketIdentifier(for: connection))
             .path
+    }
+
+    private func ensureControlSocketDirectoryExists() {
+        createIfNeeded(at: controlSocketDirectoryURL)
     }
 
     private func createIfNeeded(at url: URL) {
