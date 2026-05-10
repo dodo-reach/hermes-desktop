@@ -115,13 +115,22 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
         }
 
         let exportCommand = "export HERMES_HOME=\"\(shellHomeExpression)\""
-        guard let startupCommandLine,
-              !startupCommandLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "\(exportCommand); exec \"${SHELL:-/bin/zsh}\" -l"
+
+        let innerCommand: String
+        if let startupCommandLine,
+              !startupCommandLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let escapedStartupCommand = startupCommandLine.escapedForDoubleQuotedShellArgument
+            innerCommand = "\(exportCommand); exec \"${SHELL:-/bin/zsh}\" -lc \"\(escapedStartupCommand)\""
+        } else {
+            innerCommand = "\(exportCommand); exec \"${SHELL:-/bin/zsh}\" -l"
         }
 
-        let escapedStartupCommand = startupCommandLine.escapedForDoubleQuotedShellArgument
-        return "\(exportCommand); exec \"${SHELL:-/bin/zsh}\" -lc \"\(escapedStartupCommand)\""
+        // Wrap in /bin/sh via exec so the command works regardless of whether the
+        // user's remote login shell is fish, bash, zsh, or any other POSIX shell.
+        // Fish does not understand `export` or `${VAR:-default}` syntax, but /bin/sh
+        // (POSIX) handles both. The outer "..." string is escaped for fish double-quoted
+        // context so fish passes it correctly to sh -c.
+        return "exec /bin/sh -c \"\(innerCommand.escapedForFishDoubleQuotedString)\""
     }
 
     var workspaceScopeFingerprint: String {
@@ -226,6 +235,14 @@ private extension String {
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "$", with: "\\$")
             .replacingOccurrences(of: "`", with: "\\`")
+    }
+
+    /// Escapes the string for use inside a fish double-quoted ("...") string.
+    /// Fish interprets `\\` as `\`, `\"` as `"`, and `\$` as a literal `$`.
+    var escapedForFishDoubleQuotedString: String {
+        replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
     }
 
     var containsControlCharacter: Bool {

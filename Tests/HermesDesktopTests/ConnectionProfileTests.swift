@@ -24,7 +24,7 @@ struct ConnectionProfileTests {
         #expect(profile.remotePath(for: .memory) == "~/.hermes/memories/MEMORY.md")
         #expect(
             profile.remoteShellBootstrapCommand ==
-                "export HERMES_HOME=\"$HOME/.hermes\"; exec \"${SHELL:-/bin/zsh}\" -l"
+                "exec /bin/sh -c \"export HERMES_HOME=\\\"\\$HOME/.hermes\\\"; exec \\\"\\${SHELL:-/bin/zsh}\\\" -l\""
         )
         #expect(profile.displayDestination == "alice@hermes-home")
         #expect(profile.resolvedPort == nil)
@@ -50,7 +50,7 @@ struct ConnectionProfileTests {
         #expect(profileScoped.remoteKanbanDatabasePath == "~/.hermes/kanban.db")
         #expect(
             profileScoped.remoteShellBootstrapCommand ==
-                "export HERMES_HOME=\"$HOME/.hermes/profiles/researcher\"; exec \"${SHELL:-/bin/zsh}\" -l"
+                "exec /bin/sh -c \"export HERMES_HOME=\\\"\\$HOME/.hermes/profiles/researcher\\\"; exec \\\"\\${SHELL:-/bin/zsh}\\\" -l\""
         )
         #expect(base.workspaceScopeFingerprint != profileScoped.workspaceScopeFingerprint)
         #expect(base.hostConnectionFingerprint == profileScoped.hostConnectionFingerprint)
@@ -68,7 +68,7 @@ struct ConnectionProfileTests {
 
         #expect(
             profile.remoteShellBootstrapCommand ==
-                "export HERMES_HOME=\"$HOME/.hermes/profiles/research\\\"lab\"; exec \"${SHELL:-/bin/zsh}\" -l"
+                "exec /bin/sh -c \"export HERMES_HOME=\\\"\\$HOME/.hermes/profiles/research\\\\\\\"lab\\\"; exec \\\"\\${SHELL:-/bin/zsh}\\\" -l\""
         )
     }
 
@@ -83,7 +83,7 @@ struct ConnectionProfileTests {
 
         #expect(
             profile.remoteShellBootstrapCommand ==
-                "export HERMES_HOME=\"$HOME/.hermes/profiles/research\\$HOME\\`whoami\\`\"; exec \"${SHELL:-/bin/zsh}\" -l"
+                "exec /bin/sh -c \"export HERMES_HOME=\\\"\\$HOME/.hermes/profiles/research\\\\\\$HOME\\\\`whoami\\\\`\\\"; exec \\\"\\${SHELL:-/bin/zsh}\\\" -l\""
         )
     }
 
@@ -136,7 +136,7 @@ struct ConnectionProfileTests {
 
         #expect(
             profile.remoteShellBootstrapCommand(startupCommandLine: "hermes --profile researcher --resume 'debug session'\\''s final turn'") ==
-                "export HERMES_HOME=\"$HOME/.hermes/profiles/researcher\"; exec \"${SHELL:-/bin/zsh}\" -lc \"hermes --profile researcher --resume 'debug session'\\\\''s final turn'\""
+                "exec /bin/sh -c \"export HERMES_HOME=\\\"\\$HOME/.hermes/profiles/researcher\\\"; exec \\\"\\${SHELL:-/bin/zsh}\\\" -lc \\\"hermes --profile researcher --resume 'debug session'\\\\\\\\''s final turn'\\\"\""
         )
     }
 
@@ -149,7 +149,7 @@ struct ConnectionProfileTests {
 
         #expect(
             profile.remoteShellBootstrapCommand(startupCommandLine: "printf \"$HOME `whoami`\"") ==
-                "export HERMES_HOME=\"$HOME/.hermes\"; exec \"${SHELL:-/bin/zsh}\" -lc \"printf \\\"\\$HOME \\`whoami\\`\\\"\""
+                "exec /bin/sh -c \"export HERMES_HOME=\\\"\\$HOME/.hermes\\\"; exec \\\"\\${SHELL:-/bin/zsh}\\\" -lc \\\"printf \\\\\\\"\\\\\\$HOME \\\\`whoami\\\\`\\\\\\\"\\\"\""
         )
     }
 
