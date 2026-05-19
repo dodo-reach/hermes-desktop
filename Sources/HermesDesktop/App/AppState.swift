@@ -100,6 +100,7 @@ final class AppState: ObservableObject {
     let updateCheckService: UpdateCheckService
     let terminalWorkspace: TerminalWorkspaceStore
     let workflowLaunchDiagnostics: WorkflowLaunchDiagnostics
+    let notificationService = NotificationService()
 
     private let sessionPageSize = 50
     private let approvalNeededMessage = "Hermes requested command approval, but this chat turn cannot collect manual approvals. Retry this turn with Auto-approve enabled, or resume the session in Terminal to review the command yourself."
@@ -167,6 +168,51 @@ final class AppState: ObservableObject {
         if activeConnectionID != nil {
             selectedSection = .overview
         }
+
+        // Notification service setup
+        Task {
+            await notificationService.requestAuthorization()
+        }
+
+        // Sync notification preferences from connection store
+        notificationService.messageNotificationsEnabled = connectionStore.notifyOnNewMessage
+        notificationService.approvalNotificationsEnabled = connectionStore.notifyOnApprovalRequest
+        notificationService.showInAppBanners = connectionStore.showInAppBanners
+        notificationService.soundEnabled = connectionStore.notificationSoundEnabled
+
+        // Clear badge when app becomes active
+        NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )
+        .sink { [weak self] _ in
+            self?.notificationService.clearBadge()
+        }
+        .store(in: &cancellables)
+
+        // Keep notification service flags in sync with preferences
+        connectionStore.$notifyOnNewMessage
+            .sink { [weak self] value in
+                self?.notificationService.messageNotificationsEnabled = value
+            }
+            .store(in: &cancellables)
+
+        connectionStore.$notifyOnApprovalRequest
+            .sink { [weak self] value in
+                self?.notificationService.approvalNotificationsEnabled = value
+            }
+            .store(in: &cancellables)
+
+        connectionStore.$showInAppBanners
+            .sink { [weak self] value in
+                self?.notificationService.showInAppBanners = value
+            }
+            .store(in: &cancellables)
+
+        connectionStore.$notificationSoundEnabled
+            .sink { [weak self] value in
+                self?.notificationService.soundEnabled = value
+            }
+            .store(in: &cancellables)
     }
 
     var activeConnection: ConnectionProfile? {
@@ -1013,6 +1059,12 @@ final class AppState: ObservableObject {
             if let createdSessionID {
                 await loadSessionDetail(sessionID: createdSessionID)
             }
+
+            // Post notification for new session response
+            let preview = createdSessionID.flatMap { sessionSummary(for: $0)?.preview } ?? trimmedPrompt
+            let title = createdSessionID.flatMap { sessionSummary(for: $0)?.resolvedTitle }
+            notificationService.postMessageNotification(sessionTitle: title, preview: preview)
+
             return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
@@ -1021,6 +1073,12 @@ final class AppState: ObservableObject {
             let message = error.localizedDescription
             sessionConversationError = message
             setStatusMessage(sessionStatusMessage(forConversationError: message, fallback: "Unable to start Hermes session"))
+
+            // Post notification for approval requests
+            if message.contains(approvalNeededMessage) {
+                notificationService.postApprovalNotification()
+            }
+
             return false
         }
     }
@@ -1100,6 +1158,12 @@ final class AppState: ObservableObject {
             isSendingSessionMessage = false
             pendingSessionTurn = nil
             await loadSessions(reset: true, query: sessionSearchQuery)
+
+            // Post notification for new response
+            let preview = sessionSummary(for: selectedSessionID)?.preview ?? trimmedPrompt
+            let title = sessionSummary(for: selectedSessionID)?.resolvedTitle
+            notificationService.postMessageNotification(sessionTitle: title, preview: preview)
+
             return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
@@ -1109,6 +1173,12 @@ final class AppState: ObservableObject {
             let message = error.localizedDescription
             sessionConversationError = message
             setStatusMessage(sessionStatusMessage(forConversationError: message, fallback: "Unable to send prompt to Hermes"))
+
+            // Post notification for approval requests
+            if message.contains(approvalNeededMessage) {
+                notificationService.postApprovalNotification()
+            }
+
             return false
         }
     }

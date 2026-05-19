@@ -891,3 +891,11 @@
 "board default" = "board default";
 "Give this preset a stable name and the prompt that should seed the terminal session." = "Give this preset a stable name and the prompt that should seed the terminal session.";
 "Skills are preloaded at launch using the Hermes CLI skill flags." = "Skills are preloaded at launch using the Hermes CLI skill flags.";
+"Notify on New Messages" = "新消息通知";
+"Notify on Approval Requests" = "审批请求通知";
+"Show In-App Banners" = "前台横幅通知";
+"Show notification banners even when Hermes Desktop is active" = "当 Hermes Desktop 处于前台时也显示通知横幅";
+"Notification Sound" = "通知声音";
+"Approval Required" = "需要审批";
+"Hermes Agent is waiting for your approval to continue." = "Hermes Agent 正在等待你的审批才能继续。";
+"Hermes Agent" = "Hermes Agent";

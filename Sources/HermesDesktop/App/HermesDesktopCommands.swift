@@ -62,6 +62,41 @@ struct HermesDesktopCommands: Commands {
                 }
             }
             .disabled(appState.isCheckingForUpdates)
+
+            Divider()
+
+            Toggle(
+                L10n.string("Notify on New Messages"),
+                isOn: Binding(
+                    get: { appState.connectionStore.notifyOnNewMessage },
+                    set: { appState.connectionStore.notifyOnNewMessage = $0 }
+                )
+            )
+
+            Toggle(
+                L10n.string("Notify on Approval Requests"),
+                isOn: Binding(
+                    get: { appState.connectionStore.notifyOnApprovalRequest },
+                    set: { appState.connectionStore.notifyOnApprovalRequest = $0 }
+                )
+            )
+
+            Toggle(
+                L10n.string("Show In-App Banners"),
+                isOn: Binding(
+                    get: { appState.connectionStore.showInAppBanners },
+                    set: { appState.connectionStore.showInAppBanners = $0 }
+                )
+            )
+            .help(L10n.string("Show notification banners even when Hermes Desktop is active"))
+
+            Toggle(
+                L10n.string("Notification Sound"),
+                isOn: Binding(
+                    get: { appState.connectionStore.notificationSoundEnabled },
+                    set: { appState.connectionStore.notificationSoundEnabled = $0 }
+                )
+            )
         }
 
         CommandMenu(L10n.string("Navigate")) {

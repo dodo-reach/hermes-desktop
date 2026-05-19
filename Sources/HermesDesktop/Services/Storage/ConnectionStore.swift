@@ -40,6 +40,26 @@ final class ConnectionStore: ObservableObject {
             persistPreferencesIfNeeded()
         }
     }
+    @Published var notifyOnNewMessage = true {
+        didSet {
+            persistPreferencesIfNeeded()
+        }
+    }
+    @Published var notifyOnApprovalRequest = true {
+        didSet {
+            persistPreferencesIfNeeded()
+        }
+    }
+    @Published var showInAppBanners = true {
+        didSet {
+            persistPreferencesIfNeeded()
+        }
+    }
+    @Published var notificationSoundEnabled = true {
+        didSet {
+            persistPreferencesIfNeeded()
+        }
+    }
 
     private let paths: AppPaths
     private let encoder = JSONEncoder()
@@ -222,7 +242,11 @@ final class ConnectionStore: ObservableObject {
             lastAutomaticUpdateCheckAt: lastAutomaticUpdateCheckAt,
             workspaceFileBookmarks: workspaceFileBookmarks,
             pinnedSessions: pinnedSessions,
-            workflows: workflows
+            workflows: workflows,
+            notifyOnNewMessage: notifyOnNewMessage,
+            notifyOnApprovalRequest: notifyOnApprovalRequest,
+            showInAppBanners: showInAppBanners,
+            notificationSoundEnabled: notificationSoundEnabled
         )
 
         do {
@@ -282,7 +306,11 @@ final class ConnectionStore: ObservableObject {
                 lastAutomaticUpdateCheckAt: nil,
                 workspaceFileBookmarks: [],
                 pinnedSessions: [],
-                workflows: []
+                workflows: [],
+                notifyOnNewMessage: true,
+                notifyOnApprovalRequest: true,
+                showInAppBanners: true,
+                notificationSoundEnabled: true
             )
         )
     }
@@ -295,6 +323,10 @@ final class ConnectionStore: ObservableObject {
         workspaceFileBookmarks = preferences.workspaceFileBookmarks ?? []
         pinnedSessions = preferences.pinnedSessions ?? []
         workflows = preferences.workflows ?? []
+        notifyOnNewMessage = preferences.notifyOnNewMessage ?? true
+        notifyOnApprovalRequest = preferences.notifyOnApprovalRequest ?? true
+        showInAppBanners = preferences.showInAppBanners ?? true
+        notificationSoundEnabled = preferences.notificationSoundEnabled ?? true
     }
 
     private func reportPersistenceError(_ message: String) {
@@ -314,6 +346,10 @@ private struct AppPreferences: Codable {
     var workspaceFileBookmarks: [WorkspaceFileBookmark]?
     var pinnedSessions: [PinnedSession]?
     var workflows: [WorkflowPreset]?
+    var notifyOnNewMessage: Bool?
+    var notifyOnApprovalRequest: Bool?
+    var showInAppBanners: Bool?
+    var notificationSoundEnabled: Bool?
 }
 
 private extension String {
