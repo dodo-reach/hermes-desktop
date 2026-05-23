@@ -24,17 +24,17 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .connections:
             "Connections"
         case .overview:
-            "Overview"
+            "Homebase"
         case .files:
-            "Files"
+            "Artifacts"
         case .sessions:
-            "Sessions"
+            "Cael Sessions"
         case .workflows:
             "Workflows"
         case .cronjobs:
-            "Cron Jobs"
+            "Watchdogs"
         case .kanban:
-            "Kanban"
+            "Tasks"
         case .usage:
             "Usage"
         case .skills:
