@@ -1958,6 +1958,8 @@ private struct ConversationMessageCard: View {
         TranscriptMessageSurface(tint: roleTint) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 10) {
+                    RoleAvatar(role: message.role, tint: roleTint)
+
                     HermesBadge(
                         text: displayRole,
                         tint: roleTint,
@@ -2027,13 +2029,56 @@ private struct ConversationMessageCard: View {
     private var roleSystemImage: String? {
         switch message.role {
         case .assistant:
-            return "sparkles"
+            return nil
         case .user:
             return "person.fill"
         case .system:
             return "gearshape.fill"
         case .event, .custom:
             return nil
+        }
+    }
+}
+
+private struct RoleAvatar: View {
+    let role: SessionMessageRole
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(tint.opacity(0.16))
+
+            avatarContent
+        }
+        .frame(width: 28, height: 28)
+        .overlay {
+            Circle()
+                .strokeBorder(tint.opacity(0.45), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        switch role {
+        case .assistant:
+            Image("CaelProfile", bundle: .module)
+                .resizable()
+                .scaledToFill()
+                .clipShape(Circle())
+        case .user:
+            Image(systemName: "person.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+        case .system:
+            Image(systemName: "gearshape.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+        case .event, .custom:
+            Image(systemName: "ellipsis")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
         }
     }
 }
