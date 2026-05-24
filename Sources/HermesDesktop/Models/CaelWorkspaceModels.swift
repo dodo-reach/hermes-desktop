@@ -1,6 +1,6 @@
 import Foundation
 
-struct CaelWorkspaceStatus: Decodable {
+struct CaelWorkspaceStatus: Codable {
     let ok: Bool
     let generatedAt: String
     let host: String
@@ -10,14 +10,14 @@ struct CaelWorkspaceStatus: Decodable {
     let contract: CaelCommandCenterContract
 }
 
-struct CaelWorkspacePosture: Decodable {
+struct CaelWorkspacePosture: Codable {
     let bind: String
     let remoteAccess: String
     let auth: String
     let publicInternet: String
 }
 
-struct CaelWorkspaceServiceCheck: Decodable, Identifiable {
+struct CaelWorkspaceServiceCheck: Codable, Identifiable {
     let id: String
     let label: String
     let kind: String
@@ -27,14 +27,14 @@ struct CaelWorkspaceServiceCheck: Decodable, Identifiable {
     let latencyMs: Double?
 }
 
-struct CaelWorkspaceLink: Decodable, Identifiable {
+struct CaelWorkspaceLink: Codable, Identifiable {
     var id: String { href }
     let label: String
     let href: String
     let description: String
 }
 
-struct CaelCommandCenterContract: Decodable {
+struct CaelCommandCenterContract: Codable {
     let id: String
     let version: String
     let generatedAt: String
@@ -45,7 +45,7 @@ struct CaelCommandCenterContract: Decodable {
     let surfaces: [CaelCommandCenterSurface]
 }
 
-struct CaelCommandCenterSurface: Decodable, Identifiable {
+struct CaelCommandCenterSurface: Codable, Identifiable {
     let id: String
     let label: String
     let owner: String
@@ -56,14 +56,14 @@ struct CaelCommandCenterSurface: Decodable, Identifiable {
     let description: String
 }
 
-struct CaelIntegrationStatus: Decodable {
+struct CaelIntegrationStatus: Codable {
     let ok: Bool
     let generatedAt: String
     let integrations: [CaelIntegrationCheck]
     let policy: [String: String]
 }
 
-struct CaelIntegrationCheck: Decodable, Identifiable {
+struct CaelIntegrationCheck: Codable, Identifiable {
     let id: String
     let label: String
     let status: String
@@ -71,14 +71,14 @@ struct CaelIntegrationCheck: Decodable, Identifiable {
     let safeMode: String
 }
 
-struct CaelProviderUsageLimits: Decodable {
+struct CaelProviderUsageLimits: Codable {
     let ok: Bool
     let generatedAt: String
     let enabledProviders: [String]
     let providers: [CaelProviderUsageCard]
 }
 
-struct CaelProviderUsageCard: Decodable, Identifiable {
+struct CaelProviderUsageCard: Codable, Identifiable {
     let id: String
     let label: String
     let status: String
@@ -98,7 +98,7 @@ struct CaelProviderUsageCard: Decodable, Identifiable {
     let dailyUsage: [CaelDailyUsage]
 }
 
-struct CaelUsageWindow: Decodable, Identifiable {
+struct CaelUsageWindow: Codable, Identifiable {
     let id: String
     let label: String
     let used: Double
@@ -109,21 +109,21 @@ struct CaelUsageWindow: Decodable, Identifiable {
     let resetsAt: String?
 }
 
-struct CaelUsageBadge: Decodable, Identifiable {
+struct CaelUsageBadge: Codable, Identifiable {
     var id: String { "\(label)-\(value)" }
     let label: String
     let value: String
     let color: String?
 }
 
-struct CaelTokenUsage: Decodable {
+struct CaelTokenUsage: Codable {
     let sessionCostUSD: Double?
     let sessionTokens: Double?
     let last30DaysCostUSD: Double?
     let last30DaysTokens: Double?
 }
 
-struct CaelDailyUsage: Decodable, Identifiable {
+struct CaelDailyUsage: Codable, Identifiable {
     var id: String { dayKey }
     let dayKey: String
     let totalTokens: Double?
@@ -131,7 +131,7 @@ struct CaelDailyUsage: Decodable, Identifiable {
 }
 
 
-struct CaelCommandCenterSummaryEnvelope: Decodable {
+struct CaelCommandCenterSummaryEnvelope: Codable {
     let ok: Bool
     let generatedAt: String
     let source: String
@@ -142,14 +142,14 @@ struct CaelCommandCenterSummaryEnvelope: Decodable {
     let links: [CaelCommandCenterEnvelopeLink]?
 }
 
-struct CaelCommandCenterEnvelopeLink: Decodable, Identifiable {
+struct CaelCommandCenterEnvelopeLink: Codable, Identifiable {
     var id: String { href }
     let label: String
     let href: String
     let kind: String
 }
 
-struct CaelCommandCenterSummary: Decodable {
+struct CaelCommandCenterSummary: Codable {
     let version: String
     let generatedAt: String
     let contract: CaelCommandCenterContract?
@@ -165,7 +165,7 @@ struct CaelCommandCenterSummary: Decodable {
     let homebaseRecords: CaelCommandCenterHomebaseRecords
 }
 
-struct CaelCommandCenterPosture: Decodable {
+struct CaelCommandCenterPosture: Codable {
     let host: String
     let bind: String
     let remoteAccess: String
@@ -173,7 +173,7 @@ struct CaelCommandCenterPosture: Decodable {
     let publicInternet: String
 }
 
-struct CaelCommandCenterSystem: Decodable, Identifiable {
+struct CaelCommandCenterSystem: Codable, Identifiable {
     let id: String
     let label: String
     let ok: Bool
@@ -183,7 +183,7 @@ struct CaelCommandCenterSystem: Decodable, Identifiable {
     let latencyMs: Double?
 }
 
-struct CaelCommandCenterIntegration: Decodable, Identifiable {
+struct CaelCommandCenterIntegration: Codable, Identifiable {
     let id: String
     let label: String
     let status: String
@@ -191,12 +191,12 @@ struct CaelCommandCenterIntegration: Decodable, Identifiable {
     let safeMode: String
 }
 
-struct CaelCommandCenterUsage: Decodable {
+struct CaelCommandCenterUsage: Codable {
     let enabledProviders: [String]
     let providers: [CaelCommandCenterUsageProvider]
 }
 
-struct CaelCommandCenterUsageProvider: Decodable, Identifiable {
+struct CaelCommandCenterUsageProvider: Codable, Identifiable {
     let id: String
     let label: String
     let status: String
@@ -207,19 +207,19 @@ struct CaelCommandCenterUsageProvider: Decodable, Identifiable {
     let primary: CaelCommandCenterUsageWindow?
 }
 
-struct CaelCommandCenterUsageWindow: Decodable {
+struct CaelCommandCenterUsageWindow: Codable {
     let label: String
     let usedPercent: Double
     let remainingPercent: Double
     let resetsAt: String?
 }
 
-struct CaelCommandCenterAutomations: Decodable {
+struct CaelCommandCenterAutomations: Codable {
     let boundary: String
     let instances: [CaelCommandCenterAutomation]
 }
 
-struct CaelCommandCenterAutomation: Decodable, Identifiable {
+struct CaelCommandCenterAutomation: Codable, Identifiable {
     let id: String
     let label: String
     let ok: Bool
@@ -228,11 +228,11 @@ struct CaelCommandCenterAutomation: Decodable, Identifiable {
     let failures: Int
 }
 
-struct CaelCommandCenterBrain: Decodable {
+struct CaelCommandCenterBrain: Codable {
     let sources: [CaelCommandCenterBrainSource]
 }
 
-struct CaelCommandCenterBrainSource: Decodable, Identifiable {
+struct CaelCommandCenterBrainSource: Codable, Identifiable {
     let id: String
     let label: String
     let category: String
@@ -240,7 +240,7 @@ struct CaelCommandCenterBrainSource: Decodable, Identifiable {
     let writable: Bool
 }
 
-struct CaelCommandCenterActionGate: Decodable, Identifiable {
+struct CaelCommandCenterActionGate: Codable, Identifiable {
     let id: String
     let label: String
     let source: String
@@ -251,7 +251,7 @@ struct CaelCommandCenterActionGate: Decodable, Identifiable {
     let detail: String
 }
 
-struct CaelCommandCenterAgentRun: Decodable, Identifiable {
+struct CaelCommandCenterAgentRun: Codable, Identifiable {
     let id: String
     let title: String
     let status: String
@@ -260,7 +260,7 @@ struct CaelCommandCenterAgentRun: Decodable, Identifiable {
     let path: String?
 }
 
-struct CaelCommandCenterNowNextItem: Decodable, Identifiable {
+struct CaelCommandCenterNowNextItem: Codable, Identifiable {
     let id: String
     let label: String
     let detail: String
@@ -268,20 +268,20 @@ struct CaelCommandCenterNowNextItem: Decodable, Identifiable {
     let href: String?
 }
 
-struct CaelCommandCenterHomebaseRecords: Decodable {
+struct CaelCommandCenterHomebaseRecords: Codable {
     let status: String
     let detail: String
     let records: [CaelCommandCenterHomebaseRecord]
 }
 
-struct CaelCommandCenterHomebaseRecord: Decodable, Identifiable {
+struct CaelCommandCenterHomebaseRecord: Codable, Identifiable {
     let id: String
     let label: String
     let kind: String
     let updatedAt: String?
 }
 
-struct CaelCommandCenterSectionEnvelope<Payload: Decodable>: Decodable {
+struct CaelCommandCenterSectionEnvelope<Payload: Codable>: Codable {
     let ok: Bool
     let generatedAt: String
     let source: String
@@ -291,7 +291,7 @@ struct CaelCommandCenterSectionEnvelope<Payload: Decodable>: Decodable {
     let errors: [String]
 }
 
-struct CaelCommandCenterSectionsSnapshot {
+struct CaelCommandCenterSectionsSnapshot: Codable {
     let actionGates: CaelCommandCenterSectionEnvelope<CaelCommandCenterActionGatesSection>?
     let agentRuns: CaelCommandCenterSectionEnvelope<CaelCommandCenterAgentRunsSection>?
     let automations: CaelCommandCenterSectionEnvelope<CaelCommandCenterAutomationSection>?
@@ -317,14 +317,14 @@ struct CaelCommandCenterSectionsSnapshot {
     }
 }
 
-struct CaelCommandCenterActionGatesSection: Decodable {
+struct CaelCommandCenterActionGatesSection: Codable {
     let total: Int
     let approvalRequired: Int
     let dryRun: Int
     let actions: [CaelCommandCenterActionGateDetail]
 }
 
-struct CaelCommandCenterActionGateDetail: Decodable, Identifiable {
+struct CaelCommandCenterActionGateDetail: Codable, Identifiable {
     let id: String
     let label: String
     let source: String
@@ -339,12 +339,12 @@ struct CaelCommandCenterActionGateDetail: Decodable, Identifiable {
     let href: String?
 }
 
-struct CaelCommandCenterAgentRunsSection: Decodable {
+struct CaelCommandCenterAgentRunsSection: Codable {
     let runs: [CaelCommandCenterAgentRunDetail]
     let receipts: [CaelCommandCenterPromotionReceipt]
 }
 
-struct CaelCommandCenterAgentRunDetail: Decodable, Identifiable {
+struct CaelCommandCenterAgentRunDetail: Codable, Identifiable {
     let id: String
     let title: String
     let status: String
@@ -355,7 +355,7 @@ struct CaelCommandCenterAgentRunDetail: Decodable, Identifiable {
     let verification: String
 }
 
-struct CaelCommandCenterPromotionReceipt: Decodable, Identifiable {
+struct CaelCommandCenterPromotionReceipt: Codable, Identifiable {
     var id: String { path }
     let title: String
     let path: String
@@ -363,14 +363,14 @@ struct CaelCommandCenterPromotionReceipt: Decodable, Identifiable {
     let instance: String
 }
 
-struct CaelCommandCenterAutomationSection: Decodable {
+struct CaelCommandCenterAutomationSection: Codable {
     let boundary: String
     let instances: [CaelCommandCenterAutomationInstance]
     let promotionReceipts: [CaelCommandCenterPromotionReceipt]
     let guardrails: [String]
 }
 
-struct CaelCommandCenterAutomationInstance: Decodable, Identifiable {
+struct CaelCommandCenterAutomationInstance: Codable, Identifiable {
     let id: String
     let label: String
     let scope: String
@@ -380,14 +380,14 @@ struct CaelCommandCenterAutomationInstance: Decodable, Identifiable {
     let failures: [CaelCommandCenterAutomationFailure]
 }
 
-struct CaelCommandCenterAutomationHealth: Decodable {
+struct CaelCommandCenterAutomationHealth: Codable {
     let ok: Bool
     let detail: String
     let checkedAt: String
     let latencyMs: Double?
 }
 
-struct CaelCommandCenterAutomationFailure: Decodable, Identifiable {
+struct CaelCommandCenterAutomationFailure: Codable, Identifiable {
     var id: String { "\(instance)-\(workflowName)-\(lastSeen)" }
     let workflowName: String
     let status: String
@@ -396,25 +396,25 @@ struct CaelCommandCenterAutomationFailure: Decodable, Identifiable {
     let instance: String
 }
 
-struct CaelCommandCenterBrainSection: Decodable {
+struct CaelCommandCenterBrainSection: Codable {
     let sources: [CaelCommandCenterBrainSource]
     let memoryArtifacts: CaelCommandCenterBrainMemoryArtifacts
     let policy: [String]
 }
 
-struct CaelCommandCenterBrainMemoryArtifacts: Decodable {
+struct CaelCommandCenterBrainMemoryArtifacts: Codable {
     let count: Int
     let rootConfigured: Bool
     let root: String?
 }
 
-struct CaelCommandCenterMemoryArtifactsSection: Decodable {
+struct CaelCommandCenterMemoryArtifactsSection: Codable {
     let root: String
     let count: Int
     let artifacts: [CaelCommandCenterMemoryArtifact]
 }
 
-struct CaelCommandCenterMemoryArtifact: Decodable, Identifiable {
+struct CaelCommandCenterMemoryArtifact: Codable, Identifiable {
     let id: String
     let title: String
     let path: String
@@ -426,13 +426,13 @@ struct CaelCommandCenterMemoryArtifact: Decodable, Identifiable {
     let excerpt: String
 }
 
-struct CaelCommandCenterVaultRefsSection: Decodable {
+struct CaelCommandCenterVaultRefsSection: Codable {
     let warningCount: Int
     let refs: [CaelCommandCenterVaultRef]
     let policy: [String]
 }
 
-struct CaelCommandCenterVaultRef: Decodable, Identifiable {
+struct CaelCommandCenterVaultRef: Codable, Identifiable {
     let id: String
     let displayName: String
     let scope: String

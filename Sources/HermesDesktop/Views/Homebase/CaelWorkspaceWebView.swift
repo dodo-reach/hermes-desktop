@@ -3,8 +3,6 @@ import SwiftUI
 struct CaelWorkspaceWebView: View {
     @EnvironmentObject private var appState: AppState
 
-    private let workspaceURL = URL(string: "http://100.97.216.111:3077/cael-home")!
-
     var body: some View {
         HermesPageContainer(width: .analytics) {
             VStack(alignment: .leading, spacing: 24) {
@@ -33,16 +31,24 @@ struct CaelWorkspaceWebView: View {
         }
     }
 
+    private var workspaceURL: URL {
+        appState.activeConnection?.caelWorkspaceURL(path: "/cael-home") ?? ConnectionProfile().caelWorkspaceURL(path: "/cael-home")
+    }
+
     @ViewBuilder
     private var content: some View {
         if appState.isLoadingCaelWorkspace,
            appState.caelWorkspaceStatus == nil,
-           appState.caelIntegrationStatus == nil {
+           appState.caelIntegrationStatus == nil,
+           appState.caelCommandCenterSummary == nil,
+           appState.caelCommandCenterSections == nil {
             HermesSurfacePanel {
                 HermesLoadingState(label: "Loading Cael workspace…", minHeight: 320)
             }
         } else if let error = appState.caelWorkspaceError,
-                  appState.caelWorkspaceStatus == nil {
+                  appState.caelWorkspaceStatus == nil,
+                  appState.caelCommandCenterSummary == nil,
+                  appState.caelCommandCenterSections == nil {
             HermesSurfacePanel {
                 ContentUnavailableView(
                     "Unable to load Cael workspace",
@@ -52,6 +58,17 @@ struct CaelWorkspaceWebView: View {
                 .frame(maxWidth: .infinity, minHeight: 320)
             }
         } else {
+            if let cacheNotice = appState.caelCommandCenterCacheNotice {
+                HermesInsetSurface {
+                    CaelCommandCenterRow(
+                        title: "Last-known snapshot",
+                        detail: cacheNotice,
+                        badge: "Cached",
+                        tint: .orange
+                    )
+                }
+            }
+
             if let summary = appState.caelCommandCenterSummary {
                 commandCenterSnapshot(summary, warnings: appState.caelCommandCenterWarnings)
             }

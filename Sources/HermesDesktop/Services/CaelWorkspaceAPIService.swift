@@ -2,7 +2,6 @@ import Foundation
 
 final class CaelWorkspaceAPIService: @unchecked Sendable {
     private let sshTransport: SSHTransport
-    private let baseURL = "http://100.97.216.111:3077"
 
     init(sshTransport: SSHTransport) {
         self.sshTransport = sshTransport
@@ -89,7 +88,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         responseType: Response.Type
     ) async throws -> Response {
         let payload = try JSONEncoder().encode(CaelWorkspaceAPIRequest(
-            baseURL: baseURL,
+            baseURL: connection.resolvedCaelWorkspaceBaseURL,
             path: path,
             hermesHome: connection.remoteHermesHomePath
         ))

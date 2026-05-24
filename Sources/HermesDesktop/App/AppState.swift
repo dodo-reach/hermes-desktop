@@ -53,6 +53,7 @@ final class AppState: ObservableObject {
     @Published var caelCommandCenterSummary: CaelCommandCenterSummary?
     @Published var caelCommandCenterSections: CaelCommandCenterSectionsSnapshot?
     @Published var caelCommandCenterWarnings: [String] = []
+    @Published var caelCommandCenterCacheNotice: String?
     @Published var caelWorkspaceError: String?
     @Published var caelProviderUsageError: String?
     @Published var isLoadingCaelWorkspace = false
@@ -114,6 +115,7 @@ final class AppState: ObservableObject {
     let hermesChatService: HermesChatService
     let usageBrowserService: UsageBrowserService
     let caelWorkspaceAPIService: CaelWorkspaceAPIService
+    let caelCommandCenterSnapshotStore: CaelCommandCenterSnapshotStore
     let skillBrowserService: SkillBrowserService
     let cronBrowserService: CronBrowserService
     let kanbanBrowserService: KanbanBrowserService
@@ -164,6 +166,7 @@ final class AppState: ObservableObject {
         self.hermesChatService = HermesChatService(sshTransport: sshTransport)
         self.usageBrowserService = UsageBrowserService(sshTransport: sshTransport)
         self.caelWorkspaceAPIService = CaelWorkspaceAPIService(sshTransport: sshTransport)
+        self.caelCommandCenterSnapshotStore = CaelCommandCenterSnapshotStore(paths: paths)
         self.skillBrowserService = SkillBrowserService(sshTransport: sshTransport)
         self.cronBrowserService = CronBrowserService(sshTransport: sshTransport)
         self.kanbanBrowserService = KanbanBrowserService(sshTransport: sshTransport)
@@ -460,9 +463,12 @@ final class AppState: ObservableObject {
 
     func connect(to profile: ConnectionProfile) {
         let isSwitchingConnection = activeConnection?.workspaceScopeFingerprint != profile.workspaceScopeFingerprint
+        let isSwitchingCaelWorkspace = activeConnection?.commandCenterClientFingerprint != profile.commandCenterClientFingerprint
 
         if isSwitchingConnection {
             resetWorkspaceStateForConnectionChange()
+        } else if isSwitchingCaelWorkspace {
+            resetCaelWorkspaceState()
         }
 
         activeConnectionID = profile.id
@@ -483,6 +489,7 @@ final class AppState: ObservableObject {
         let previous = connectionStore.connections.first(where: { $0.id == normalized.id })
         let isActiveConnection = activeConnectionID == normalized.id
         let isChangingWorkspaceScope = previous?.workspaceScopeFingerprint != normalized.workspaceScopeFingerprint
+        let isChangingCaelWorkspaceScope = previous?.commandCenterClientFingerprint != normalized.commandCenterClientFingerprint
 
         if isActiveConnection && isChangingWorkspaceScope && hasUnsavedFileChanges {
             activeAlert = AppAlert(
@@ -495,14 +502,22 @@ final class AppState: ObservableObject {
         connectionStore.upsert(normalized)
 
         guard isActiveConnection else { return }
-        guard isChangingWorkspaceScope else { return }
+        if isChangingWorkspaceScope {
+            resetWorkspaceStateForConnectionChange()
+            selectedSection = .overview
+            setStatusMessage(L10n.string("Refreshing %@…", normalized.label))
 
-        resetWorkspaceStateForConnectionChange()
-        selectedSection = .overview
-        setStatusMessage(L10n.string("Refreshing %@…", normalized.label))
+            Task {
+                await prepareWorkspaceForActiveConnection()
+            }
+        } else if isChangingCaelWorkspaceScope {
+            resetCaelWorkspaceState()
+            setStatusMessage(L10n.string("Refreshing Cael Workspace for %@…", normalized.label))
 
-        Task {
-            await prepareWorkspaceForActiveConnection()
+            Task {
+                await loadCaelWorkspace(forceRefresh: true)
+                await loadCaelProviderUsage(forceRefresh: true)
+            }
         }
     }
 
@@ -1668,6 +1683,13 @@ final class AppState: ObservableObject {
             return
         }
 
+        if caelCommandCenterSummary == nil, caelCommandCenterSections == nil {
+            _ = applyCachedCommandCenterSnapshot(
+                for: profile,
+                reason: "Refreshing the live Workspace in the background."
+            )
+        }
+
         isLoadingCaelWorkspace = true
         caelWorkspaceError = nil
 
@@ -1676,16 +1698,28 @@ final class AppState: ObservableObject {
             let loadedIntegrations = try await caelWorkspaceAPIService.loadIntegrations(connection: profile)
             let loadedCommandCenter = try? await caelWorkspaceAPIService.loadCommandCenterSummary(connection: profile)
             let loadedSections = await caelWorkspaceAPIService.loadCommandCenterSections(connection: profile)
-            guard isActiveWorkspace(profile) else { return }
+            guard isActiveCaelWorkspace(profile) else { return }
 
             caelWorkspaceStatus = loadedStatus
             caelIntegrationStatus = loadedIntegrations
             caelCommandCenterSummary = loadedCommandCenter?.data
             caelCommandCenterSections = loadedSections
             caelCommandCenterWarnings = loadedCommandCenter?.warnings ?? []
+            caelCommandCenterCacheNotice = nil
+            try? caelCommandCenterSnapshotStore.save(
+                summaryEnvelope: loadedCommandCenter,
+                sections: loadedSections,
+                for: profile
+            )
             isLoadingCaelWorkspace = false
         } catch {
-            guard isActiveWorkspace(profile) else { return }
+            guard isActiveCaelWorkspace(profile) else { return }
+            if caelCommandCenterSummary == nil, caelCommandCenterSections == nil {
+                _ = applyCachedCommandCenterSnapshot(
+                    for: profile,
+                    reason: "The live Workspace fetch failed: \(error.localizedDescription)"
+                )
+            }
             isLoadingCaelWorkspace = false
             caelWorkspaceError = error.localizedDescription
             setStatusMessage("Unable to load Cael workspace status")
@@ -1707,12 +1741,12 @@ final class AppState: ObservableObject {
                 connection: profile,
                 force: forceRefresh
             )
-            guard isActiveWorkspace(profile) else { return }
+            guard isActiveCaelWorkspace(profile) else { return }
 
             caelProviderUsageLimits = limits
             isLoadingCaelProviderUsage = false
         } catch {
-            guard isActiveWorkspace(profile) else { return }
+            guard isActiveCaelWorkspace(profile) else { return }
             isLoadingCaelProviderUsage = false
             caelProviderUsageLimits = nil
             caelProviderUsageError = error.localizedDescription
@@ -2957,6 +2991,10 @@ final class AppState: ObservableObject {
         activeConnection?.workspaceScopeFingerprint == profile.workspaceScopeFingerprint
     }
 
+    private func isActiveCaelWorkspace(_ profile: ConnectionProfile) -> Bool {
+        activeConnection?.commandCenterClientFingerprint == profile.commandCenterClientFingerprint
+    }
+
     private func setDocument(_ document: FileEditorDocument) {
         workspaceFileDocuments[document.fileID] = document
     }
@@ -3797,6 +3835,37 @@ final class AppState: ObservableObject {
         await loadSessions(reset: true)
     }
 
+
+    @discardableResult
+    private func applyCachedCommandCenterSnapshot(for profile: ConnectionProfile, reason: String) -> Bool {
+        guard let cached = caelCommandCenterSnapshotStore.load(for: profile) else { return false }
+        caelCommandCenterSummary = cached.summaryEnvelope?.data
+        caelCommandCenterSections = cached.sections
+        let cachedAt = cached.cachedAt.formatted(date: .abbreviated, time: .shortened)
+        let notice = "Showing last-known command center snapshot from \(cachedAt). \(reason)"
+        var warnings = cached.summaryEnvelope?.warnings ?? []
+        warnings.insert(notice, at: 0)
+        caelCommandCenterWarnings = warnings
+        caelCommandCenterCacheNotice = notice
+        return true
+    }
+
+    private func resetCaelWorkspaceState() {
+        caelWorkspaceStatus = nil
+        caelIntegrationStatus = nil
+        caelProviderUsageLimits = nil
+        caelCommandCenterSummary = nil
+        caelCommandCenterSections = nil
+        caelCommandCenterWarnings = []
+        caelCommandCenterCacheNotice = nil
+        caelWorkspaceError = nil
+        caelProviderUsageError = nil
+        isLoadingCaelWorkspace = false
+        isRefreshingCaelWorkspace = false
+        isLoadingCaelProviderUsage = false
+        isRefreshingCaelProviderUsage = false
+    }
+
     private func resetWorkspaceStateForConnectionChange(closeTerminalTabs: Bool = true) {
         isBusy = false
         connectionTestRequestID = nil
@@ -3837,6 +3906,7 @@ final class AppState: ObservableObject {
         usageError = nil
         isLoadingUsage = false
         isRefreshingUsage = false
+        resetCaelWorkspaceState()
         skills = []
         selectedSkillID = nil
         selectedSkillDetail = nil

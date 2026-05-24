@@ -322,6 +322,53 @@ struct ConnectionProfileTests {
         #expect(result.stderr == "")
     }
 
+
+    @Test
+    func caelWorkspaceBaseURLDefaultsToBigMacAndBuildsRoutes() {
+        let profile = ConnectionProfile(
+            label: "BigMac",
+            sshAlias: "bigmac-home"
+        ).updated()
+
+        #expect(profile.resolvedCaelWorkspaceBaseURL == ConnectionProfile.defaultCaelWorkspaceBaseURL)
+        #expect(profile.caelWorkspaceURLString(path: "/cael-home") == "http://100.97.216.111:3077/cael-home")
+        #expect(profile.caelWorkspaceURLString(path: "usage") == "http://100.97.216.111:3077/usage")
+    }
+
+    @Test
+    func caelWorkspaceBaseURLNormalizesAndScopesCommandCenterClient() {
+        let base = ConnectionProfile(
+            label: "BigMac",
+            sshAlias: "bigmac-home"
+        ).updated()
+        let custom = ConnectionProfile(
+            label: "BigMac",
+            sshAlias: "bigmac-home",
+            caelWorkspaceBaseURL: "  https://cael.example.test:8443/workspace/  "
+        ).updated()
+
+        #expect(custom.resolvedCaelWorkspaceBaseURL == "https://cael.example.test:8443/workspace")
+        #expect(custom.workspaceScopeFingerprint == base.workspaceScopeFingerprint)
+        #expect(custom.commandCenterClientFingerprint != base.commandCenterClientFingerprint)
+    }
+
+    @Test
+    func rejectsInvalidCaelWorkspaceBaseURL() {
+        let missingScheme = ConnectionProfile(
+            label: "Bad Workspace",
+            sshHost: "example.com",
+            caelWorkspaceBaseURL: "100.97.216.111:3077"
+        ).updated()
+        let withQuery = ConnectionProfile(
+            label: "Bad Workspace",
+            sshHost: "example.com",
+            caelWorkspaceBaseURL: "http://100.97.216.111:3077?token=abc"
+        ).updated()
+
+        #expect(missingScheme.validationError == "Workspace URL must start with http:// or https://.")
+        #expect(withQuery.validationError == "Workspace URL cannot include query strings or fragments.")
+    }
+
     @Test
     func controlPathRecreatesTemporarySocketDirectoryWhenPruned() throws {
         let fileManager = FileManager.default

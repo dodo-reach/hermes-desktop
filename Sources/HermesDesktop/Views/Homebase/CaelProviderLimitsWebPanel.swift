@@ -3,8 +3,6 @@ import SwiftUI
 struct CaelProviderLimitsWebPanel: View {
     @EnvironmentObject private var appState: AppState
 
-    private let usageURL = URL(string: "http://100.97.216.111:3077/usage")!
-
     var body: some View {
         HermesSurfacePanel(
             title: "Provider Remaining Limits",
@@ -30,6 +28,10 @@ struct CaelProviderLimitsWebPanel: View {
         .task(id: appState.activeConnectionID) {
             await appState.loadCaelProviderUsage()
         }
+    }
+
+    private var usageURL: URL {
+        appState.activeConnection?.caelWorkspaceURL(path: "/usage") ?? ConnectionProfile().caelWorkspaceURL(path: "/usage")
     }
 
     @ViewBuilder
