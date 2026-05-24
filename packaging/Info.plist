@@ -30,6 +30,11 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Hermes Desktop contributors</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+    </dict>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSPrincipalClass</key>

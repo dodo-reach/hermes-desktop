@@ -36,11 +36,17 @@ struct SessionsView: View {
                 session: selectedSession,
                 messages: appState.sessionMessageDisplays,
                 errorMessage: appState.sessionsError,
+                conversationError: appState.sessionConversationError,
+                isSendingMessage: appState.isSendingSessionMessage,
                 isDeletingSession: selectedSession.map { selectedSession in
                     appState.isDeletingSession && appState.selectedSessionID == selectedSession.id
                 } ?? false,
                 isSessionPinned: selectedSession.map { appState.isSessionPinned($0.id) } ?? false,
                 sessionCompactionNotice: appState.sessionCompactionNotice,
+                pendingTurn: appState.pendingSessionTurn,
+                liveMessages: appState.liveSessionMessageDisplays,
+                liveToolActivityCards: appState.liveToolActivityCards,
+                promptCards: appState.sessionPromptCards,
                 mode: appState.selectedSessionDetailMode,
                 terminal: appState.sessionTUITerminal,
                 terminalTheme: appState.connectionStore.terminalTheme,
@@ -66,6 +72,15 @@ struct SessionsView: View {
                 },
                 onStartChat: {
                     appState.startSelectedSessionChat()
+                },
+                onStartSession: { prompt, autoApproveCommands in
+                    await appState.startNewSession(with: prompt, autoApproveCommands: autoApproveCommands)
+                },
+                onSendMessage: { prompt, autoApproveCommands in
+                    await appState.sendMessageToSelectedSession(prompt, autoApproveCommands: autoApproveCommands)
+                },
+                onRespondToPrompt: { card, response in
+                    await appState.respondToSessionPrompt(card, response: response)
                 },
                 onUpdateTerminalTheme: { newValue in
                     appState.connectionStore.terminalTheme = newValue

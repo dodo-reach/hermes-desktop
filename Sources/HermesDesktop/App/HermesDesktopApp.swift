@@ -7,7 +7,7 @@ struct HermesDesktopApp: App {
     @StateObject private var appState = AppState()
 
     var body: some Scene {
-        WindowGroup("Hermes Desktop") {
+        WindowGroup("Cael Desktop") {
             RootView()
                 .environmentObject(appState)
                 .frame(minWidth: 940, minHeight: 520)

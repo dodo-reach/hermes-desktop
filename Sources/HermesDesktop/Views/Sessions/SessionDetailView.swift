@@ -75,9 +75,15 @@ struct SessionDetailView: View {
     let session: SessionSummary?
     let messages: [SessionMessageDisplay]
     let errorMessage: String?
+    let conversationError: String?
+    let isSendingMessage: Bool
     let isDeletingSession: Bool
     let isSessionPinned: Bool
     let sessionCompactionNotice: SessionCompactionNotice?
+    let pendingTurn: PendingSessionTurn?
+    let liveMessages: [SessionMessageDisplay]
+    let liveToolActivityCards: [HermesToolActivityCard]
+    let promptCards: [HermesPromptCard]
     let mode: SessionDetailMode
     let terminal: SessionTUITerminal?
     let terminalTheme: TerminalThemePreference
@@ -90,6 +96,9 @@ struct SessionDetailView: View {
     let onToggleSessionPin: (SessionSummary) -> Void
     let onModeChange: (SessionDetailMode) -> Void
     let onStartChat: () -> Void
+    let onStartSession: (String, Bool) async -> Bool
+    let onSendMessage: (String, Bool) async -> Bool
+    let onRespondToPrompt: (HermesPromptCard, HermesPromptResponse) async -> Void
     let onUpdateTerminalTheme: (TerminalThemePreference) -> Void
     let onTerminalExitRefresh: () async -> Void
 
@@ -102,7 +111,7 @@ struct SessionDetailView: View {
     @State private var shouldAutoScrollNextMessageLoad = true
 
     private var latestMessageScrollKey: String {
-        "\(messages.count):\(messages.last?.id ?? "none")"
+        "\(messages.count):\(messages.last?.id ?? "none"):live=\(liveMessages.count):\(liveMessages.last?.id ?? "none"):pending=\(pendingTurn?.id.uuidString ?? "none"):prompts=\(promptCards.count):tools=\(liveToolActivityCards.count)"
     }
 
     var body: some View {
@@ -189,7 +198,7 @@ struct SessionDetailView: View {
 
     private var newChatSubtitle: String {
         guard let connection else {
-            return L10n.string("Select an SSH host to start a live Hermes TUI.")
+            return L10n.string("Select an SSH host to start a live Hermes chat.")
         }
         return "\(connection.label) - \(connection.displayDestination) - \(connection.resolvedHermesProfileName)"
     }
@@ -306,46 +315,171 @@ struct SessionDetailView: View {
 
     @ViewBuilder
     private var chatMode: some View {
-        if let terminal, terminalMatchesCurrentSelection(terminal) {
-            VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    Image(systemName: terminal.terminalSession.isRunning ? "terminal.fill" : "terminal")
-                        .foregroundStyle(terminal.terminalSession.isRunning ? Color.green : Color.secondary)
+        nativeChatMode
+    }
 
-                    Text(L10n.string(terminal.targetLabel))
-                        .font(.subheadline.weight(.semibold))
+    private var nativeChatMode: some View {
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        nativeChatScrollContent
 
-                    Spacer()
-
-                    TerminalAppearanceToolbarButton(
-                        appearance: terminalAppearance,
-                        isPresented: $isShowingChatAppearanceEditor,
-                        themePreference: terminalThemeBinding
+                        Color.clear
+                            .frame(height: 1)
+                            .id(sessionDetailBottomID)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 22)
+                }
+                .background {
+                    SessionScrollOffsetObserver(
+                        sessionID: session?.id,
+                        savedOffset: savedScrollOffset,
+                        restoreRequestID: scrollOffsetRestoreRequestID,
+                        onSaveOffset: onSaveScrollOffset,
+                        onMetricsChange: { metrics in
+                            scrollMetrics = metrics
+                        }
                     )
-
-                    if let exitCode = terminal.terminalSession.exitCode {
-                        HermesBadge(text: L10n.string("Exited %@", "\(exitCode)"), tint: exitCode == 0 ? .secondary : .orange)
-                    } else if terminal.terminalSession.isRunning {
-                        HermesBadge(text: L10n.string("Running"), tint: Color(red: 0.0, green: 0.58, blue: 0.22))
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if shouldShowJumpToLatestButton {
+                        Button {
+                            requestScrollToLatest(proxy, reason: .pendingTurnChanged)
+                        } label: {
+                            Label(L10n.string("Jump to Latest"), systemImage: "arrow.down.to.line")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(18)
+                        .transition(.opacity)
+                        .help(L10n.string("Scroll to the latest message"))
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.secondary.opacity(0.06))
-
-                SwiftTermTerminalView(
-                    session: terminal.terminalSession,
-                    appearance: terminalAppearance,
-                    isActive: isActive && mode == .chat
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onChange(of: session?.id) { _, _ in
+                    expandedMetadataMessageIDs.removeAll()
+                    shouldAutoScrollNextMessageLoad = true
+                    restoreSavedScrollOffsetOrScrollToLatest(proxy)
+                }
+                .onChange(of: latestMessageScrollKey) { _, _ in
+                    handleMessageScrollChange(proxy)
+                }
+                .task(id: session?.id) {
+                    restoreSavedScrollOffsetOrScrollToLatest(proxy)
+                }
             }
-            .onChange(of: terminal.terminalSession.exitCode) { _, _ in
-                Task { await onTerminalExitRefresh() }
+
+            Divider()
+                .opacity(0.6)
+
+            composerDock
+        }
+    }
+
+    @ViewBuilder
+    private var nativeChatScrollContent: some View {
+        if let errorMessage {
+            HermesSurfacePanel {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+            }
+        }
+
+        if let session {
+            if let sessionCompactionNotice,
+               sessionCompactionNotice.sourceSessionID == session.id {
+                SessionCompactionNoticeView(notice: sessionCompactionNotice)
+            }
+
+            nativeConversationContent(for: session)
+        } else if let pendingTurn, pendingTurn.sessionID == nil {
+            HermesSurfacePanel(title: "Starting Session") {
+                PendingSessionTurnView(turn: pendingTurn, showPrompt: !allChatMessages.containsUserPrompt(pendingTurn.prompt))
+                    .id(pendingTurnScrollID(pendingTurn))
             }
         } else {
-            sessionChatPlaceholder
+            HermesSurfacePanel {
+                ContentUnavailableView(
+                    L10n.string("Start or select a session"),
+                    systemImage: "bubble.left.and.bubble.right",
+                    description: Text(L10n.string("Write below to begin a new Hermes conversation, or choose an existing session from the list."))
+                )
+                .frame(maxWidth: .infinity, minHeight: 320)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func nativeConversationContent(for session: SessionSummary) -> some View {
+        let matchingPendingTurn = pendingTurn?.sessionID == session.id ? pendingTurn : nil
+
+        if allChatMessages.isEmpty && matchingPendingTurn == nil && liveToolActivityCards.isEmpty && promptCards.isEmpty {
+            HermesSurfacePanel {
+                ContentUnavailableView(
+                    L10n.string("No transcript entries"),
+                    systemImage: "text.bubble",
+                    description: Text(L10n.string("This session has no readable message rows yet."))
+                )
+                .frame(maxWidth: .infinity, minHeight: 280)
+            }
+        } else {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(allChatMessages) { message in
+                    MessageCard(
+                        message: message,
+                        isShowingMetadata: metadataExpansionBinding(for: message.id)
+                    )
+                    .id(sessionMessageScrollID(message))
+                }
+
+                ForEach(liveToolActivityCards) { card in
+                    SessionToolActivityCardView(card: card)
+                }
+
+                ForEach(promptCards) { card in
+                    SessionPromptCardView(
+                        card: card,
+                        isDisabled: isSendingMessage,
+                        onRespond: onRespondToPrompt
+                    )
+                }
+
+                if let matchingPendingTurn {
+                    PendingSessionTurnView(
+                        turn: matchingPendingTurn,
+                        showPrompt: !allChatMessages.containsUserPrompt(matchingPendingTurn.prompt)
+                    )
+                    .id(pendingTurnScrollID(matchingPendingTurn))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var allChatMessages: [SessionMessageDisplay] {
+        var seen = Set<String>()
+        return (messages + liveMessages).filter { message in
+            seen.insert(message.id).inserted
+        }
+    }
+
+    private var composerDock: some View {
+        SessionComposerPanel(
+            title: session == nil ? "New Session" : "Continue Session",
+            placeholder: session == nil ? "Start a new Hermes session…" : "Write a reply to continue this session…",
+            errorMessage: conversationError,
+            isSending: isSendingMessage,
+            showsAutoApprove: true,
+            onResumeInTerminal: session.map { selectedSession in
+                { onResumeInTerminal(selectedSession) }
+            },
+            onSend: session == nil ? onStartSession : onSendMessage
+        )
+        .id(session?.id ?? "new-session")
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 
     @ViewBuilder
@@ -438,7 +572,8 @@ struct SessionDetailView: View {
     }
 
     private var hasLatestTranscriptTarget: Bool {
-        !messages.isEmpty
+        let hasMatchingPendingTurn = pendingTurn.map { $0.sessionID == nil || $0.sessionID == session?.id } ?? false
+        return !allChatMessages.isEmpty || hasMatchingPendingTurn || !promptCards.isEmpty || !liveToolActivityCards.isEmpty
     }
 
     private var isNearLatest: Bool {
@@ -523,7 +658,12 @@ struct SessionDetailView: View {
     }
 
     private var latestScrollTarget: (id: String, anchor: UnitPoint) {
-        if let lastMessage = messages.last {
+        if let pendingTurn,
+           pendingTurn.sessionID == nil || pendingTurn.sessionID == session?.id {
+            return (pendingTurnScrollID(pendingTurn), .top)
+        }
+
+        if let lastMessage = allChatMessages.last {
             return (sessionMessageScrollID(lastMessage), .top)
         }
 
@@ -1796,6 +1936,25 @@ private struct ConversationMessageCard: View {
     @Binding var isShowingMetadata: Bool
 
     var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if isUserMessage {
+                Spacer(minLength: 80)
+            }
+
+            messageSurface
+                .frame(
+                    maxWidth: isUserMessage ? 680 : .infinity,
+                    alignment: isUserMessage ? .trailing : .leading
+                )
+
+            if !isUserMessage {
+                Spacer(minLength: 40)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)
+    }
+
+    private var messageSurface: some View {
         TranscriptMessageSurface(tint: roleTint) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 10) {
@@ -1842,6 +2001,10 @@ private struct ConversationMessageCard: View {
                 }
             }
         }
+    }
+
+    private var isUserMessage: Bool {
+        message.role == .user
     }
 
     private var displayRole: String {

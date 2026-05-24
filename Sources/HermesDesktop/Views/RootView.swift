@@ -62,7 +62,7 @@ struct RootView: View {
                 }
 
                 ToolbarItem(placement: .principal) {
-                    HermesToolbarPrincipalTitle(title: "Hermes Desktop")
+                    HermesToolbarPrincipalTitle(title: "Cael Desktop")
                 }
 
                 ToolbarItemGroup(placement: .automatic) {
@@ -286,7 +286,7 @@ struct RootView: View {
         case .connections:
             ConnectionsView()
         case .overview:
-            OverviewView()
+            CaelWorkspaceWebView()
         case .files:
             FilesView(splitLayout: $filesSplitLayout)
         case .sessions:

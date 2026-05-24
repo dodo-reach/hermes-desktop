@@ -212,9 +212,11 @@ struct SessionMessageDisplay: Identifiable, Hashable, Sendable {
             guard let value = displayMetadata[key] else { return nil }
             return SessionMetadataDisplayItem(key: key, value: value)
         }
-        toolSummary = message.role.isToolRole
-            ? SessionToolMessageSummary(content: message.content)
-            : nil
+        if message.role.isToolRole || SessionToolMessageSummary.isToolLikePayload(message.content) {
+            toolSummary = SessionToolMessageSummary(content: message.content)
+        } else {
+            toolSummary = nil
+        }
         isStreaming = false
     }
 
@@ -358,21 +360,93 @@ struct SessionToolMessageSummary: Hashable, Sendable {
         }
 
         let payload = Self.jsonPayload(from: content)
+        let toolCall = Self.toolCallPayload(from: Self.jsonObject(from: content))
         statusKind = Self.statusKind(from: payload)
-        statusText = Self.statusText(for: statusKind, payload: payload)
-        title = Self.title(from: payload) ?? L10n.string("Tool output")
-        preview = Self.preview(from: payload) ?? Self.snippet(from: content)
+        statusText = toolCall == nil ? Self.statusText(for: statusKind, payload: payload) : nil
+        title = toolCall?.title ?? Self.title(from: payload) ?? L10n.string("Tool output")
+        preview = toolCall?.preview ?? Self.preview(from: payload) ?? Self.snippet(from: content)
+    }
+
+    static func isToolLikePayload(_ content: String?) -> Bool {
+        guard let content else { return false }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.first == "{" || trimmed.first == "[" else { return false }
+        guard trimmed.utf8.count <= jsonParseByteLimit else { return false }
+        guard let object = Self.jsonObject(from: trimmed) else {
+            return false
+        }
+
+        if Self.toolCallPayload(from: object) != nil {
+            return true
+        }
+
+        guard let payload = object as? [String: Any] else { return false }
+        return payload["output"] != nil ||
+            payload["error"] != nil ||
+            payload["diff"] != nil ||
+            payload["exit_code"] != nil ||
+            payload["success"] != nil ||
+            payload["files_modified"] != nil
     }
 
     private static func jsonPayload(from content: String) -> [String: Any]? {
-        guard content.utf8.count <= jsonParseByteLimit,
-              let data = content.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
+        guard let object = Self.jsonObject(from: content),
               let payload = object as? [String: Any] else {
             return nil
         }
 
         return payload
+    }
+
+    private static func jsonObject(from content: String) -> Any? {
+        guard content.utf8.count <= jsonParseByteLimit,
+              let data = content.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    private static func toolCallPayload(from object: Any?) -> (title: String, preview: String?)? {
+        if let payload = object as? [String: Any] {
+            return Self.toolCallPayload(from: payload)
+        }
+
+        if let items = object as? [[String: Any]] {
+            for item in items {
+                if let result = Self.toolCallPayload(from: item) {
+                    return result
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func toolCallPayload(from payload: [String: Any]?) -> (title: String, preview: String?)? {
+        guard let payload else { return nil }
+
+        if let type = stringValue(payload["type"])?.lowercased(),
+           type.contains("function"),
+           let function = payload["function"] as? [String: Any] {
+            let name = stringValue(function["name"]) ?? L10n.string("function")
+            let arguments = stringValue(function["arguments"])
+            return (
+                L10n.string("Tool call: %@", name),
+                arguments.flatMap(Self.snippet(from:))
+            )
+        }
+
+        if let name = stringValue(payload["name"]),
+           payload["arguments"] != nil || payload["parameters"] != nil {
+            let rawArguments = stringValue(payload["arguments"]) ?? stringValue(payload["parameters"])
+            return (
+                L10n.string("Tool call: %@", name),
+                rawArguments.flatMap(Self.snippet(from:))
+            )
+        }
+
+        return nil
     }
 
     private static func statusKind(from payload: [String: Any]?) -> SessionToolStatusKind {

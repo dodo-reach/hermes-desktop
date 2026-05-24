@@ -47,6 +47,15 @@ final class AppState: ObservableObject {
     @Published var usageError: String?
     @Published var isLoadingUsage = false
     @Published var isRefreshingUsage = false
+    @Published var caelWorkspaceStatus: CaelWorkspaceStatus?
+    @Published var caelIntegrationStatus: CaelIntegrationStatus?
+    @Published var caelProviderUsageLimits: CaelProviderUsageLimits?
+    @Published var caelWorkspaceError: String?
+    @Published var caelProviderUsageError: String?
+    @Published var isLoadingCaelWorkspace = false
+    @Published var isRefreshingCaelWorkspace = false
+    @Published var isLoadingCaelProviderUsage = false
+    @Published var isRefreshingCaelProviderUsage = false
     @Published var selectedSkillID: String?
     @Published var skills: [SkillSummary] = []
     @Published var selectedSkillDetail: SkillDetail?
@@ -101,6 +110,7 @@ final class AppState: ObservableObject {
     let sessionBrowserService: SessionBrowserService
     let hermesChatService: HermesChatService
     let usageBrowserService: UsageBrowserService
+    let caelWorkspaceAPIService: CaelWorkspaceAPIService
     let skillBrowserService: SkillBrowserService
     let cronBrowserService: CronBrowserService
     let kanbanBrowserService: KanbanBrowserService
@@ -150,6 +160,7 @@ final class AppState: ObservableObject {
         self.sessionBrowserService = SessionBrowserService(sshTransport: sshTransport)
         self.hermesChatService = HermesChatService(sshTransport: sshTransport)
         self.usageBrowserService = UsageBrowserService(sshTransport: sshTransport)
+        self.caelWorkspaceAPIService = CaelWorkspaceAPIService(sshTransport: sshTransport)
         self.skillBrowserService = SkillBrowserService(sshTransport: sshTransport)
         self.cronBrowserService = CronBrowserService(sshTransport: sshTransport)
         self.kanbanBrowserService = KanbanBrowserService(sshTransport: sshTransport)
@@ -262,7 +273,7 @@ final class AppState: ObservableObject {
 
         switch selectedSection {
         case .overview:
-            return !isRefreshingOverview && !isBusy
+            return !isLoadingCaelWorkspace && !isRefreshingCaelWorkspace
         case .sessions:
             return !isLoadingSessions && !isRefreshingSessions
         case .workflows:
@@ -272,7 +283,7 @@ final class AppState: ObservableObject {
         case .kanban:
             return !isLoadingKanbanBoards && !isLoadingKanbanBoard && !isRefreshingKanbanBoard
         case .usage:
-            return !isLoadingUsage && !isRefreshingUsage
+            return !isLoadingUsage && !isRefreshingUsage && !isLoadingCaelProviderUsage && !isRefreshingCaelProviderUsage
         case .skills:
             return !isLoadingSkills && !isRefreshingSkills
         case .connections, .files, .terminal:
@@ -364,7 +375,7 @@ final class AppState: ObservableObject {
 
         switch selectedSection {
         case .overview:
-            await refreshOverview(manual: true)
+            await refreshCaelWorkspace()
         case .sessions:
             await refreshSessions(query: sessionSearchQuery)
         case .workflows:
@@ -375,6 +386,7 @@ final class AppState: ObservableObject {
             await refreshKanbanBoard()
         case .usage:
             await refreshUsage()
+            await refreshCaelProviderUsage()
         case .skills:
             await refreshSkills()
         case .connections, .files, .terminal:
@@ -612,6 +624,20 @@ final class AppState: ObservableObject {
         isRefreshingUsage = true
         await loadUsage(forceRefresh: true)
         isRefreshingUsage = false
+    }
+
+    func refreshCaelWorkspace() async {
+        guard !isLoadingCaelWorkspace, !isRefreshingCaelWorkspace else { return }
+        isRefreshingCaelWorkspace = true
+        await loadCaelWorkspace(forceRefresh: true)
+        isRefreshingCaelWorkspace = false
+    }
+
+    func refreshCaelProviderUsage() async {
+        guard !isLoadingCaelProviderUsage, !isRefreshingCaelProviderUsage else { return }
+        isRefreshingCaelProviderUsage = true
+        await loadCaelProviderUsage(forceRefresh: true)
+        isRefreshingCaelProviderUsage = false
     }
 
     func refreshSkills() async {
@@ -985,7 +1011,7 @@ final class AppState: ObservableObject {
         sessionsError = nil
         sessionConversationError = nil
         selectedSessionDetailMode = .chat
-        startSessionTUI(sessionID: nil, replacesExisting: true)
+        stopSessionTUI()
     }
 
     func setSessionDetailMode(_ mode: SessionDetailMode) {
@@ -1000,13 +1026,13 @@ final class AppState: ObservableObject {
                 }
             }
         case .chat:
-            startSessionTUIIfNeededForCurrentSelection()
+            stopSessionTUI()
         }
     }
 
     func startSelectedSessionChat() {
         selectedSessionDetailMode = .chat
-        startSessionTUI(sessionID: selectedSessionID, replacesExisting: true)
+        stopSessionTUI()
     }
 
     func refreshSessionsAfterChat() async {
@@ -1608,6 +1634,62 @@ final class AppState: ObservableObject {
             usageProfileBreakdown = nil
             usageError = error.localizedDescription
             setStatusMessage(L10n.string("Unable to load usage"))
+        }
+    }
+
+    func loadCaelWorkspace(forceRefresh: Bool = false) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingCaelWorkspace { return }
+        if !forceRefresh,
+           caelWorkspaceStatus != nil,
+           caelIntegrationStatus != nil {
+            return
+        }
+
+        isLoadingCaelWorkspace = true
+        caelWorkspaceError = nil
+
+        do {
+            let loadedStatus = try await caelWorkspaceAPIService.loadStatus(connection: profile)
+            let loadedIntegrations = try await caelWorkspaceAPIService.loadIntegrations(connection: profile)
+            guard isActiveWorkspace(profile) else { return }
+
+            caelWorkspaceStatus = loadedStatus
+            caelIntegrationStatus = loadedIntegrations
+            isLoadingCaelWorkspace = false
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingCaelWorkspace = false
+            caelWorkspaceError = error.localizedDescription
+            setStatusMessage("Unable to load Cael workspace status")
+        }
+    }
+
+    func loadCaelProviderUsage(forceRefresh: Bool = false) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingCaelProviderUsage { return }
+        if !forceRefresh, caelProviderUsageLimits != nil {
+            return
+        }
+
+        isLoadingCaelProviderUsage = true
+        caelProviderUsageError = nil
+
+        do {
+            let limits = try await caelWorkspaceAPIService.loadProviderUsage(
+                connection: profile,
+                force: forceRefresh
+            )
+            guard isActiveWorkspace(profile) else { return }
+
+            caelProviderUsageLimits = limits
+            isLoadingCaelProviderUsage = false
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingCaelProviderUsage = false
+            caelProviderUsageLimits = nil
+            caelProviderUsageError = error.localizedDescription
+            setStatusMessage("Unable to load provider usage limits")
         }
     }
 
@@ -2740,7 +2822,7 @@ final class AppState: ObservableObject {
     private func handleSectionEntry(_ section: AppSection) {
         switch section {
         case .overview:
-            Task { await refreshOverview() }
+            Task { await loadCaelWorkspace() }
         case .files:
             Task { await ensureInitialFileLoads() }
         case .sessions:
@@ -2756,7 +2838,10 @@ final class AppState: ObservableObject {
         case .kanban:
             Task { await loadKanbanBoard() }
         case .usage:
-            Task { await loadUsage(forceRefresh: true) }
+            Task {
+                await loadUsage(forceRefresh: true)
+                await loadCaelProviderUsage(forceRefresh: true)
+            }
         case .skills:
             Task { await loadSkills(reset: true) }
         case .terminal:
