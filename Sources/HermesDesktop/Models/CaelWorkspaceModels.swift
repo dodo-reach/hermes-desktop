@@ -280,3 +280,167 @@ struct CaelCommandCenterHomebaseRecord: Decodable, Identifiable {
     let kind: String
     let updatedAt: String?
 }
+
+struct CaelCommandCenterSectionEnvelope<Payload: Decodable>: Decodable {
+    let ok: Bool
+    let generatedAt: String
+    let source: String
+    let scope: String
+    let data: Payload?
+    let warnings: [String]
+    let errors: [String]
+}
+
+struct CaelCommandCenterSectionsSnapshot {
+    let actionGates: CaelCommandCenterSectionEnvelope<CaelCommandCenterActionGatesSection>?
+    let agentRuns: CaelCommandCenterSectionEnvelope<CaelCommandCenterAgentRunsSection>?
+    let automations: CaelCommandCenterSectionEnvelope<CaelCommandCenterAutomationSection>?
+    let brain: CaelCommandCenterSectionEnvelope<CaelCommandCenterBrainSection>?
+    let homebaseRecords: CaelCommandCenterSectionEnvelope<CaelCommandCenterHomebaseRecords>?
+    let memoryArtifacts: CaelCommandCenterSectionEnvelope<CaelCommandCenterMemoryArtifactsSection>?
+    let usageLimits: CaelCommandCenterSectionEnvelope<CaelCommandCenterUsage>?
+    let vaultRefs: CaelCommandCenterSectionEnvelope<CaelCommandCenterVaultRefsSection>?
+
+    var warningCount: Int {
+        [
+            actionGates?.warnings.count,
+            agentRuns?.warnings.count,
+            automations?.warnings.count,
+            brain?.warnings.count,
+            homebaseRecords?.warnings.count,
+            memoryArtifacts?.warnings.count,
+            usageLimits?.warnings.count,
+            vaultRefs?.warnings.count
+        ]
+        .compactMap { $0 }
+        .reduce(0, +)
+    }
+}
+
+struct CaelCommandCenterActionGatesSection: Decodable {
+    let total: Int
+    let approvalRequired: Int
+    let dryRun: Int
+    let actions: [CaelCommandCenterActionGateDetail]
+}
+
+struct CaelCommandCenterActionGateDetail: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let source: String
+    let status: String
+    let riskLevel: String
+    let approvalRequired: Bool
+    let dryRunSupported: Bool
+    let detail: String
+    let ownerSystem: String
+    let sideEffects: String
+    let rollback: String
+    let href: String?
+}
+
+struct CaelCommandCenterAgentRunsSection: Decodable {
+    let runs: [CaelCommandCenterAgentRunDetail]
+    let receipts: [CaelCommandCenterPromotionReceipt]
+}
+
+struct CaelCommandCenterAgentRunDetail: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let status: String
+    let updatedAt: String
+    let source: String
+    let path: String?
+    let receiptCount: Int?
+    let verification: String
+}
+
+struct CaelCommandCenterPromotionReceipt: Decodable, Identifiable {
+    var id: String { path }
+    let title: String
+    let path: String
+    let updatedAt: String
+    let instance: String
+}
+
+struct CaelCommandCenterAutomationSection: Decodable {
+    let boundary: String
+    let instances: [CaelCommandCenterAutomationInstance]
+    let promotionReceipts: [CaelCommandCenterPromotionReceipt]
+    let guardrails: [String]
+}
+
+struct CaelCommandCenterAutomationInstance: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let scope: String
+    let access: String
+    let boundary: String
+    let health: CaelCommandCenterAutomationHealth
+    let failures: [CaelCommandCenterAutomationFailure]
+}
+
+struct CaelCommandCenterAutomationHealth: Decodable {
+    let ok: Bool
+    let detail: String
+    let checkedAt: String
+    let latencyMs: Double?
+}
+
+struct CaelCommandCenterAutomationFailure: Decodable, Identifiable {
+    var id: String { "\(instance)-\(workflowName)-\(lastSeen)" }
+    let workflowName: String
+    let status: String
+    let lastSeen: String
+    let count: Int
+    let instance: String
+}
+
+struct CaelCommandCenterBrainSection: Decodable {
+    let sources: [CaelCommandCenterBrainSource]
+    let memoryArtifacts: CaelCommandCenterBrainMemoryArtifacts
+    let policy: [String]
+}
+
+struct CaelCommandCenterBrainMemoryArtifacts: Decodable {
+    let count: Int
+    let rootConfigured: Bool
+    let root: String?
+}
+
+struct CaelCommandCenterMemoryArtifactsSection: Decodable {
+    let root: String
+    let count: Int
+    let artifacts: [CaelCommandCenterMemoryArtifact]
+}
+
+struct CaelCommandCenterMemoryArtifact: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let path: String
+    let scope: String
+    let tenant: String?
+    let updatedAt: String?
+    let sensitivity: String
+    let tags: [String]
+    let excerpt: String
+}
+
+struct CaelCommandCenterVaultRefsSection: Decodable {
+    let warningCount: Int
+    let refs: [CaelCommandCenterVaultRef]
+    let policy: [String]
+}
+
+struct CaelCommandCenterVaultRef: Decodable, Identifiable {
+    let id: String
+    let displayName: String
+    let scope: String
+    let exists: Bool
+    let lastVerifiedAt: String?
+    let rotationDueAt: String?
+    let linkedSystems: [String]
+    let vaultHref: String?
+    let secretValue: String?
+}
+

@@ -56,6 +56,10 @@ struct CaelWorkspaceWebView: View {
                 commandCenterSnapshot(summary, warnings: appState.caelCommandCenterWarnings)
             }
 
+            if let sections = appState.caelCommandCenterSections {
+                commandCenterSectionsSnapshot(sections)
+            }
+
             if let status = appState.caelWorkspaceStatus {
                 statusOverview(status)
                 systemsPanel(status)
@@ -238,6 +242,157 @@ struct CaelWorkspaceWebView: View {
                             badge: "\(brainCount)",
                             tint: .mint
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    private func commandCenterSectionsSnapshot(_ snapshot: CaelCommandCenterSectionsSnapshot) -> some View {
+        HermesSurfacePanel(
+            title: "Command Center Sections",
+            subtitle: "Dedicated /api/command-center/* section endpoints for Desktop, Web, and mobile mirrors. Secrets are represented as refs only."
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                if snapshot.warningCount > 0 {
+                    HermesInsetSurface {
+                        CaelCommandCenterRow(
+                            title: "Section warnings",
+                            detail: "\(snapshot.warningCount) degraded or setup-needed conditions are present across the section endpoints.",
+                            badge: "Review",
+                            tint: .orange
+                        )
+                    }
+                }
+
+                LazyVGrid(columns: adaptiveColumns(minWidth: 260), spacing: 12) {
+                    CaelCommandCenterListCard(
+                        title: "Action Gates",
+                        emptyText: "No approval gates surfaced.",
+                        isEmpty: snapshot.actionGates?.data?.actions.isEmpty ?? true
+                    ) {
+                        if let data = snapshot.actionGates?.data {
+                            CaelCommandCenterRow(
+                                title: "Approval required",
+                                detail: "\(data.dryRun) actions support dry-run before promotion.",
+                                badge: "\(data.approvalRequired)",
+                                tint: data.approvalRequired > 0 ? .orange : .green
+                            )
+                            ForEach(data.actions.prefix(3)) { gate in
+                                CaelCommandCenterRow(
+                                    title: gate.label,
+                                    detail: gate.sideEffects.nilIfEmpty ?? gate.detail,
+                                    badge: gate.riskLevel.replacingOccurrences(of: "_", with: " "),
+                                    tint: gate.approvalRequired ? .orange : .green
+                                )
+                            }
+                        }
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Runs + Receipts",
+                        emptyText: "No run or receipt details reported.",
+                        isEmpty: snapshot.agentRuns?.data?.runs.isEmpty ?? true
+                    ) {
+                        if let data = snapshot.agentRuns?.data {
+                            CaelCommandCenterRow(
+                                title: "Receipt refs",
+                                detail: "Run history is sourced from durable receipt references.",
+                                badge: "\(data.receipts.count)",
+                                tint: .cyan
+                            )
+                            ForEach(data.runs.prefix(3)) { run in
+                                CaelCommandCenterRow(
+                                    title: run.title,
+                                    detail: run.verification,
+                                    badge: run.status,
+                                    tint: .cyan
+                                )
+                            }
+                        }
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Brain + Memory",
+                        emptyText: "No brain or memory artifacts reported.",
+                        isEmpty: snapshot.brain?.data?.sources.isEmpty ?? true
+                    ) {
+                        if let brain = snapshot.brain?.data {
+                            CaelCommandCenterRow(
+                                title: "Brain sources",
+                                detail: "\(brain.memoryArtifacts.count) memory artifact references are visible to the command center.",
+                                badge: "\(brain.sources.count)",
+                                tint: .mint
+                            )
+                        }
+                        ForEach((snapshot.memoryArtifacts?.data?.artifacts ?? []).prefix(3)) { artifact in
+                            CaelCommandCenterRow(
+                                title: artifact.title,
+                                detail: artifact.excerpt.nilIfEmpty ?? artifact.scope,
+                                badge: artifact.sensitivity,
+                                tint: artifact.sensitivity == "secret_ref" ? .orange : .mint
+                            )
+                        }
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Automations",
+                        emptyText: "No automation lanes reported.",
+                        isEmpty: snapshot.automations?.data?.instances.isEmpty ?? true
+                    ) {
+                        if let automations = snapshot.automations?.data {
+                            ForEach(automations.instances) { instance in
+                                CaelCommandCenterRow(
+                                    title: instance.label,
+                                    detail: instance.health.detail,
+                                    badge: "\(instance.failures.count) failures",
+                                    tint: instance.health.ok ? .green : .orange
+                                )
+                            }
+                        }
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Vault + Models",
+                        emptyText: "No vault refs or model monitors reported."
+                    ) {
+                        let vaultRefs = snapshot.vaultRefs?.data?.refs ?? []
+                        let providers = snapshot.usageLimits?.data?.providers.filter { $0.monitorKind == "cael" || $0.caelDefault } ?? []
+                        CaelCommandCenterRow(
+                            title: "Vault refs",
+                            detail: "Reference-only pointers; secret values are not returned to the client.",
+                            badge: "\(vaultRefs.count)",
+                            tint: .orange
+                        )
+                        CaelCommandCenterRow(
+                            title: "Cael model monitors",
+                            detail: providers.map { $0.caelModel ?? $0.label }.joined(separator: ", ").nilIfEmpty ?? "No active model monitors reported.",
+                            badge: "\(providers.count)",
+                            tint: .blue
+                        )
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Homebase",
+                        emptyText: "Homebase records are unavailable or degraded.",
+                        isEmpty: snapshot.homebaseRecords?.data?.records.isEmpty ?? true
+                    ) {
+                        if let homebase = snapshot.homebaseRecords?.data {
+                            CaelCommandCenterRow(
+                                title: homebase.status,
+                                detail: homebase.detail,
+                                badge: "\(homebase.records.count)",
+                                tint: homebase.status == "available" ? .green : .orange
+                            )
+                            ForEach(homebase.records.prefix(3)) { record in
+                                CaelCommandCenterRow(
+                                    title: record.label,
+                                    detail: record.updatedAt ?? "No update timestamp",
+                                    badge: record.kind,
+                                    tint: .secondary
+                                )
+                            }
+                        }
                     }
                 }
             }
