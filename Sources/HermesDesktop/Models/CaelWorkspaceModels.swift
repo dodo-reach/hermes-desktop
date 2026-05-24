@@ -7,6 +7,7 @@ struct CaelWorkspaceStatus: Decodable {
     let posture: CaelWorkspacePosture
     let services: [CaelWorkspaceServiceCheck]
     let links: [CaelWorkspaceLink]
+    let contract: CaelCommandCenterContract
 }
 
 struct CaelWorkspacePosture: Decodable {
@@ -30,6 +31,28 @@ struct CaelWorkspaceLink: Decodable, Identifiable {
     var id: String { href }
     let label: String
     let href: String
+    let description: String
+}
+
+struct CaelCommandCenterContract: Decodable {
+    let id: String
+    let version: String
+    let generatedAt: String
+    let principle: String
+    let primarySurface: String
+    let mirrorSurface: String
+    let privateAccess: String
+    let surfaces: [CaelCommandCenterSurface]
+}
+
+struct CaelCommandCenterSurface: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let owner: String
+    let desktop: String
+    let web: String
+    let source: String
+    let status: String
     let description: String
 }
 

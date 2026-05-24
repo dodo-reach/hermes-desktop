@@ -1124,6 +1124,15 @@ final class AppState: ObservableObject {
 
         let existingVisibleSessionIDs = Set((sessions + pinnedSessionSummaries).map(\.id))
 
+        if await preferredChatTransport(for: profile) == .native {
+            return await startNativeSessionTurn(
+                prompt: trimmedPrompt,
+                sessionID: nil,
+                autoApproveCommands: autoApproveCommands,
+                existingVisibleSessionIDs: existingVisibleSessionIDs
+            )
+        }
+
         isSendingSessionMessage = true
         pendingSessionTurn = PendingSessionTurn(
             sessionID: nil,
@@ -1348,6 +1357,14 @@ final class AppState: ObservableObject {
             sessionConversationError = message
             setStatusMessage(L10n.string("Conversation compacted. Open the new session from history to continue."))
             return false
+        }
+
+        if await preferredChatTransport(for: profile) == .native {
+            return await startNativeSessionTurn(
+                prompt: trimmedPrompt,
+                sessionID: selectedSessionID,
+                autoApproveCommands: autoApproveCommands
+            )
         }
 
         isSendingSessionMessage = true
@@ -1910,6 +1927,18 @@ final class AppState: ObservableObject {
         sessionsError = nil
         sessionConversationError = nil
         selectedSessionDetailMode = .chat
+        selectedSection = .sessions
+
+        if await preferredChatTransport(for: profile) == .native {
+            setStatusMessage(L10n.string("Running %@ in native Chat…", workflow.name))
+            _ = await startNativeSessionTurn(
+                prompt: invocation.initialInput,
+                sessionID: nil,
+                autoApproveCommands: false
+            )
+            return
+        }
+
         sessionTUITerminal = SessionTUITerminal(
             sessionID: nil,
             connection: profile.updated(),
@@ -1918,8 +1947,7 @@ final class AppState: ObservableObject {
             startupInput: invocation.initialInput,
             workflowLaunchDiagnosticsContext: workflowLaunchDiagnosticsContext
         )
-        selectedSection = .sessions
-        setStatusMessage(L10n.string("Opening %@ in Chat…", workflow.name))
+        setStatusMessage(L10n.string("Opening %@ in Chat TUI fallback…", workflow.name))
     }
 
     func loadSkillDetail(summary: SkillSummary) async {

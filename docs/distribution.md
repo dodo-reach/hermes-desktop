@@ -120,6 +120,31 @@ source and build the app yourself:
 
 That produces a local app bundle in `dist/HermesDesktop.app`.
 
+For the Cael-local distribution loop on BigMac, the current private arm64 package
+is served by Cael Workspace rather than GitHub:
+
+```bash
+cd /Users/cderamos/StorageRuntime/hermes-desktop-cael
+HERMES_MAC_ARCHS=arm64 ./scripts/build-macos-app.sh
+ditto -c -k --keepParent dist/HermesDesktop.app /tmp/CaelDesktop-macOS-arm64.zip
+cp /tmp/CaelDesktop-macOS-arm64.zip \
+  /Users/cderamos/StorageRuntime/hermes-workspace-cael/public/downloads/CaelDesktop-macOS-arm64.zip
+cd /Users/cderamos/StorageRuntime/hermes-workspace-cael/public/downloads
+shasum -a 256 CaelDesktop-macOS-arm64.zip > CaelDesktop-macOS-arm64.sha256
+```
+
+The private install page is `http://100.97.216.111:3077/desktop` on the
+Tailscale mesh. It serves:
+
+- `/downloads/CaelDesktop-macOS-arm64.zip`
+- `/downloads/CaelDesktop-macOS-arm64.sha256`
+
+Install paths used in the Cael setup:
+
+- BigMac source/build path: `/Users/cderamos/StorageRuntime/hermes-desktop-cael`
+- BigMac installed app: `/Applications/HermesDesktop.app`
+- MBP installed app: `~/Applications/HermesDesktop.app` or `/Applications/HermesDesktop.app`
+
 This is still an ad-hoc signed, non-notarized bundle, because that is the
 current build and release model in the repo. Building locally does not turn it
 into a notarized distribution, but it does let you trust your own build inputs
