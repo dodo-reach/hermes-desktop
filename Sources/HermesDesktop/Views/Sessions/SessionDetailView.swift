@@ -2040,6 +2040,23 @@ private struct ConversationMessageCard: View {
     }
 }
 
+private enum HermesDesktopResourceBundle {
+    static let module: Bundle? = {
+        let bundleName = "HermesDesktop_HermesDesktop.bundle"
+        let candidates: [URL?] = [
+            Bundle.main.bundleURL.appendingPathComponent(bundleName),
+            Bundle.main.resourceURL?.appendingPathComponent(bundleName),
+        ]
+
+        for candidate in candidates {
+            guard let candidate, let bundle = Bundle(url: candidate) else { continue }
+            return bundle
+        }
+
+        return nil
+    }()
+}
+
 private struct RoleAvatar: View {
     let role: SessionMessageRole
     let tint: Color
@@ -2063,10 +2080,17 @@ private struct RoleAvatar: View {
     private var avatarContent: some View {
         switch role {
         case .assistant:
-            Image("CaelProfile", bundle: .module)
-                .resizable()
-                .scaledToFill()
-                .clipShape(Circle())
+            if let bundle = HermesDesktopResourceBundle.module,
+               bundle.url(forResource: "CaelProfile", withExtension: "png") != nil {
+                Image("CaelProfile", bundle: bundle)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(Circle())
+            } else {
+                Image(systemName: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
         case .user:
             Image(systemName: "person.fill")
                 .font(.caption.weight(.semibold))

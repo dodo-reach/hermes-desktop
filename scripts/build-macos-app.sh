@@ -246,6 +246,7 @@ if [[ ! -d "$APP_RESOURCE_BUNDLE_PATH" ]]; then
     echo "error: expected SwiftPM resource bundle not found at $APP_RESOURCE_BUNDLE_PATH" >&2
     exit 1
 fi
+rm -rf "$RESOURCES_PATH/$APP_RESOURCE_BUNDLE_NAME"
 cp -R "$APP_RESOURCE_BUNDLE_PATH" "$RESOURCES_PATH/"
 if [[ -d "$LOCALIZATION_SOURCE_PATH" ]]; then
     find "$LOCALIZATION_SOURCE_PATH" -maxdepth 1 -name "*.lproj" -type d -exec cp -R {} "$RESOURCES_PATH/" \;
