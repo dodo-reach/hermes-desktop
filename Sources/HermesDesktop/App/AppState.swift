@@ -50,6 +50,8 @@ final class AppState: ObservableObject {
     @Published var caelWorkspaceStatus: CaelWorkspaceStatus?
     @Published var caelIntegrationStatus: CaelIntegrationStatus?
     @Published var caelProviderUsageLimits: CaelProviderUsageLimits?
+    @Published var caelCommandCenterSummary: CaelCommandCenterSummary?
+    @Published var caelCommandCenterWarnings: [String] = []
     @Published var caelWorkspaceError: String?
     @Published var caelProviderUsageError: String?
     @Published var isLoadingCaelWorkspace = false
@@ -1659,7 +1661,8 @@ final class AppState: ObservableObject {
         if isLoadingCaelWorkspace { return }
         if !forceRefresh,
            caelWorkspaceStatus != nil,
-           caelIntegrationStatus != nil {
+           caelIntegrationStatus != nil,
+           caelCommandCenterSummary != nil {
             return
         }
 
@@ -1669,10 +1672,13 @@ final class AppState: ObservableObject {
         do {
             let loadedStatus = try await caelWorkspaceAPIService.loadStatus(connection: profile)
             let loadedIntegrations = try await caelWorkspaceAPIService.loadIntegrations(connection: profile)
+            let loadedCommandCenter = try? await caelWorkspaceAPIService.loadCommandCenterSummary(connection: profile)
             guard isActiveWorkspace(profile) else { return }
 
             caelWorkspaceStatus = loadedStatus
             caelIntegrationStatus = loadedIntegrations
+            caelCommandCenterSummary = loadedCommandCenter?.data
+            caelCommandCenterWarnings = loadedCommandCenter?.warnings ?? []
             isLoadingCaelWorkspace = false
         } catch {
             guard isActiveWorkspace(profile) else { return }

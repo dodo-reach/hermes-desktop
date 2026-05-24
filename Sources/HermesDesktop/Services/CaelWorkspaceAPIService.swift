@@ -16,6 +16,10 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         try await loadStatus(connection: connection).contract
     }
 
+    func loadCommandCenterSummary(connection: ConnectionProfile) async throws -> CaelCommandCenterSummaryEnvelope {
+        try await loadJSON(connection: connection, path: "/api/command-center/summary", responseType: CaelCommandCenterSummaryEnvelope.self)
+    }
+
     func loadIntegrations(connection: ConnectionProfile) async throws -> CaelIntegrationStatus {
         try await loadJSON(connection: connection, path: "/api/integrations/status", responseType: CaelIntegrationStatus.self)
     }

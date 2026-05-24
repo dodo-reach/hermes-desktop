@@ -52,6 +52,10 @@ struct CaelWorkspaceWebView: View {
                 .frame(maxWidth: .infinity, minHeight: 320)
             }
         } else {
+            if let summary = appState.caelCommandCenterSummary {
+                commandCenterSnapshot(summary, warnings: appState.caelCommandCenterWarnings)
+            }
+
             if let status = appState.caelWorkspaceStatus {
                 statusOverview(status)
                 systemsPanel(status)
@@ -145,6 +149,110 @@ struct CaelWorkspaceWebView: View {
         }
     }
 
+
+
+    private func commandCenterSnapshot(
+        _ summary: CaelCommandCenterSummary,
+        warnings: [String]
+    ) -> some View {
+        HermesSurfacePanel(
+            title: "Shared Command Center",
+            subtitle: "Snapshot from /api/command-center/summary. Desktop and Web render the same contract."
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                if !warnings.isEmpty {
+                    HermesInsetSurface {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Warnings")
+                                .font(.caption.weight(.semibold))
+                                .textCase(.uppercase)
+                                .foregroundStyle(.orange)
+                            ForEach(warnings, id: \.self) { warning in
+                                Text(warning)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                LazyVGrid(columns: adaptiveColumns(minWidth: 260), spacing: 12) {
+                    CaelCommandCenterListCard(
+                        title: "Now / Next",
+                        emptyText: "No focus items reported."
+                    ) {
+                        ForEach(summary.nowNext.prefix(5)) { item in
+                            CaelCommandCenterRow(
+                                title: item.label,
+                                detail: item.detail,
+                                tint: tint(for: item.tone)
+                            )
+                        }
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Action Gates",
+                        emptyText: "No approval gates surfaced.",
+                        isEmpty: summary.actionGates.isEmpty
+                    ) {
+                        ForEach(summary.actionGates.prefix(4)) { gate in
+                            CaelCommandCenterRow(
+                                title: gate.label,
+                                detail: gate.detail,
+                                badge: gate.riskLevel.replacingOccurrences(of: "_", with: " "),
+                                tint: gate.approvalRequired ? .orange : .green
+                            )
+                        }
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Recent Receipts",
+                        emptyText: "No receipt summaries found.",
+                        isEmpty: summary.agentRuns.isEmpty
+                    ) {
+                        ForEach(summary.agentRuns.prefix(4)) { run in
+                            CaelCommandCenterRow(
+                                title: run.title,
+                                detail: run.status,
+                                badge: run.source,
+                                tint: .cyan
+                            )
+                        }
+                    }
+
+                    CaelCommandCenterListCard(
+                        title: "Models + Brain",
+                        emptyText: "No model or brain snapshot reported."
+                    ) {
+                        let providers = summary.usage?.providers.filter { $0.monitorKind == "cael" || $0.caelDefault } ?? []
+                        CaelCommandCenterRow(
+                            title: "Cael model monitors",
+                            detail: providers.map { $0.caelModel ?? $0.label }.joined(separator: ", ").nilIfEmpty ?? "No active model monitors reported.",
+                            badge: "\(providers.count)",
+                            tint: .blue
+                        )
+                        let brainCount = summary.brain?.sources.filter { $0.status == "available" }.count ?? 0
+                        CaelCommandCenterRow(
+                            title: "Available brain sources",
+                            detail: "Reference-only sources; secrets stay filtered.",
+                            badge: "\(brainCount)",
+                            tint: .mint
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func tint(for tone: String) -> Color {
+        switch tone {
+        case "success": .green
+        case "warning": .orange
+        case "danger": .red
+        default: .blue
+        }
+    }
+
     private var nativeFeatureMap: some View {
         HermesSurfacePanel(
             title: "Native Feature Map",
@@ -163,6 +271,75 @@ struct CaelWorkspaceWebView: View {
 
     private func adaptiveColumns(minWidth: CGFloat) -> [GridItem] {
         [GridItem(.adaptive(minimum: minWidth), spacing: 12, alignment: .top)]
+    }
+}
+
+
+
+private struct CaelCommandCenterListCard<Content: View>: View {
+    let title: String
+    let emptyText: String
+    var isEmpty = false
+    let content: () -> Content
+
+    init(
+        title: String,
+        emptyText: String,
+        isEmpty: Bool = false,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.emptyText = emptyText
+        self.isEmpty = isEmpty
+        self.content = content
+    }
+
+    var body: some View {
+        HermesInsetSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title)
+                    .font(.headline)
+                if isEmpty {
+                    Text(emptyText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+private struct CaelCommandCenterRow: View {
+    let title: String
+    let detail: String
+    var badge: String?
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let badge {
+                    CaelStatusBadge(label: badge.capitalized, tint: tint)
+                }
+            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

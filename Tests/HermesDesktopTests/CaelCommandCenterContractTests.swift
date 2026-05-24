@@ -53,4 +53,120 @@ struct CaelCommandCenterContractTests {
         #expect(status.contract.surfaces.first?.status == "migration-only")
         #expect(status.contract.surfaces.first?.owner == "legacy")
     }
+
+    @Test
+    func decodesCommandCenterSummaryEnvelope() throws {
+        let json = #"""
+        {
+          "ok": true,
+          "generatedAt": "2026-05-24T00:00:00.000Z",
+          "source": "cael-workspace:3077",
+          "scope": "mixed",
+          "warnings": [],
+          "errors": [],
+          "links": [{ "label": "Usage", "href": "/usage", "kind": "local" }],
+          "data": {
+            "version": "2026-05-24.phase1",
+            "generatedAt": "2026-05-24T00:00:00.000Z",
+            "contract": null,
+            "posture": {
+              "host": "BigMac",
+              "bind": "100.97.216.111:3077",
+              "remoteAccess": "Tailscale-only",
+              "auth": "enabled",
+              "publicInternet": "disabled"
+            },
+            "systems": [{
+              "id": "workspace",
+              "label": "Workspace",
+              "ok": true,
+              "lane": "personal",
+              "owner": "Cael",
+              "detail": "HTTP 200",
+              "latencyMs": 12
+            }],
+            "integrations": [],
+            "usage": {
+              "enabledProviders": ["codex"],
+              "providers": [{
+                "id": "codex",
+                "label": "Codex",
+                "status": "ok",
+                "confidence": "live",
+                "monitorKind": "cael",
+                "caelDefault": true,
+                "caelModel": "gpt-5.5",
+                "primary": {
+                  "label": "weekly",
+                  "usedPercent": 25,
+                  "remainingPercent": 75,
+                  "resetsAt": null
+                }
+              }]
+            },
+            "automations": {
+              "boundary": "separate lanes",
+              "instances": [{
+                "id": "personal-bigmac",
+                "label": "Personal n8n",
+                "ok": true,
+                "scope": "personal",
+                "boundary": "personal only",
+                "failures": 0
+              }]
+            },
+            "brain": {
+              "sources": [{
+                "id": "personal-kv",
+                "label": "Personal Knowledge Vault",
+                "category": "personal",
+                "status": "available",
+                "writable": false
+              }]
+            },
+            "actionGates": [{
+              "id": "business-dry-run-smoke",
+              "label": "Business dry run",
+              "source": "n8n-governance",
+              "status": "approval_gated",
+              "riskLevel": "production_mutation",
+              "approvalRequired": true,
+              "dryRunSupported": true,
+              "detail": "requires approval"
+            }],
+            "agentRuns": [{
+              "id": "/Users/cderamos/.hermes/receipts/chat.md",
+              "title": "chat recovery receipt",
+              "status": "personal-bigmac",
+              "updatedAt": "2026-05-24T01:00:00.000Z",
+              "source": "receipt",
+              "path": "/Users/cderamos/.hermes/receipts/chat.md"
+            }],
+            "nowNext": [{
+              "id": "runtime-posture",
+              "label": "Runtime ready",
+              "detail": "Core checks are online.",
+              "tone": "success",
+              "href": "/cael-home"
+            }],
+            "homebaseRecords": {
+              "status": "planned",
+              "detail": "Twenty remains legacy.",
+              "records": []
+            }
+          }
+        }
+        """#
+
+        let envelope = try JSONDecoder().decode(CaelCommandCenterSummaryEnvelope.self, from: Data(json.utf8))
+
+        #expect(envelope.ok)
+        #expect(envelope.source == "cael-workspace:3077")
+        #expect(envelope.data?.posture?.host == "BigMac")
+        #expect(envelope.data?.usage?.enabledProviders == ["codex"])
+        #expect(envelope.data?.actionGates.first?.approvalRequired == true)
+        #expect(envelope.data?.brain?.sources.first?.status == "available")
+        #expect(envelope.links?.first?.kind == "local")
+    }
+
 }
