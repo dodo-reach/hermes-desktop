@@ -11,6 +11,9 @@ struct HermesDesktopApp: App {
             RootView()
                 .environmentObject(appState)
                 .frame(minWidth: 940, minHeight: 520)
+                .tint(HermesTheme.accent)
+                .preferredColorScheme(.dark)
+                .background(HermesTheme.background)
                 .background(HermesWindowTitleBarConfigurator())
         }
         .defaultSize(width: 1360, height: 860)

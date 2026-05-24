@@ -428,7 +428,7 @@ private struct WorkspaceSidebarCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(L10n.string("Hermes Profile"))
+            Text(L10n.string("Agent"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -441,15 +441,15 @@ private struct WorkspaceSidebarCard: View {
                             }
                         } label: {
                             if profile.name == connection.resolvedHermesProfileName {
-                                Label(profile.name, systemImage: "checkmark")
+                                Label(profile.displayTitle, systemImage: "checkmark")
                             } else {
-                                Text(profile.name)
+                                Text(profile.displayTitle)
                             }
                         }
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Text(connection.resolvedHermesProfileName)
+                        Text(connection.agentDisplayName)
                             .font(.headline)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -467,7 +467,7 @@ private struct WorkspaceSidebarCard: View {
                 .buttonStyle(.plain)
                 .disabled(appState.isRefreshingOverview || appState.isBusy)
             } else {
-                Text(connection.resolvedHermesProfileName)
+                Text(connection.agentDisplayName)
                     .font(.headline)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -500,7 +500,8 @@ private struct WorkspaceSidebarCard: View {
                 name: connection.resolvedHermesProfileName,
                 path: connection.remoteHermesHomePath,
                 isDefault: connection.usesDefaultHermesProfile,
-                exists: true
+                exists: true,
+                displayName: connection.agentDisplayName
             )
         ]
     }

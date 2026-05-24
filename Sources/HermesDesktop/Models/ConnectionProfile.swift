@@ -2,6 +2,7 @@ import Foundation
 
 struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
     static let defaultCaelWorkspaceBaseURL = "http://100.97.216.111:3077"
+    static let defaultAgentDisplayName = "Cael"
 
     var id: UUID
     var label: String
@@ -108,6 +109,13 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
             return trimmedCustomHermesHomePath.displayNameForCustomHermesHomePath
         }
         return trimmedHermesProfile ?? "default"
+    }
+
+    var agentDisplayName: String {
+        if usesCustomHermesHome {
+            return resolvedHermesProfileName
+        }
+        return trimmedHermesProfile?.profileDisplayName ?? Self.defaultAgentDisplayName
     }
 
     var usesDefaultHermesProfile: Bool {
@@ -392,6 +400,19 @@ private extension String {
         }
 
         return trimmed.split(separator: "/").last.map(String.init) ?? trimmed
+    }
+
+    var profileDisplayName: String {
+        let words = split { character in
+            character == "-" || character == "_"
+        }
+        guard !words.isEmpty else { return self }
+        return words
+            .map { word in
+                let lowercased = String(word).lowercased()
+                return lowercased.prefix(1).uppercased() + lowercased.dropFirst()
+            }
+            .joined(separator: " ")
     }
 
     var escapedForDoubleQuotedShellArgument: String {

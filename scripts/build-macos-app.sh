@@ -111,7 +111,14 @@ generate_icon() {
     mkdir -p "$ICONSET_PATH"
 
     if [[ ! -f "$ICON_SOURCE" ]]; then
-        env "${BUILD_ENV[@]}" swift "$ROOT_DIR/scripts/generate-app-icon.swift" "$ICON_SOURCE"
+        if [[ -f "$ROOT_DIR/packaging/CaelImageGenMaster.png" && -f "$ROOT_DIR/../hermes-workspace-cael/scripts/generate-cael-brand-assets.swift" ]]; then
+            env "${BUILD_ENV[@]}" swift "$ROOT_DIR/../hermes-workspace-cael/scripts/generate-cael-brand-assets.swift" \
+                "$ROOT_DIR/packaging/CaelImageGenMaster.png" \
+                "$ROOT_DIR" \
+                "$ROOT_DIR/../hermes-workspace-cael"
+        else
+            env "${BUILD_ENV[@]}" swift "$ROOT_DIR/scripts/generate-app-icon.swift" "$ICON_SOURCE"
+        fi
     fi
 
     sips -z 16 16 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_16x16.png" >/dev/null

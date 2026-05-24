@@ -7,28 +7,41 @@ enum HermesTheme {
     static let insetCornerRadius: CGFloat = 10
     static let rowCornerRadius: CGFloat = 12
 
+    static let background = Color(red: 0.008, green: 0.031, blue: 0.071)
+    static let sidebar = Color(red: 0.024, green: 0.075, blue: 0.149)
+    static let panel = Color(red: 0.027, green: 0.102, blue: 0.180)
+    static let card = Color(red: 0.039, green: 0.129, blue: 0.220)
+    static let row = Color(red: 0.051, green: 0.161, blue: 0.271)
+    static let text = Color(red: 0.918, green: 0.969, blue: 1.000)
+    static let mutedText = Color(red: 0.706, green: 0.835, blue: 0.902)
+    static let accent = Color(red: 0.337, green: 0.851, blue: 1.000)
+    static let accentSecondary = Color(red: 0.914, green: 0.727, blue: 0.365)
+    static let success = Color(red: 0.290, green: 0.871, blue: 0.502)
+    static let warning = Color(red: 0.965, green: 0.769, blue: 0.325)
+    static let danger = Color(red: 0.984, green: 0.443, blue: 0.522)
+
     static var panelFill: Color {
-        Color(NSColor.controlBackgroundColor).opacity(0.72)
+        panel.opacity(0.94)
     }
 
     static var insetFill: Color {
-        Color.secondary.opacity(0.055)
+        card.opacity(0.72)
     }
 
     static var rowFill: Color {
-        Color.secondary.opacity(0.045)
+        row.opacity(0.62)
     }
 
     static var subtleStroke: Color {
-        Color.primary.opacity(0.055)
+        accent.opacity(0.15)
     }
 
     static var selectedFill: Color {
-        Color.accentColor.opacity(0.12)
+        accent.opacity(0.14)
     }
 
     static var selectedStroke: Color {
-        Color.accentColor.opacity(0.22)
+        accent.opacity(0.34)
     }
 }
 
@@ -75,6 +88,9 @@ struct HermesPageContainer<Content: View>: View {
                 .padding(.vertical, verticalPadding)
                 .frame(maxWidth: .infinity, alignment: .top)
         }
+        .scrollContentBackground(.hidden)
+        .background(HermesTheme.background)
+        .foregroundStyle(HermesTheme.text)
     }
 }
 
@@ -116,12 +132,13 @@ struct HermesPageHeader<Accessory: View>: View {
             Text(L10n.string(title))
                 .font(.title)
                 .fontWeight(.semibold)
+                .foregroundStyle(HermesTheme.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
 
             Text(L10n.string(subtitle))
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(HermesTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -269,12 +286,13 @@ struct HermesSurfacePanel<Content: View>: View {
                     if let title {
                         Text(L10n.string(title))
                             .font(.headline)
+                            .foregroundStyle(HermesTheme.text)
                     }
 
                     if let subtitle {
                         Text(L10n.string(subtitle))
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(HermesTheme.mutedText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }

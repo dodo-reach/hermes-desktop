@@ -29,14 +29,23 @@ struct RemoteHermesProfile: Codable, Identifiable {
     let path: String
     let isDefault: Bool
     let exists: Bool
+    let displayName: String?
 
     var id: String { name }
+    var displayTitle: String { displayName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? name }
 
     enum CodingKeys: String, CodingKey {
         case name
         case path
         case isDefault = "is_default"
         case exists
+        case displayName = "display_name"
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 
