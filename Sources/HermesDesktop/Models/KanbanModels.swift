@@ -66,6 +66,15 @@ struct KanbanOperationResponse: Codable, Sendable {
 
 struct KanbanProject: Codable, Identifiable, Hashable, Sendable {
     static let defaultSlug = "default"
+    static let workspaceTasksSlug = "workspace-tasks"
+    static let workspaceTasks = KanbanProject(
+        slug: workspaceTasksSlug,
+        name: "Workspace Tasks",
+        description: "Shared :3077 task board used by the web and mobile workspace.",
+        icon: "checklist",
+        color: "blue",
+        isCurrent: true
+    )
 
     let slug: String
     let name: String?
@@ -513,6 +522,7 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
     case todo
     case ready
     case running
+    case review
     case blocked
     case done
     case archived
@@ -523,6 +533,7 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
         .todo,
         .ready,
         .running,
+        .review,
         .blocked,
         .done,
         .archived
@@ -548,6 +559,8 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
             self = .ready
         case "running":
             self = .running
+        case "review":
+            self = .review
         case "blocked":
             self = .blocked
         case "done":
@@ -569,6 +582,8 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
             "ready"
         case .running:
             "running"
+        case .review:
+            "review"
         case .blocked:
             "blocked"
         case .done:
@@ -590,6 +605,8 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
             "Ready"
         case .running:
             "Running"
+        case .review:
+            "Review"
         case .blocked:
             "Blocked"
         case .done:

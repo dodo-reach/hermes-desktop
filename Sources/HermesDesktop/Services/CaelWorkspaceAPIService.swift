@@ -336,6 +336,94 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return artifact
     }
 
+    func loadWorkspaceTasks(connection: ConnectionProfile, includeDone: Bool = false) async throws -> [WorkspaceTask] {
+        let includeDoneValue = includeDone ? "true" : "false"
+        let response = try await loadJSON(
+            connection: connection,
+            path: "/api/claude-tasks?include_done=\(includeDoneValue)",
+            responseType: WorkspaceTasksResponse.self
+        )
+        return response.tasks
+    }
+
+    @discardableResult
+    func createWorkspaceTask(connection: ConnectionProfile, draft: KanbanTaskDraft) async throws -> WorkspaceTask {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/claude-tasks",
+            body: WorkspaceTaskCreateRequest(
+                title: draft.normalizedTitle,
+                description: draft.normalizedBody ?? "",
+                column: draft.startsInTriage ? .backlog : .todo,
+                priority: WorkspaceTaskPriority.fromKanbanPriority(draft.priority),
+                assignee: draft.normalizedAssignee,
+                tags: draft.skills,
+                dueDate: nil,
+                createdBy: connection.resolvedHermesProfileName
+            ),
+            responseType: WorkspaceTaskMutationResponse.self
+        )
+        guard let task = response.task else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API did not return a created task.")
+        }
+        return task
+    }
+
+    @discardableResult
+    func updateWorkspaceTask(
+        connection: ConnectionProfile,
+        taskID: String,
+        title: String? = nil,
+        description: String? = nil,
+        column: WorkspaceTaskColumn? = nil,
+        priority: WorkspaceTaskPriority? = nil,
+        assignee: String? = nil,
+        tags: [String]? = nil
+    ) async throws -> WorkspaceTask {
+        let response = try await patchJSON(
+            connection: connection,
+            path: "/api/claude-tasks/\(taskID)",
+            body: WorkspaceTaskUpdateRequest(
+                title: title,
+                description: description,
+                column: column,
+                priority: priority,
+                assignee: assignee,
+                tags: tags
+            ),
+            responseType: WorkspaceTaskMutationResponse.self
+        )
+        guard let task = response.task else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API did not return an updated task.")
+        }
+        return task
+    }
+
+    @discardableResult
+    func moveWorkspaceTask(connection: ConnectionProfile, taskID: String, column: WorkspaceTaskColumn) async throws -> WorkspaceTask {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/claude-tasks/\(taskID)?action=move",
+            body: WorkspaceTaskMoveRequest(column: column, movedBy: "cael-desktop"),
+            responseType: WorkspaceTaskMutationResponse.self
+        )
+        guard let task = response.task else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API did not return a moved task.")
+        }
+        return task
+    }
+
+    func deleteWorkspaceTask(connection: ConnectionProfile, taskID: String) async throws {
+        let response = try await deleteJSON(
+            connection: connection,
+            path: "/api/claude-tasks/\(taskID)",
+            responseType: WorkspaceTaskDeleteResponse.self
+        )
+        guard response.ok == true else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API does not support deleting this shared task.")
+        }
+    }
+
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
         var components = URLComponents()
         components.path = "/api/files"
@@ -399,6 +487,33 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
             body: bodyString,
             responseType: responseType
         )
+    }
+
+    private func patchJSON<Body: Encodable, Response: Decodable>(
+        connection: ConnectionProfile,
+        path: String,
+        body: Body,
+        responseType: Response.Type
+    ) async throws -> Response {
+        let bodyData = try JSONEncoder().encode(body)
+        guard let bodyString = String(data: bodyData, encoding: .utf8) else {
+            throw SSHTransportError.invalidResponse("Workspace API request body was not valid UTF-8.")
+        }
+        return try await requestJSON(
+            connection: connection,
+            path: path,
+            method: "PATCH",
+            body: bodyString,
+            responseType: responseType
+        )
+    }
+
+    private func deleteJSON<Response: Decodable>(
+        connection: ConnectionProfile,
+        path: String,
+        responseType: Response.Type
+    ) async throws -> Response {
+        try await requestJSON(connection: connection, path: path, method: "DELETE", body: nil, responseType: responseType)
     }
 
     private func requestJSON<Response: Decodable>(
@@ -605,6 +720,47 @@ private struct CaelWorkspaceFileEntry: Decodable {
     private static func modifiedTimestamp(from value: String?) -> Double? {
         guard let value else { return nil }
         return ISO8601DateFormatter().date(from: value)?.timeIntervalSince1970
+    }
+}
+
+private struct WorkspaceTaskCreateRequest: Encodable {
+    let title: String
+    let description: String
+    let column: WorkspaceTaskColumn
+    let priority: WorkspaceTaskPriority
+    let assignee: String?
+    let tags: [String]
+    let dueDate: String?
+    let createdBy: String
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case description
+        case column
+        case priority
+        case assignee
+        case tags
+        case dueDate = "due_date"
+        case createdBy = "created_by"
+    }
+}
+
+private struct WorkspaceTaskUpdateRequest: Encodable {
+    let title: String?
+    let description: String?
+    let column: WorkspaceTaskColumn?
+    let priority: WorkspaceTaskPriority?
+    let assignee: String?
+    let tags: [String]?
+}
+
+private struct WorkspaceTaskMoveRequest: Encodable {
+    let column: WorkspaceTaskColumn
+    let movedBy: String
+
+    enum CodingKeys: String, CodingKey {
+        case column
+        case movedBy = "moved_by"
     }
 }
 

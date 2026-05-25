@@ -11,7 +11,9 @@ struct KanbanView: View {
     @State private var tenantFilter = KanbanFilterOption.all
     @State private var isCreatingTask = false
     @State private var isCreatingBoard = false
+    @State private var isEditingWorkspaceTask = false
     @State private var taskDraft = KanbanTaskDraft()
+    @State private var workspaceTaskDraft = KanbanTaskDraft()
     @State private var boardDraft = KanbanBoardDraft()
     @State private var boardPendingArchive: KanbanProject?
     @State private var showArchiveBoardConfirmation = false
@@ -82,7 +84,9 @@ struct KanbanView: View {
 
             HStack(spacing: 8) {
                 createTaskButton
-                dispatchButton
+                if !appState.isWorkspaceKanbanBoardSelected {
+                    dispatchButton
+                }
             }
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -96,6 +100,7 @@ struct KanbanView: View {
                     Button {
                         isCreatingBoard = false
                         isCreatingTask = false
+                        isEditingWorkspaceTask = false
                         Task { await appState.selectKanbanBoard(board.slug) }
                     } label: {
                         HStack {
@@ -116,6 +121,7 @@ struct KanbanView: View {
                 Button {
                     boardDraft = KanbanBoardDraft()
                     isCreatingTask = false
+                    isEditingWorkspaceTask = false
                     isCreatingBoard = true
                 } label: {
                     Label(L10n.string("New Board"), systemImage: "plus")
@@ -126,7 +132,8 @@ struct KanbanView: View {
 
             if appState.supportsKanbanBoardManagement,
                let selectedBoard = appState.selectedKanbanBoard,
-               !selectedBoard.isDefault {
+               !selectedBoard.isDefault,
+               selectedBoard.slug != KanbanProject.workspaceTasksSlug {
                 Divider()
 
                 Button(L10n.string("Archive Board"), role: .destructive) {
@@ -469,6 +476,45 @@ struct KanbanView: View {
                     }
                 }
             )
+        } else if isEditingWorkspaceTask {
+            KanbanTaskEditorView(
+                draft: $workspaceTaskDraft,
+                errorMessage: appState.kanbanError,
+                isSaving: appState.isOperatingOnKanbanTask,
+                assignees: assigneeOptions,
+                onCancel: {
+                    isEditingWorkspaceTask = false
+                },
+                onSave: {
+                    guard let taskID = appState.selectedKanbanTaskID else { return }
+                    if await appState.updateWorkspaceKanbanTask(taskID: taskID, draft: workspaceTaskDraft) {
+                        isEditingWorkspaceTask = false
+                    }
+                }
+            )
+        } else if appState.isWorkspaceKanbanBoardSelected {
+            WorkspaceTaskDetailView(
+                task: selectedTask,
+                errorMessage: appState.kanbanError,
+                operationInFlight: selectedTask.map { task in
+                    appState.isOperatingOnKanbanTask && appState.operatingKanbanTaskID == task.id
+                } ?? false,
+                onCreate: {
+                    taskDraft = KanbanTaskDraft()
+                    isCreatingBoard = false
+                    isEditingWorkspaceTask = false
+                    isCreatingTask = true
+                },
+                onEdit: { task in
+                    workspaceTaskDraft = draft(from: task)
+                    isCreatingBoard = false
+                    isCreatingTask = false
+                    isEditingWorkspaceTask = true
+                },
+                onMove: { taskID, status in
+                    await appState.moveWorkspaceKanbanTask(taskID: taskID, to: status)
+                }
+            )
         } else {
             KanbanTaskDetailView(
                 task: selectedTask,
@@ -619,6 +665,13 @@ struct KanbanView: View {
 
     private func boardSubtitle(_ board: KanbanBoard) -> String {
         let boardName = appState.selectedKanbanBoard?.resolvedName ?? selectedBoardTitle
+        if appState.isWorkspaceKanbanBoardSelected {
+            return L10n.string(
+                "Workspace task board %@ from %@. Shared with the :3077 web and mobile app.",
+                boardName,
+                board.databasePath
+            )
+        }
         return L10n.string(
             "Kanban board %@ at %@. SSH-native; active profile is the operator.",
             boardName,
@@ -639,7 +692,19 @@ struct KanbanView: View {
     private func startCreatingTask() {
         taskDraft = KanbanTaskDraft()
         isCreatingBoard = false
+        isEditingWorkspaceTask = false
         isCreatingTask = true
+    }
+
+    private func draft(from task: KanbanTask) -> KanbanTaskDraft {
+        var draft = KanbanTaskDraft()
+        draft.title = task.resolvedTitle
+        draft.body = task.body ?? ""
+        draft.assignee = task.assignee ?? ""
+        draft.priority = task.priority
+        draft.skillsText = task.skills.joined(separator: ", ")
+        draft.startsInTriage = task.status == .triage
+        return draft
     }
 }
 
@@ -649,6 +714,7 @@ private enum KanbanStatusFilter: Hashable, CaseIterable {
     case todo
     case ready
     case running
+    case review
     case blocked
     case done
     case archived
@@ -665,6 +731,8 @@ private enum KanbanStatusFilter: Hashable, CaseIterable {
             "Ready"
         case .running:
             "Running"
+        case .review:
+            "Review"
         case .blocked:
             "Blocked"
         case .done:
@@ -686,6 +754,8 @@ private enum KanbanStatusFilter: Hashable, CaseIterable {
             .ready
         case .running:
             .running
+        case .review:
+            .review
         case .blocked:
             .blocked
         case .done:
@@ -734,6 +804,8 @@ private enum KanbanColors {
             .green
         case .running:
             .orange
+        case .review:
+            .cyan
         case .blocked:
             .red
         case .done:
@@ -742,6 +814,116 @@ private enum KanbanColors {
             .secondary
         case .other:
             .secondary
+        }
+    }
+}
+
+private struct WorkspaceTaskDetailView: View {
+    let task: KanbanTask?
+    let errorMessage: String?
+    let operationInFlight: Bool
+    let onCreate: () -> Void
+    let onEdit: (KanbanTask) -> Void
+    let onMove: (String, KanbanTaskStatus) async -> Void
+
+    var body: some View {
+        HermesSurfacePanel(title: "Workspace Task", subtitle: "Shared with web and mobile /tasks.") {
+            VStack(alignment: .leading, spacing: 16) {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                if let task {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(task.resolvedTitle)
+                                .font(.headline)
+                                .textSelection(.enabled)
+
+                            Spacer()
+
+                            HermesBadge(text: task.status.displayTitle, tint: KanbanColors.tint(for: task.status))
+                        }
+
+                        if let body = task.trimmedBody {
+                            Text(body)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            WorkspaceTaskFact(label: "ID", value: task.id)
+                            WorkspaceTaskFact(label: "Assignee", value: task.assignee ?? "Unassigned")
+                            WorkspaceTaskFact(label: "Priority", value: task.priorityLabel)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Button {
+                            onEdit(task)
+                        } label: {
+                            Label(L10n.string("Edit"), systemImage: "pencil")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(operationInFlight)
+
+                        Menu {
+                            ForEach([KanbanTaskStatus.triage, .ready, .running, .review, .blocked, .done], id: \.rawValue) { status in
+                                Button(L10n.string(status.displayTitle)) {
+                                    Task { await onMove(task.id, status) }
+                                }
+                            }
+                        } label: {
+                            Label(L10n.string("Move"), systemImage: "arrow.right")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(operationInFlight)
+                    }
+
+                    Text("Delete is intentionally not shown for the shared Workspace Tasks backend until /api/claude-tasks supports safe delete or archive semantics.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ContentUnavailableView(
+                        L10n.string("Select a task"),
+                        systemImage: "checklist",
+                        description: Text(L10n.string("Choose a Workspace task from the board, or create a new one."))
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 260)
+
+                    Button {
+                        onCreate()
+                    } label: {
+                        Label(L10n.string("New Task"), systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+private struct WorkspaceTaskFact: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(L10n.string(label))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 74, alignment: .leading)
+
+            Text(value)
+                .font(.caption)
+                .textSelection(.enabled)
         }
     }
 }

@@ -227,6 +227,10 @@ final class AppState: ObservableObject {
         kanbanBoards.first(where: { $0.slug == selectedKanbanBoardSlug })
     }
 
+    var isWorkspaceKanbanBoardSelected: Bool {
+        selectedKanbanBoardSlug == KanbanProject.workspaceTasksSlug
+    }
+
     var canonicalWorkspaceFileReferences: [WorkspaceFileReference] {
         guard let activeConnection else { return [] }
 
@@ -2533,26 +2537,27 @@ final class AppState: ObservableObject {
             let response = try await kanbanBrowserService.loadBoards(connection: profile)
             guard isActiveWorkspace(profile) else { return }
 
-            kanbanBoards = response.boards.isEmpty
+            let remoteBoards = response.boards.isEmpty
                 ? [KanbanProject(slug: KanbanProject.defaultSlug)]
                 : response.boards
+            kanbanBoards = [KanbanProject.workspaceTasks] + remoteBoards
             remoteCurrentKanbanBoardSlug = response.current
             supportsKanbanBoardManagement = response.supportsBoardManagement
 
             if !kanbanBoards.contains(where: { $0.slug == selectedKanbanBoardSlug }) {
-                if let current = response.current,
-                   kanbanBoards.contains(where: { $0.slug == current }) {
-                    selectedKanbanBoardSlug = current
-                } else {
-                    selectedKanbanBoardSlug = kanbanBoards.first?.slug ?? KanbanProject.defaultSlug
-                }
+                selectedKanbanBoardSlug = KanbanProject.workspaceTasksSlug
+            } else if selectedKanbanBoardSlug == KanbanProject.defaultSlug {
+                selectedKanbanBoardSlug = KanbanProject.workspaceTasksSlug
             }
 
             isLoadingKanbanBoards = false
         } catch {
             guard isActiveWorkspace(profile) else { return }
             isLoadingKanbanBoards = false
-            kanbanBoards = kanbanBoards.isEmpty ? [KanbanProject(slug: KanbanProject.defaultSlug)] : kanbanBoards
+            kanbanBoards = kanbanBoards.isEmpty ? [KanbanProject.workspaceTasks, KanbanProject(slug: KanbanProject.defaultSlug)] : kanbanBoards
+            if !kanbanBoards.contains(where: { $0.slug == selectedKanbanBoardSlug }) {
+                selectedKanbanBoardSlug = KanbanProject.workspaceTasksSlug
+            }
             remoteCurrentKanbanBoardSlug = nil
             supportsKanbanBoardManagement = false
             kanbanError = error.localizedDescription
@@ -2591,11 +2596,20 @@ final class AppState: ObservableObject {
         kanbanError = nil
 
         do {
-            let board = try await kanbanBrowserService.loadBoard(
-                connection: profile,
-                boardSlug: boardSlug,
-                includeArchived: includeArchivedKanbanTasks
-            )
+            let board: KanbanBoard
+            if boardSlug == KanbanProject.workspaceTasksSlug {
+                let tasks = try await caelWorkspaceAPIService.loadWorkspaceTasks(
+                    connection: profile,
+                    includeDone: includeArchivedKanbanTasks
+                )
+                board = .workspaceTasks(tasks, includeDone: includeArchivedKanbanTasks)
+            } else {
+                board = try await kanbanBrowserService.loadBoard(
+                    connection: profile,
+                    boardSlug: boardSlug,
+                    includeArchived: includeArchivedKanbanTasks
+                )
+            }
             guard isActiveWorkspace(profile), selectedKanbanBoardSlug == boardSlug else { return }
             kanbanBoard = board
             isLoadingKanbanBoard = false
@@ -2629,6 +2643,12 @@ final class AppState: ObservableObject {
         selectedKanbanTaskID = taskID
         isLoadingKanbanTaskDetail = true
         kanbanError = nil
+
+        if boardSlug == KanbanProject.workspaceTasksSlug {
+            selectedKanbanTaskDetail = nil
+            isLoadingKanbanTaskDetail = false
+            return
+        }
 
         do {
             let detail = try await kanbanBrowserService.loadTaskDetail(
@@ -2733,11 +2753,23 @@ final class AppState: ObservableObject {
 
         do {
             let boardSlug = selectedKanbanBoardSlug
-            let taskID = try await kanbanBrowserService.createTask(connection: profile, boardSlug: boardSlug, draft: draft)
+            let taskID: String
+            if boardSlug == KanbanProject.workspaceTasksSlug {
+                taskID = try await caelWorkspaceAPIService.createWorkspaceTask(
+                    connection: profile,
+                    draft: draft
+                ).id
+            } else {
+                taskID = try await kanbanBrowserService.createTask(connection: profile, boardSlug: boardSlug, draft: draft)
+            }
             guard isActiveWorkspace(profile), selectedKanbanBoardSlug == boardSlug else { return false }
             await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
             selectedKanbanTaskID = taskID
-            await loadKanbanTaskDetail(taskID: taskID)
+            if boardSlug == KanbanProject.workspaceTasksSlug {
+                selectedKanbanTaskDetail = nil
+            } else {
+                await loadKanbanTaskDetail(taskID: taskID)
+            }
             isSavingKanbanTaskDraft = false
             setStatusMessage(L10n.string("Kanban task created"))
             return true
@@ -2746,6 +2778,79 @@ final class AppState: ObservableObject {
             isSavingKanbanTaskDraft = false
             kanbanError = error.localizedDescription
             setStatusMessage(L10n.string("Unable to create Kanban task"))
+            return false
+        }
+    }
+
+    func moveWorkspaceKanbanTask(taskID: String, to status: KanbanTaskStatus) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            try await caelWorkspaceAPIService.moveWorkspaceTask(
+                connection: profile,
+                taskID: taskID,
+                column: WorkspaceTaskColumn.fromKanbanStatus(status)
+            )
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(L10n.string("Workspace task moved"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to move Workspace task"))
+        }
+    }
+
+    func updateWorkspaceKanbanTask(taskID: String, draft: KanbanTaskDraft) async -> Bool {
+        guard let profile = activeConnection else { return false }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return false }
+
+        if let validationError = draft.validationError {
+            let localizedError = L10n.string(validationError)
+            kanbanError = localizedError
+            setStatusMessage(localizedError)
+            return false
+        }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            try await caelWorkspaceAPIService.updateWorkspaceTask(
+                connection: profile,
+                taskID: taskID,
+                title: draft.normalizedTitle,
+                description: draft.normalizedBody ?? "",
+                priority: WorkspaceTaskPriority.fromKanbanPriority(draft.priority),
+                assignee: draft.normalizedAssignee,
+                tags: draft.skills
+            )
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return false }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(L10n.string("Workspace task updated"))
+            return true
+        } catch {
+            guard isActiveWorkspace(profile) else { return false }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to update Workspace task"))
             return false
         }
     }
