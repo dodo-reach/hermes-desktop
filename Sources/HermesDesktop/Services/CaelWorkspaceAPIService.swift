@@ -275,6 +275,42 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
     }
 
+    @discardableResult
+    func uploadWorkspaceFile(
+        connection: ConnectionProfile,
+        targetPath: String,
+        fileName: String,
+        contentBase64: String
+    ) async throws -> WorkspaceFileUploadResult {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/files",
+            body: CaelWorkspaceFileUploadRequest(
+                action: "uploadBase64",
+                path: targetPath,
+                fileName: fileName,
+                contentBase64: contentBase64
+            ),
+            responseType: WorkspaceFileUploadResult.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not upload \(fileName).")
+        }
+        return response
+    }
+
+    func loadPreviewFile(connection: ConnectionProfile, path filePath: String) async throws -> WorkspacePreviewFile {
+        let response = try await loadJSON(
+            connection: connection,
+            path: previewFileAPIPath(path: filePath),
+            responseType: WorkspacePreviewFile.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse("Workspace API could not preview \(filePath).")
+        }
+        return response
+    }
+
     func loadToolArtifacts(connection: ConnectionProfile, sessionId: String? = nil, limit: Int = 100) async throws -> [ToolArtifactSummary] {
         let response = try await loadJSON(
             connection: connection,
@@ -326,6 +362,16 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
         components.queryItems = queryItems
         return components.string ?? "/api/artifacts"
+    }
+
+    private func previewFileAPIPath(path filePath: String) -> String {
+        var components = URLComponents()
+        components.path = "/api/preview-file"
+        components.queryItems = [
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "path", value: filePath)
+        ]
+        return components.string ?? "/api/preview-file"
     }
 
     private func loadJSON<Response: Decodable>(
@@ -424,7 +470,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         )
 
         try:
-            with urllib.request.urlopen(http_request, timeout=6) as response:
+            with urllib.request.urlopen(http_request, timeout=20) as response:
                 sys.stdout.write(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", "replace")
@@ -594,6 +640,13 @@ private struct CaelWorkspaceFileMutationResponse: Decodable {
     let ok: Bool
     let path: String?
     let error: String?
+}
+
+private struct CaelWorkspaceFileUploadRequest: Encodable {
+    let action: String
+    let path: String
+    let fileName: String
+    let contentBase64: String
 }
 
 private struct ToolArtifactsListResponse: Decodable {

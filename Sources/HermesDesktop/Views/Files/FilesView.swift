@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct FilesView: View {
     @EnvironmentObject private var appState: AppState
@@ -744,6 +746,7 @@ private struct WorkspaceFileBrowserSheet: View {
     @State private var pathActionDraft: WorkspaceFilePathActionDraft?
     @State private var pendingDeleteEntry: RemoteDirectoryEntry?
     @State private var showDeletePathAlert = false
+    @State private var showUploadImporter = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -809,6 +812,18 @@ private struct WorkspaceFileBrowserSheet: View {
                 }
                 .disabled(appState.workspaceFileBrowserListing == nil)
 
+                Button {
+                    showUploadImporter = true
+                } label: {
+                    Label(L10n.string("Upload"), systemImage: "square.and.arrow.up")
+                }
+                .disabled(appState.workspaceFileBrowserListing == nil || appState.isUploadingWorkspaceFile)
+
+                if appState.isUploadingWorkspaceFile {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
                 Spacer()
             }
             .controlSize(.small)
@@ -823,6 +838,7 @@ private struct WorkspaceFileBrowserSheet: View {
             }
 
             browserContent
+            previewPanel
 
             HStack {
                 if let listing = appState.workspaceFileBrowserListing {
@@ -848,7 +864,14 @@ private struct WorkspaceFileBrowserSheet: View {
             }
         }
         .padding(22)
-        .frame(width: 760, height: 560)
+        .frame(width: 820, height: 700)
+        .fileImporter(
+            isPresented: $showUploadImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            handleUploadSelection(result)
+        }
         .sheet(item: $pathActionDraft) { draft in
             WorkspaceFilePathActionSheet(draft: draft) { submittedPath in
                 switch draft.kind {
@@ -961,6 +984,16 @@ private struct WorkspaceFileBrowserSheet: View {
             }
 
             Menu {
+                if entry.kind == .file {
+                    Button {
+                        Task {
+                            await appState.previewWorkspacePath(entry.displayPath)
+                        }
+                    } label: {
+                        Label(L10n.string("Preview"), systemImage: "eye")
+                    }
+                }
+
                 Button {
                     beginRename(entry)
                 } label: {
@@ -988,6 +1021,36 @@ private struct WorkspaceFileBrowserSheet: View {
             } else if entry.canBookmark, !isBookmarked(entry) {
                 addBookmark(entry)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var previewPanel: some View {
+        if appState.isLoadingWorkspacePreview || appState.workspacePreviewFile != nil || appState.workspacePreviewError != nil {
+            HermesSurfacePanel(
+                title: "Preview",
+                subtitle: appState.workspacePreviewFile?.path ?? "Workspace preview endpoint"
+            ) {
+                if appState.isLoadingWorkspacePreview {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(L10n.string("Loading preview..."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let errorMessage = appState.workspacePreviewError {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let preview = appState.workspacePreviewFile {
+                    WorkspacePreviewPanel(preview: preview)
+                }
+            }
+            .frame(maxHeight: 190)
         }
     }
 
@@ -1033,6 +1096,22 @@ private struct WorkspaceFileBrowserSheet: View {
 
     private func addBookmark(_ entry: RemoteDirectoryEntry) {
         appState.addWorkspaceFileBookmark(remotePath: entry.displayPath, selectAfterAdd: false)
+    }
+
+    private func handleUploadSelection(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            Task {
+                await appState.uploadWorkspaceFile(localFileURL: url, to: currentUploadTargetPath)
+            }
+        case .failure(let error):
+            appState.workspaceFileBrowserError = error.localizedDescription
+        }
+    }
+
+    private var currentUploadTargetPath: String {
+        appState.workspaceFileBrowserListing?.displayPath ?? pathText
     }
 
     private func isBookmarked(_ entry: RemoteDirectoryEntry) -> Bool {
@@ -1091,6 +1170,54 @@ private struct WorkspaceFileBrowserSheet: View {
         let trimmedParent = parent.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedParent.isEmpty else { return component }
         return trimmedParent.hasSuffix("/") ? "\(trimmedParent)\(component)" : "\(trimmedParent)/\(component)"
+    }
+}
+
+private struct WorkspacePreviewPanel: View {
+    let preview: WorkspacePreviewFile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(preview.kind)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.10), in: Capsule())
+
+                Text(preview.mime)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(ByteCountFormatter.string(fromByteCount: preview.size, countStyle: .file))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if preview.isText {
+                ScrollView {
+                    Text(preview.content ?? "")
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else if preview.isImage,
+                      let encoded = preview.contentBase64,
+                      let data = Data(base64Encoded: encoded),
+                      let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 110, alignment: .leading)
+            } else {
+                Text(L10n.string("Binary preview metadata loaded."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

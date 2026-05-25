@@ -102,6 +102,10 @@ final class AppState: ObservableObject {
     @Published var workspaceFileBrowserListing: RemoteDirectoryListing?
     @Published var workspaceFileBrowserError: String?
     @Published var isLoadingWorkspaceFileBrowser = false
+    @Published var workspacePreviewFile: WorkspacePreviewFile?
+    @Published var workspacePreviewError: String?
+    @Published var isLoadingWorkspacePreview = false
+    @Published var isUploadingWorkspaceFile = false
     @Published var toolArtifacts: [ToolArtifactSummary] = []
     @Published var selectedToolArtifactID: String?
     @Published var selectedToolArtifactDetail: ToolArtifactDetail?
@@ -958,6 +962,73 @@ final class AppState: ObservableObject {
             guard isActiveWorkspace(profile) else { return }
             workspaceFileBrowserError = error.localizedDescription
             setStatusMessage(L10n.string("Unable to delete path"))
+        }
+    }
+
+    func uploadWorkspaceFile(localFileURL: URL, to targetPath: String) async {
+        guard let profile = activeConnection else { return }
+        let target = targetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return }
+
+        isUploadingWorkspaceFile = true
+        workspaceFileBrowserError = nil
+
+        do {
+            let didAccess = localFileURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    localFileURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let data = try Data(contentsOf: localFileURL)
+            guard data.count <= WorkspaceFileLimits.maxDesktopUploadBytes else {
+                throw SSHTransportError.invalidResponse(
+                    L10n.string(
+                        "Desktop uploads are limited to %@.",
+                        WorkspaceFileLimits.decimalMegabytes(for: Int64(WorkspaceFileLimits.maxDesktopUploadBytes))
+                    )
+                )
+            }
+
+            let result = try await caelWorkspaceAPIService.uploadWorkspaceFile(
+                connection: profile,
+                targetPath: target,
+                fileName: localFileURL.lastPathComponent,
+                contentBase64: data.base64EncodedString()
+            )
+            guard isActiveWorkspace(profile) else { return }
+            isUploadingWorkspaceFile = false
+            setStatusMessage(L10n.string("%@ uploaded", result.path ?? localFileURL.lastPathComponent))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isUploadingWorkspaceFile = false
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to upload file"))
+        }
+    }
+
+    func previewWorkspacePath(_ path: String) async {
+        guard let profile = activeConnection else { return }
+        let targetPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetPath.isEmpty else { return }
+
+        isLoadingWorkspacePreview = true
+        workspacePreviewError = nil
+        workspacePreviewFile = nil
+
+        do {
+            let preview = try await caelWorkspaceAPIService.loadPreviewFile(connection: profile, path: targetPath)
+            guard isActiveWorkspace(profile) else { return }
+            workspacePreviewFile = preview
+            isLoadingWorkspacePreview = false
+            setStatusMessage(L10n.string("Preview loaded"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingWorkspacePreview = false
+            workspacePreviewError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to preview file"))
         }
     }
 
@@ -4129,6 +4200,10 @@ final class AppState: ObservableObject {
         workspaceFileBrowserListing = nil
         workspaceFileBrowserError = nil
         isLoadingWorkspaceFileBrowser = false
+        workspacePreviewFile = nil
+        workspacePreviewError = nil
+        isLoadingWorkspacePreview = false
+        isUploadingWorkspaceFile = false
         selectedWorkspaceFileID = RemoteTrackedFile.memory.workspaceFileID
     }
 
