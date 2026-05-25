@@ -384,6 +384,8 @@ private struct CronJobCardRow: View {
 }
 
 private struct CronJobDetailView: View {
+    @EnvironmentObject private var appState: AppState
+
     let job: CronJob?
     let operationInFlight: Bool
     let onEdit: () -> Void
@@ -391,6 +393,11 @@ private struct CronJobDetailView: View {
     let onRunNow: () -> Void
     let onTogglePause: () -> Void
     let onDelete: () -> Void
+
+    @State private var outputsJobID: String?
+    @State private var outputs: [CronJobOutput] = []
+    @State private var isLoadingOutputs = false
+    @State private var outputError: String?
 
     private let metadataColumns = [
         GridItem(.adaptive(minimum: 180), alignment: .topLeading)
@@ -414,6 +421,8 @@ private struct CronJobDetailView: View {
                     }
 
                     metadataPanel(job)
+
+                    outputPanel(job)
 
                     if !job.skills.isEmpty {
                         HermesSurfacePanel(
@@ -483,6 +492,93 @@ private struct CronJobDetailView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 22)
+        }
+        .task(id: job?.id) {
+            guard let job else { return }
+            await loadOutputs(for: job)
+        }
+    }
+
+    private func outputPanel(_ job: CronJob) -> some View {
+        HermesSurfacePanel(
+            title: "Recent Output",
+            subtitle: "Latest captured output from the shared Workspace jobs API."
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Button(isLoadingOutputs ? "Loading..." : "Refresh Output") {
+                        Task { await loadOutputs(for: job, force: true) }
+                    }
+                    .disabled(isLoadingOutputs)
+
+                    if isLoadingOutputs {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    Spacer()
+
+                    if !outputs.isEmpty {
+                        HermesBadge(text: "\(outputs.count) items", tint: .accentColor)
+                    }
+                }
+
+                if let outputError {
+                    Text(outputError)
+                        .foregroundStyle(.orange)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                } else if outputs.isEmpty && !isLoadingOutputs {
+                    ContentUnavailableView(
+                        "No output captured",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("This job has no stored output yet, or the active gateway returned an empty output list.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    ForEach(outputs.prefix(5)) { output in
+                        HermesInsetSurface {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Text(output.displayTitle)
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    Text(ByteCountFormatter.string(fromByteCount: Int64(output.size), countStyle: .file))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(output.timestamp)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                Text(output.previewContent)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadOutputs(for job: CronJob, force: Bool = false) async {
+        guard let connection = appState.activeConnection else { return }
+        if !force, outputsJobID == job.id { return }
+        outputsJobID = job.id
+        isLoadingOutputs = true
+        outputError = nil
+        defer { isLoadingOutputs = false }
+        do {
+            outputs = try await appState.caelWorkspaceAPIService.loadWorkspaceCronJobOutputs(
+                connection: connection,
+                jobID: job.id,
+                limit: 10
+            )
+        } catch {
+            outputs = []
+            outputError = error.localizedDescription
         }
     }
 

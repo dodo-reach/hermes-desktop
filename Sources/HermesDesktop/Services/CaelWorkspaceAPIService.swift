@@ -677,6 +677,19 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
     }
 
+    func loadWorkspaceCronJobOutputs(connection: ConnectionProfile, jobID: String, limit: Int = 10) async throws -> [CronJobOutput] {
+        let boundedLimit = max(1, min(limit, 50))
+        let response = try await loadJSON(
+            connection: connection,
+            path: "/api/claude-jobs/\(Self.pathSegment(jobID))?action=output&limit=\(boundedLimit)",
+            responseType: CronJobOutputResponse.self
+        )
+        guard response.ok != false else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not load cron job output.")
+        }
+        return response.outputs
+    }
+
     private func runWorkspaceCronJobAction(connection: ConnectionProfile, jobID: String, action: String) async throws {
         let response = try await postJSON(
             connection: connection,

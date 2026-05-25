@@ -5,6 +5,31 @@ struct CronJobListResponse: Decodable {
     let jobs: [CronJob]
 }
 
+
+struct CronJobOutputResponse: Decodable {
+    let ok: Bool?
+    let outputs: [CronJobOutput]
+    let error: String?
+}
+
+struct CronJobOutput: Decodable, Identifiable, Hashable {
+    var id: String { filename }
+    let filename: String
+    let timestamp: String
+    let content: String
+    let size: Int
+
+    var displayTitle: String {
+        filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? timestamp : filename
+    }
+
+    var previewContent: String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 6000 else { return trimmed.isEmpty ? "No output content captured." : trimmed }
+        return String(trimmed.prefix(6000)) + "\n..."
+    }
+}
+
 struct CronJob: Decodable, Identifiable, Hashable, OptionalModelDisplayable {
     let id: String
     let name: String
