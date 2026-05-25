@@ -342,7 +342,7 @@ final class TerminalHostView: NSView {
         send(bytes: TerminalInputSequence.bracketedPasteSubmission(for: text))
     }
 
-    private static func makeTerminalColor(from themeColor: TerminalThemeColor) -> SwiftTerm.Color {
+    static func makeTerminalColor(from themeColor: TerminalThemeColor) -> SwiftTerm.Color {
         let color = themeColor.nsColor.usingColorSpace(.deviceRGB) ?? .black
         return SwiftTerm.Color(
             red: UInt16(color.redComponent * 65535),

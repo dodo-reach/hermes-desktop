@@ -18,6 +18,8 @@ struct TerminalWorkspaceView: View {
                                 TerminalTabChip(
                                     profileName: tab.session.connection.resolvedHermesProfileName,
                                     hostLabel: tab.session.connection.label,
+                                    modeLabel: tab.session.backendLabel,
+                                    isWorkspacePTY: tab.session.isWorkspacePTY,
                                     isSelected: workspace.selectedTabID == tab.id,
                                     isCurrentWorkspace: isTabForActiveWorkspace(tab),
                                     onSelect: { requestTabSelection(tab.id) },
@@ -40,6 +42,14 @@ struct TerminalWorkspaceView: View {
                         Label(L10n.string("New Tab"), systemImage: "plus")
                     }
                     .buttonStyle(.borderedProminent)
+
+                    Button {
+                        requestSharedTab(for: activeConnection)
+                    } label: {
+                        Label(L10n.string("Shared PTY"), systemImage: "network")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(L10n.string("Open a Workspace-backed terminal session that can share the web/mobile terminal contract."))
                 }
 
                 Spacer(minLength: 8)
@@ -67,7 +77,7 @@ struct TerminalWorkspaceView: View {
                 ContentUnavailableView(
                     L10n.string("No terminal tab"),
                     systemImage: "terminal",
-                    description: Text(L10n.string("Create a tab to start a real SSH shell for the active host."))
+                    description: Text(L10n.string("Create a native SSH tab or a shared Workspace PTY tab for the active host."))
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -108,6 +118,12 @@ struct TerminalWorkspaceView: View {
         }
     }
 
+    private func requestSharedTab(for connection: ConnectionProfile) {
+        DispatchQueue.main.async {
+            workspace.addWorkspaceTerminalTab(for: connection.updated())
+        }
+    }
+
     private func requestTabSelection(_ tabID: UUID) {
         DispatchQueue.main.async {
             workspace.selectTab(tabID)
@@ -124,6 +140,8 @@ struct TerminalWorkspaceView: View {
 private struct TerminalTabChip: View {
     let profileName: String
     let hostLabel: String
+    let modeLabel: String
+    let isWorkspacePTY: Bool
     let isSelected: Bool
     let isCurrentWorkspace: Bool
     let onSelect: () -> Void
@@ -141,6 +159,8 @@ private struct TerminalTabChip: View {
 
                             if !isCurrentWorkspace {
                                 HermesBadge(text: "Other Profile", tint: .orange)
+                            } else if isWorkspacePTY {
+                                HermesBadge(text: modeLabel, tint: .blue)
                             }
                         }
 
