@@ -134,7 +134,8 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
                 request: WorkspaceTerminalLaunchRequest(
                     baseURL: connection.resolvedCaelWorkspaceBaseURL,
                     launchToken: launchToken,
-                    attachedSessionId: backend.attachedWorkspaceSessionId
+                    attachedSessionId: backend.attachedWorkspaceSessionId,
+                    label: "Desktop · \(connection.resolvedHermesProfileName)"
                 ),
                 appearance: appearance,
                 isActive: isActive

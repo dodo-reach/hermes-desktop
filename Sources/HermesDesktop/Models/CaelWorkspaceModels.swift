@@ -1022,6 +1022,7 @@ struct WorkspaceTerminalSessionsResponse: Decodable {
 
 struct WorkspaceTerminalSessionSummary: Decodable, Identifiable, Hashable {
     let id: String
+    let label: String?
     let createdAt: Double
     let cwd: String?
     let command: [String]

@@ -128,12 +128,12 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
         shouldCloseServerSessionOnTerminate = request.attachedSessionId == nil
         streamTask?.cancel()
         streamTask = Task { [weak self] in
-            await self?.runStream(baseURL: url, launchToken: request.launchToken)
+            await self?.runStream(baseURL: url, launchToken: request.launchToken, requestedLabel: request.label)
         }
         onProcessStart?()
     }
 
-    private func runStream(baseURL: URL, launchToken: UUID) async {
+    private func runStream(baseURL: URL, launchToken: UUID, requestedLabel: String?) async {
         do {
             var body: [String: Any] = [
                 "cols": max(20, hostView.terminalView.terminal.cols),
@@ -141,6 +141,8 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
             ]
             if let sessionId {
                 body["sessionId"] = sessionId
+            } else if let label = requestedLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+                body["label"] = String(label.prefix(80))
             }
 
             var request = URLRequest(url: try endpoint(baseURL: baseURL, path: "/api/terminal-stream"))
@@ -189,7 +191,9 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
                 sessionId = payload.sessionId
                 shouldCloseServerSessionOnTerminate = payload.reattach != true && shouldCloseServerSessionOnTerminate
                 let prefix = payload.reattach == true ? "Attached PTY" : "Shared PTY"
-                onTitleChange?("\(prefix) · \(payload.sessionId.prefix(8))")
+                let label = payload.label?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let titleSuffix = label?.isEmpty == false ? (label ?? "") : String(payload.sessionId.prefix(8))
+                onTitleChange?("\(prefix) · \(titleSuffix)")
             }
         case "data":
             if let text = decode(String.self, from: data) {
@@ -286,11 +290,13 @@ struct WorkspaceTerminalLaunchRequest {
     let baseURL: String
     let launchToken: UUID
     let attachedSessionId: String?
+    let label: String?
 }
 
 private struct WorkspaceTerminalSessionPayload: Decodable {
     let sessionId: String
     let reattach: Bool?
+    let label: String?
 }
 
 private struct WorkspaceTerminalDataPayload: Decodable {

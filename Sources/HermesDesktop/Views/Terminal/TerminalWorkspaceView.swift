@@ -216,8 +216,8 @@ struct TerminalWorkspaceView: View {
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(shortTerminalSessionID(session.id))
-                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                Text(terminalSessionTitle(session))
+                    .font(.system(.body, design: terminalSessionHasLabel(session) ? .default : .monospaced).weight(.semibold))
                     .lineLimit(1)
 
                 Text(terminalSessionSubtitle(session))
@@ -305,11 +305,21 @@ struct TerminalWorkspaceView: View {
         return String(sessionID.prefix(8)) + "..." + String(sessionID.suffix(4))
     }
 
+    private func terminalSessionTitle(_ session: WorkspaceTerminalSessionSummary) -> String {
+        let label = session.label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return label?.isEmpty == false ? (label ?? "") : shortTerminalSessionID(session.id)
+    }
+
+    private func terminalSessionHasLabel(_ session: WorkspaceTerminalSessionSummary) -> Bool {
+        let label = session.label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return label?.isEmpty == false
+    }
+
     private func terminalSessionSubtitle(_ session: WorkspaceTerminalSessionSummary) -> String {
         let command = session.command.joined(separator: " ")
         let cwd = session.cwd ?? "unknown cwd"
         let size = "\(session.cols ?? 0)x\(session.rows ?? 0)"
-        return "\(command.isEmpty ? "shell" : command) - \(cwd) - \(size)"
+        return "\(shortTerminalSessionID(session.id)) - \(command.isEmpty ? "shell" : command) - \(cwd) - \(size)"
     }
 
     private func terminalSessionCreatedLabel(_ session: WorkspaceTerminalSessionSummary) -> String {
