@@ -131,6 +131,20 @@ struct CaelProfileMutationResponse: Codable {
     let error: String?
 }
 
+struct WorkspaceAgentStartResponse: Codable {
+    let ok: Bool
+    let message: String?
+    let pid: Int?
+    let error: String?
+
+    var displayMessage: String {
+        if ok {
+            return message?.nilIfBlank ?? "Agent runtime accepted the start request."
+        }
+        return error?.nilIfBlank ?? "Agent runtime start failed."
+    }
+}
+
 struct CaelProfileDetail: Codable {
     let name: String
     let path: String

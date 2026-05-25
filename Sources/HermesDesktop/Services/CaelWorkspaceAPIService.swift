@@ -193,6 +193,20 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
     }
 
     @discardableResult
+    func startWorkspaceAgentRuntime(connection: ConnectionProfile) async throws -> WorkspaceAgentStartResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/start-agent",
+            body: EmptyWorkspaceAPIRequest(),
+            responseType: WorkspaceAgentStartResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not start the agent runtime.")
+        }
+        return response
+    }
+
+    @discardableResult
     func renameProfile(connection: ConnectionProfile, oldName: String, newName: String) async throws -> CaelProfileMutationResponse {
         try await postJSON(
             connection: connection,
@@ -1257,6 +1271,8 @@ private struct WorkspaceSkillActionRequest: Encodable {
     let force: Bool
     let enabled: Bool?
 }
+
+private struct EmptyWorkspaceAPIRequest: Encodable {}
 
 private struct CaelProfileNameRequest: Encodable {
     let name: String

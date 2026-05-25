@@ -135,6 +135,8 @@ struct CommandCenterMirrorView: View {
 
     private var operationsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
+            NativeOperationsAgentsPanel()
+
             HermesSurfacePanel(title: "Automation Lanes", subtitle: appState.caelCommandCenterSections?.automations?.data?.boundary ?? "Business and personal automation lanes remain separated.") {
                 let instances = appState.caelCommandCenterSections?.automations?.data?.instances ?? []
                 MirrorGridOrEmpty(items: instances, emptyText: "No automation lanes reported.") { instance in
@@ -337,6 +339,297 @@ private struct MirrorGridOrEmpty<Item: Identifiable, Content: View>: View {
                 }
             }
         }
+    }
+}
+
+
+private struct NativeOperationsAgentsPanel: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var profiles: [CaelProfileSummary] = []
+    @State private var activeProfileName = "default"
+    @State private var isLoading = false
+    @State private var isCreating = false
+    @State private var isStartingRuntime = false
+    @State private var operationProfileName: String?
+    @State private var errorMessage: String?
+    @State private var runtimeMessage: String?
+    @State private var newAgentName = ""
+    @State private var newAgentModel = ""
+    @State private var profilePendingDelete: CaelProfileSummary?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HermesSurfacePanel(
+                title: "Operations Agents",
+                subtitle: "Native controls for the same profile-backed agents used by the web Operations screen."
+            ) {
+                VStack(alignment: .leading, spacing: 16) {
+                    controlsRow
+                    createRow
+
+                    if let errorMessage {
+                        MirrorRow(title: "Error", detail: errorMessage, badge: "Attention", tint: .orange)
+                    }
+
+                    if let runtimeMessage {
+                        MirrorRow(title: "Runtime", detail: runtimeMessage, badge: "Start", tint: .green)
+                    }
+
+                    MirrorGridOrEmpty(items: profiles, emptyText: "No profile-backed operations agents reported.") { profile in
+                        agentCard(profile)
+                    }
+                }
+            }
+
+            HermesSurfacePanel(title: "Recent Agent Runs", subtitle: "Durable run receipts from the shared command-center ledger.") {
+                let runs = Array((appState.caelCommandCenterSections?.agentRuns?.data?.runs ?? []).prefix(4))
+                MirrorGridOrEmpty(items: runs, emptyText: "No recent agent runs reported.") { run in
+                    MirrorListCard(title: run.title, emptyText: "No run detail reported.") {
+                        MirrorRow(title: run.status, detail: run.verification, badge: run.source, tint: tint(forStatus: run.status))
+                        MirrorRow(title: "Updated", detail: run.updatedAt, tint: .secondary)
+                    }
+                }
+            }
+        }
+        .task(id: appState.activeConnectionID) {
+            await loadProfiles()
+        }
+        .alert(
+            "Delete operations agent?",
+            isPresented: Binding(
+                get: { profilePendingDelete != nil },
+                set: { if !$0 { profilePendingDelete = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                profilePendingDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                guard let profile = profilePendingDelete else { return }
+                profilePendingDelete = nil
+                Task { await deleteProfile(profile) }
+            }
+        } message: {
+            Text("This removes the server-side Hermes profile for this operations agent.")
+        }
+    }
+
+    private var controlsRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                Task { await loadProfiles() }
+            } label: {
+                Label("Refresh Agents", systemImage: "arrow.clockwise")
+            }
+            .disabled(isLoading || appState.activeConnection == nil)
+
+            Button {
+                Task { await startRuntime() }
+            } label: {
+                Label(isStartingRuntime ? "Starting Runtime" : "Start Runtime", systemImage: "play.circle")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isStartingRuntime || appState.activeConnection == nil)
+
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Spacer(minLength: 10)
+
+            Text("Active: \(activeProfileName)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var createRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Create profile-backed agent")
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 10) {
+                TextField("agent-name", text: $newAgentName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 220)
+                TextField("model", text: $newAgentModel)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 260)
+                Button {
+                    Task { await createAgent() }
+                } label: {
+                    Label(isCreating ? "Creating" : "Create", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isCreating || appState.activeConnection == nil || !isValidProfileName(newAgentName))
+            }
+        }
+    }
+
+    private func agentCard(_ profile: CaelProfileSummary) -> some View {
+        MirrorListCard(title: profile.resolvedDisplayName, emptyText: "No operations agent detail reported.") {
+            MirrorRow(
+                title: profile.active ? "Active profile" : "Profile agent",
+                detail: profile.description?.nilIfBlank ?? profile.path,
+                badge: profile.active ? "Active" : (profile.exists ? "Ready" : "Missing"),
+                tint: profile.active ? .green : (profile.exists ? .blue : .orange)
+            )
+            MirrorRow(title: "Model", detail: profile.model?.nilIfBlank ?? "Not configured", badge: profile.provider?.nilIfBlank, tint: profile.model?.nilIfBlank == nil ? .orange : .cyan)
+            HStack(spacing: 10) {
+                OperationMiniStat(label: "skills", value: "\(profile.skillCount)")
+                OperationMiniStat(label: "sessions", value: "\(profile.sessionCount)")
+                if profile.hasEnv {
+                    OperationMiniStat(label: "env", value: "yes")
+                }
+            }
+            actionButtons(profile)
+        }
+    }
+
+    private func actionButtons(_ profile: CaelProfileSummary) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                Task { await activateProfile(profile) }
+            } label: {
+                Label("Activate", systemImage: "checkmark.circle")
+            }
+            .buttonStyle(.bordered)
+            .disabled(profile.active || operationProfileName != nil)
+
+            Button(role: .destructive) {
+                profilePendingDelete = profile
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .buttonStyle(.bordered)
+            .disabled(profile.name == "default" || operationProfileName != nil)
+        }
+        .controlSize(.small)
+    }
+
+    private func loadProfiles() async {
+        guard let connection = appState.activeConnection else {
+            profiles = []
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+        do {
+            let response = try await appState.caelWorkspaceAPIService.loadProfiles(connection: connection)
+            profiles = response.profiles
+            activeProfileName = response.activeProfile
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func createAgent() async {
+        guard let connection = appState.activeConnection else { return }
+        let name = normalizedProfileName(newAgentName)
+        isCreating = true
+        errorMessage = nil
+        do {
+            _ = try await appState.caelWorkspaceAPIService.createProfile(
+                connection: connection,
+                name: name,
+                cloneFrom: "default",
+                model: newAgentModel.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+            )
+            newAgentName = ""
+            newAgentModel = ""
+            isCreating = false
+            await loadProfiles()
+        } catch {
+            isCreating = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func activateProfile(_ profile: CaelProfileSummary) async {
+        guard let connection = appState.activeConnection else { return }
+        operationProfileName = profile.name
+        errorMessage = nil
+        do {
+            _ = try await appState.caelWorkspaceAPIService.activateProfile(connection: connection, name: profile.name)
+            await appState.switchHermesProfile(to: profile.name)
+            operationProfileName = nil
+            await loadProfiles()
+        } catch {
+            operationProfileName = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteProfile(_ profile: CaelProfileSummary) async {
+        guard let connection = appState.activeConnection else { return }
+        operationProfileName = profile.name
+        errorMessage = nil
+        do {
+            _ = try await appState.caelWorkspaceAPIService.deleteProfile(connection: connection, name: profile.name)
+            operationProfileName = nil
+            await loadProfiles()
+        } catch {
+            operationProfileName = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func startRuntime() async {
+        guard let connection = appState.activeConnection else { return }
+        isStartingRuntime = true
+        errorMessage = nil
+        runtimeMessage = nil
+        do {
+            let response = try await appState.caelWorkspaceAPIService.startWorkspaceAgentRuntime(connection: connection)
+            runtimeMessage = response.pid.map { "\(response.displayMessage) pid \($0)" } ?? response.displayMessage
+            isStartingRuntime = false
+            await appState.refreshCaelWorkspace()
+            await loadProfiles()
+        } catch {
+            isStartingRuntime = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func normalizedProfileName(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9_-]+"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+    }
+
+    private func isValidProfileName(_ value: String) -> Bool {
+        let normalized = normalizedProfileName(value)
+        guard !normalized.isEmpty, normalized != "default", normalized.count <= 64 else { return false }
+        return normalized.range(of: #"^[a-z0-9][a-z0-9_-]*$"#, options: .regularExpression) != nil
+    }
+
+    private func tint(forStatus status: String) -> Color {
+        switch status {
+        case "ready", "available", "complete", "online", "ok": return .green
+        case "active", "running": return .cyan
+        case "setup-needed", "warning", "error", "needs_attention": return .orange
+        default: return .blue
+        }
+    }
+}
+
+private struct OperationMiniStat: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        Text("\(value) \(label)")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
     }
 }
 
