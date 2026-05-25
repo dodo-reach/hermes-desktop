@@ -331,6 +331,7 @@ private struct CronJobCardRow: View {
 
                         if job.noAgent {
                             HermesBadge(text: "Script", tint: .blue)
+                            HermesBadge(text: "Native-only", tint: .purple)
                         }
 
                         if let model = job.displayModel {
@@ -446,9 +447,15 @@ private struct CronJobDetailView: View {
                     if job.noAgent {
                         HermesSurfacePanel(
                             title: "Script",
-                            subtitle: "Script-only jobs run without waking an agent."
+                            subtitle: "Script-only jobs use the desktop native scheduler path, not the shared web job runner."
                         ) {
                             VStack(alignment: .leading, spacing: 12) {
+                                HermesLabeledValue(
+                                    label: "Contract",
+                                    value: "Desktop native CronBrowserService path; not part of shared /api/claude-jobs parity.",
+                                    isMonospaced: true
+                                )
+
                                 HermesLabeledValue(
                                     label: "Script path",
                                     value: job.trimmedScript ?? L10n.string("No script configured"),
