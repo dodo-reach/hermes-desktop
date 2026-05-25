@@ -170,7 +170,7 @@ extension KanbanBoard {
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 
         return KanbanBoard(
-            databasePath: "/api/claude-tasks",
+            databasePath: "/api/hermes-tasks",
             hostWide: true,
             isInitialized: true,
             hasKanbanModule: true,

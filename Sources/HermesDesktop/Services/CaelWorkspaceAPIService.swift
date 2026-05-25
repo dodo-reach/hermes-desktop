@@ -486,7 +486,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         let includeDoneValue = includeDone ? "true" : "false"
         let response = try await loadJSON(
             connection: connection,
-            path: "/api/claude-tasks?include_done=\(includeDoneValue)",
+            path: "/api/hermes-tasks?include_done=\(includeDoneValue)",
             responseType: WorkspaceTasksResponse.self
         )
         return response.tasks
@@ -496,7 +496,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
     func createWorkspaceTask(connection: ConnectionProfile, draft: KanbanTaskDraft) async throws -> WorkspaceTask {
         let response = try await postJSON(
             connection: connection,
-            path: "/api/claude-tasks",
+            path: "/api/hermes-tasks",
             body: WorkspaceTaskCreateRequest(
                 title: draft.normalizedTitle,
                 description: draft.normalizedBody ?? "",
@@ -528,7 +528,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
     ) async throws -> WorkspaceTask {
         let response = try await patchJSON(
             connection: connection,
-            path: "/api/claude-tasks/\(taskID)",
+            path: "/api/hermes-tasks/\(taskID)",
             body: WorkspaceTaskUpdateRequest(
                 title: title,
                 description: description,
@@ -549,7 +549,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
     func moveWorkspaceTask(connection: ConnectionProfile, taskID: String, column: WorkspaceTaskColumn) async throws -> WorkspaceTask {
         let response = try await postJSON(
             connection: connection,
-            path: "/api/claude-tasks/\(taskID)?action=move",
+            path: "/api/hermes-tasks/\(taskID)?action=move",
             body: WorkspaceTaskMoveRequest(column: column, movedBy: "cael-desktop"),
             responseType: WorkspaceTaskMutationResponse.self
         )
@@ -562,7 +562,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
     func deleteWorkspaceTask(connection: ConnectionProfile, taskID: String) async throws {
         let response = try await deleteJSON(
             connection: connection,
-            path: "/api/claude-tasks/\(taskID)",
+            path: "/api/hermes-tasks/\(taskID)",
             responseType: WorkspaceTaskDeleteResponse.self
         )
         guard response.ok == true else {

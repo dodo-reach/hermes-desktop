@@ -2824,6 +2824,34 @@ final class AppState: ObservableObject {
         }
     }
 
+    func deleteWorkspaceKanbanTask(taskID: String) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            try await caelWorkspaceAPIService.deleteWorkspaceTask(connection: profile, taskID: taskID)
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            if selectedKanbanTaskID == taskID {
+                selectedKanbanTaskID = kanbanBoard?.tasks.first?.id
+            }
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(L10n.string("Workspace task deleted"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to delete Workspace task"))
+        }
+    }
+
     func updateWorkspaceKanbanTask(taskID: String, draft: KanbanTaskDraft) async -> Bool {
         guard let profile = activeConnection else { return false }
         guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return false }

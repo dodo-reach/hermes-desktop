@@ -513,6 +513,9 @@ struct KanbanView: View {
                 },
                 onMove: { taskID, status in
                     await appState.moveWorkspaceKanbanTask(taskID: taskID, to: status)
+                },
+                onDelete: { taskID in
+                    await appState.deleteWorkspaceKanbanTask(taskID: taskID)
                 }
             )
         } else {
@@ -825,6 +828,7 @@ private struct WorkspaceTaskDetailView: View {
     let onCreate: () -> Void
     let onEdit: (KanbanTask) -> Void
     let onMove: (String, KanbanTaskStatus) async -> Void
+    let onDelete: (String) async -> Void
 
     var body: some View {
         HermesSurfacePanel(title: "Workspace Task", subtitle: "Shared with web and mobile /tasks.") {
@@ -884,9 +888,17 @@ private struct WorkspaceTaskDetailView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(operationInFlight)
+                        Button(role: .destructive) {
+                            Task { await onDelete(task.id) }
+                        } label: {
+                            Label(L10n.string("Delete"), systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(operationInFlight)
+
                     }
 
-                    Text("Delete is intentionally not shown for the shared Workspace Tasks backend until /api/claude-tasks supports safe delete or archive semantics.")
+                    Text("Deletes use the canonical /api/hermes-tasks backend so web and desktop mutate the same task ledger.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
