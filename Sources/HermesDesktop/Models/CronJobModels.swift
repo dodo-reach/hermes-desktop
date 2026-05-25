@@ -1,11 +1,11 @@
 import Foundation
 
-struct CronJobListResponse: Codable {
-    let ok: Bool
+struct CronJobListResponse: Decodable {
+    let ok: Bool?
     let jobs: [CronJob]
 }
 
-struct CronJob: Codable, Identifiable, Hashable, OptionalModelDisplayable {
+struct CronJob: Decodable, Identifiable, Hashable, OptionalModelDisplayable {
     let id: String
     let name: String
     let prompt: String
@@ -48,7 +48,9 @@ struct CronJob: Codable, Identifiable, Hashable, OptionalModelDisplayable {
         case lastRunAt = "last_run_at"
         case lastStatus = "last_status"
         case lastError = "last_error"
+        case lastRunError = "last_run_error"
         case deliveryTarget = "delivery_target"
+        case deliver
         case origin
         case lastDeliveryError = "last_delivery_error"
         case script
@@ -124,8 +126,15 @@ struct CronJob: Codable, Identifiable, Hashable, OptionalModelDisplayable {
         nextRunAt = try container.decodeIfPresent(Date.self, forKey: .nextRunAt)
         lastRunAt = try container.decodeIfPresent(Date.self, forKey: .lastRunAt)
         lastStatus = try container.decodeIfPresent(String.self, forKey: .lastStatus)
-        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
-        deliveryTarget = try container.decodeIfPresent(String.self, forKey: .deliveryTarget)
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError) ??
+            container.decodeIfPresent(String.self, forKey: .lastRunError)
+        if let directDeliveryTarget = try container.decodeIfPresent(String.self, forKey: .deliveryTarget) {
+            deliveryTarget = directDeliveryTarget
+        } else if let deliverList = try container.decodeIfPresent([String].self, forKey: .deliver) {
+            deliveryTarget = deliverList.joined(separator: ",")
+        } else {
+            deliveryTarget = try container.decodeIfPresent(String.self, forKey: .deliver)
+        }
         origin = try container.decodeIfPresent(CronJobOrigin.self, forKey: .origin)
         lastDeliveryError = try container.decodeIfPresent(String.self, forKey: .lastDeliveryError)
         script = try container.decodeIfPresent(String.self, forKey: .script)

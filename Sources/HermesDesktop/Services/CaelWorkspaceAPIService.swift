@@ -424,6 +424,78 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
     }
 
+    func loadWorkspaceCronJobs(connection: ConnectionProfile) async throws -> [CronJob] {
+        let response = try await loadJSON(
+            connection: connection,
+            path: "/api/claude-jobs?include_disabled=true&profiles=all",
+            responseType: CronJobListResponse.self
+        )
+        return response.jobs
+    }
+
+    @discardableResult
+    func createWorkspaceCronJob(connection: ConnectionProfile, draft: CronJobDraft) async throws -> CronJobMutationResult {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/claude-jobs",
+            body: WorkspaceCronJobMutationRequest(connection: connection, draft: draft),
+            responseType: WorkspaceCronJobMutationResponse.self
+        )
+        guard response.ok != false else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not create the cron job.")
+        }
+        return CronJobMutationResult(jobID: response.jobID ?? response.job?.id, job: response.job)
+    }
+
+    @discardableResult
+    func updateWorkspaceCronJob(connection: ConnectionProfile, jobID: String, draft: CronJobDraft) async throws -> CronJobMutationResult {
+        let response = try await patchJSON(
+            connection: connection,
+            path: "/api/claude-jobs/\(Self.pathSegment(jobID))",
+            body: WorkspaceCronJobMutationRequest(connection: connection, draft: draft),
+            responseType: WorkspaceCronJobMutationResponse.self
+        )
+        guard response.ok != false else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not update the cron job.")
+        }
+        return CronJobMutationResult(jobID: response.jobID ?? response.job?.id ?? jobID, job: response.job)
+    }
+
+    func pauseWorkspaceCronJob(connection: ConnectionProfile, jobID: String) async throws {
+        try await runWorkspaceCronJobAction(connection: connection, jobID: jobID, action: "pause")
+    }
+
+    func resumeWorkspaceCronJob(connection: ConnectionProfile, jobID: String) async throws {
+        try await runWorkspaceCronJobAction(connection: connection, jobID: jobID, action: "resume")
+    }
+
+    func triggerWorkspaceCronJob(connection: ConnectionProfile, jobID: String) async throws {
+        try await runWorkspaceCronJobAction(connection: connection, jobID: jobID, action: "run")
+    }
+
+    func deleteWorkspaceCronJob(connection: ConnectionProfile, jobID: String) async throws {
+        let response = try await deleteJSON(
+            connection: connection,
+            path: "/api/claude-jobs/\(Self.pathSegment(jobID))",
+            responseType: WorkspaceCronJobMutationResponse.self
+        )
+        guard response.ok != false else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not remove the cron job.")
+        }
+    }
+
+    private func runWorkspaceCronJobAction(connection: ConnectionProfile, jobID: String, action: String) async throws {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/claude-jobs/\(Self.pathSegment(jobID))?action=\(action)",
+            body: WorkspaceEmptyRequest(),
+            responseType: WorkspaceCronJobMutationResponse.self
+        )
+        guard response.ok != false else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not run cron action \(action).")
+        }
+    }
+
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
         var components = URLComponents()
         components.path = "/api/files"
@@ -606,12 +678,35 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
 
         do {
-            return try JSONDecoder().decode(Response.self, from: data)
+            return try Self.makeDecoder().decode(Response.self, from: data)
         } catch {
             throw SSHTransportError.invalidResponse(
                 "Workspace API returned JSON that Cael Desktop could not decode: \(error.localizedDescription)"
             )
         }
+    }
+
+    private static func pathSegment(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+
+    private static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+            if let date = ISO8601DateFormatter.fractionalSecondsFormatter().date(from: value) {
+                return date
+            }
+            if let date = ISO8601DateFormatter().date(from: value) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid ISO-8601 date: \(value)"
+            )
+        }
+        return decoder
     }
 }
 
@@ -761,6 +856,79 @@ private struct WorkspaceTaskMoveRequest: Encodable {
     enum CodingKeys: String, CodingKey {
         case column
         case movedBy = "moved_by"
+    }
+}
+
+struct CronJobMutationResult {
+    let jobID: String?
+    let job: CronJob?
+}
+
+private struct WorkspaceEmptyRequest: Encodable {}
+
+private struct WorkspaceCronJobMutationRequest: Encodable {
+    let profile: String
+    let name: String
+    let prompt: String
+    let input: String
+    let schedule: String
+    let deliver: [String]
+    let skills: [String]
+    let model: String?
+    let provider: String?
+    let baseURL: String?
+    let timezone: String?
+    let script: String?
+    let workdir: String?
+    let noAgent: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case profile
+        case name
+        case prompt
+        case input
+        case schedule
+        case deliver
+        case skills
+        case model
+        case provider
+        case baseURL = "base_url"
+        case timezone
+        case script
+        case workdir
+        case noAgent = "no_agent"
+    }
+
+    init(connection: ConnectionProfile, draft: CronJobDraft) {
+        let prompt = draft.normalizedPrompt
+        self.profile = connection.cliHermesProfileName ?? connection.resolvedHermesProfileName
+        self.name = draft.normalizedName
+        self.prompt = prompt
+        self.input = prompt
+        self.schedule = draft.schedule.expression ?? ""
+        self.deliver = draft.normalizedDeliveryTarget.map { [$0] } ?? []
+        self.skills = draft.normalizedSkills
+        self.model = draft.normalizedModel
+        self.provider = draft.normalizedProvider
+        self.baseURL = draft.normalizedBaseURL
+        self.timezone = draft.normalizedTimezone
+        self.script = draft.normalizedScript
+        self.workdir = draft.normalizedWorkdir
+        self.noAgent = draft.noAgent
+    }
+}
+
+private struct WorkspaceCronJobMutationResponse: Decodable {
+    let ok: Bool?
+    let job: CronJob?
+    let jobID: String?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case job
+        case jobID = "jobId"
+        case error
     }
 }
 

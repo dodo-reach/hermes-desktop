@@ -2346,7 +2346,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            let jobs = try await cronBrowserService.listJobs(connection: profile)
+            let jobs = try await caelWorkspaceAPIService.loadWorkspaceCronJobs(connection: profile)
             guard isActiveWorkspace(profile) else { return }
             cronJobs = jobs
             isLoadingCronJobs = false
@@ -2374,7 +2374,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            try await cronBrowserService.pauseJob(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.pauseWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
@@ -2405,10 +2405,16 @@ final class AppState: ObservableObject {
         setStatusMessage(L10n.string("Creating cron job…"))
 
         do {
-            let jobID = try await cronBrowserService.createJob(connection: profile, draft: draft)
+            let result: CronJobMutationResult
+            if draft.noAgent {
+                let jobID = try await cronBrowserService.createJob(connection: profile, draft: draft)
+                result = CronJobMutationResult(jobID: jobID, job: nil)
+            } else {
+                result = try await caelWorkspaceAPIService.createWorkspaceCronJob(connection: profile, draft: draft)
+            }
             guard isActiveWorkspace(profile) else { return false }
             await loadCronJobs()
-            selectedCronJobID = jobID
+            selectedCronJobID = result.jobID ?? result.job?.id
             isSavingCronJobDraft = false
             setStatusMessage(L10n.string("%@ created", draft.normalizedName))
             return true
@@ -2437,7 +2443,11 @@ final class AppState: ObservableObject {
         setStatusMessage(L10n.string("Updating %@…", job.resolvedName))
 
         do {
-            try await cronBrowserService.updateJob(connection: profile, jobID: job.id, draft: draft)
+            if draft.noAgent || job.noAgent {
+                try await cronBrowserService.updateJob(connection: profile, jobID: job.id, draft: draft)
+            } else {
+                _ = try await caelWorkspaceAPIService.updateWorkspaceCronJob(connection: profile, jobID: job.id, draft: draft)
+            }
             guard isActiveWorkspace(profile) else { return false }
             await loadCronJobs()
             selectedCronJobID = job.id
@@ -2462,7 +2472,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            try await cronBrowserService.resumeJob(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.resumeWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
@@ -2486,7 +2496,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            try await cronBrowserService.removeJob(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.deleteWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
@@ -2511,7 +2521,7 @@ final class AppState: ObservableObject {
         setStatusMessage(L10n.string("Triggering %@…", job.resolvedName))
 
         do {
-            try await cronBrowserService.runJobNow(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.triggerWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
