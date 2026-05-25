@@ -139,7 +139,7 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         )
 
         try:
-            with urllib.request.urlopen(http_request, timeout=12) as response:
+            with urllib.request.urlopen(http_request, timeout=6) as response:
                 sys.stdout.write(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             body = error.read().decode("utf-8", "replace")
