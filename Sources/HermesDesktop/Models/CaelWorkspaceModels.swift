@@ -1021,6 +1021,12 @@ struct WorkspaceMCPTestResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceMCPMutationResponse: Decodable {
+    let ok: Bool
+    let server: WorkspaceMCPServer?
+    let error: String?
+}
+
 struct WorkspaceMCPTool: Decodable, Identifiable {
     var id: String { name }
     let name: String

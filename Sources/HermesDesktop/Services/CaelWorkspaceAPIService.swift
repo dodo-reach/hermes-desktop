@@ -905,6 +905,75 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return response
     }
 
+    @discardableResult
+    func createMCPCommandServer(
+        connection: ConnectionProfile,
+        name: String,
+        command: String,
+        args: [String],
+        enabled: Bool
+    ) async throws -> WorkspaceMCPMutationResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/mcp",
+            body: WorkspaceMCPCreateRequest(
+                name: name,
+                enabled: enabled,
+                transportType: "stdio",
+                command: command,
+                args: args,
+                authType: "none",
+                toolMode: "all"
+            ),
+            responseType: WorkspaceMCPMutationResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "MCP create failed.")
+        }
+        return response
+    }
+
+    @discardableResult
+    func configureMCPServer(
+        connection: ConnectionProfile,
+        name: String,
+        enabled: Bool? = nil,
+        toolMode: String? = nil,
+        includeTools: [String]? = nil,
+        excludeTools: [String]? = nil
+    ) async throws -> WorkspaceMCPMutationResponse {
+        let response = try await putJSON(
+            connection: connection,
+            path: "/api/mcp/configure",
+            body: WorkspaceMCPConfigureRequest(
+                name: name,
+                enabled: enabled,
+                toolMode: toolMode,
+                includeTools: includeTools,
+                excludeTools: excludeTools
+            ),
+            responseType: WorkspaceMCPMutationResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "MCP configure failed.")
+        }
+        return response
+    }
+
+    @discardableResult
+    func deleteMCPServer(connection: ConnectionProfile, name: String) async throws -> WorkspaceMCPMutationResponse {
+        let encodedName = Self.pathSegment(name)
+        let response = try await deleteJSON(
+            connection: connection,
+            path: "/api/mcp/\(encodedName)",
+            responseType: WorkspaceMCPMutationResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "MCP delete failed.")
+        }
+        return response
+    }
+
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
         var components = URLComponents()
         components.path = "/api/files"
@@ -984,6 +1053,25 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
             connection: connection,
             path: path,
             method: "PATCH",
+            body: bodyString,
+            responseType: responseType
+        )
+    }
+
+    private func putJSON<Body: Encodable, Response: Decodable>(
+        connection: ConnectionProfile,
+        path: String,
+        body: Body,
+        responseType: Response.Type
+    ) async throws -> Response {
+        let bodyData = try JSONEncoder().encode(body)
+        guard let bodyString = String(data: bodyData, encoding: .utf8) else {
+            throw SSHTransportError.invalidResponse("Workspace API request body was not valid UTF-8.")
+        }
+        return try await requestJSON(
+            connection: connection,
+            path: path,
+            method: "PUT",
             body: bodyString,
             responseType: responseType
         )
@@ -1192,6 +1280,24 @@ private struct KnowledgeFabricDocumentRequest: Encodable {
 
 private struct WorkspaceMCPTestRequest: Encodable {
     let name: String
+}
+
+private struct WorkspaceMCPCreateRequest: Encodable {
+    let name: String
+    let enabled: Bool
+    let transportType: String
+    let command: String
+    let args: [String]
+    let authType: String
+    let toolMode: String
+}
+
+private struct WorkspaceMCPConfigureRequest: Encodable {
+    let name: String
+    let enabled: Bool?
+    let toolMode: String?
+    let includeTools: [String]?
+    let excludeTools: [String]?
 }
 
 private struct WorkspaceSecondBrainWriteRequest: Encodable {

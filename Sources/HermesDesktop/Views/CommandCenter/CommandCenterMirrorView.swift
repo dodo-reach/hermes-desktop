@@ -591,6 +591,11 @@ private struct NativeMCPPanel: View {
     @State private var statusMessage: String?
     @State private var isLoading = false
     @State private var testingServer: String?
+    @State private var mutatingServer: String?
+    @State private var newServerName = ""
+    @State private var newServerCommand = ""
+    @State private var newServerArgs = ""
+    @State private var newServerEnabled = true
 
     private var servers: [WorkspaceMCPServer] {
         response?.servers ?? []
@@ -599,6 +604,10 @@ private struct NativeMCPPanel: View {
     private var categories: [String] {
         let values = response?.categories ?? ["All", "Connected", "Failed", "Disabled"]
         return values.isEmpty ? ["All"] : values
+    }
+
+    private var isMCPCapabilityAvailable: Bool {
+        response?.ok != false
     }
 
     var body: some View {
@@ -634,6 +643,8 @@ private struct NativeMCPPanel: View {
                     MirrorRow(title: "Status", detail: statusMessage, tint: statusMessage.lowercased().contains("error") ? .orange : .blue)
                 }
 
+                createServerForm
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 12, alignment: .top)], spacing: 12) {
                     ForEach(servers) { server in
                         serverCard(server)
@@ -650,6 +661,37 @@ private struct NativeMCPPanel: View {
         .task(id: appState.activeConnectionID) {
             await loadServers()
         }
+    }
+
+    private var createServerForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Add command MCP server")
+                .font(.headline)
+            HStack(spacing: 10) {
+                TextField("Name", text: $newServerName)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Command", text: $newServerCommand)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Args", text: $newServerArgs)
+                    .textFieldStyle(.roundedBorder)
+                Toggle("Enabled", isOn: $newServerEnabled)
+                    .toggleStyle(.checkbox)
+                Button(mutatingServer == "__create__" ? "Adding..." : "Add") {
+                    Task { await createServer() }
+                }
+                .disabled(!isMCPCapabilityAvailable || !canCreateServer || mutatingServer != nil)
+            }
+            Text("Secrets stay server-side. This form only creates stdio command servers with authType=none.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var canCreateServer: Bool {
+        !newServerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !newServerCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func serverCard(_ server: WorkspaceMCPServer) -> some View {
@@ -669,10 +711,22 @@ private struct NativeMCPPanel: View {
                     tint: result.ok ? .green : .orange
                 )
             }
-            Button(testingServer == server.name ? "Testing..." : "Test") {
-                Task { await testServer(server.name) }
+            HStack(spacing: 8) {
+                Button(testingServer == server.name ? "Testing..." : "Test") {
+                    Task { await testServer(server.name) }
+                }
+                .disabled(!isMCPCapabilityAvailable || testingServer != nil || !server.enabled)
+
+                Button(server.enabled ? "Disable" : "Enable") {
+                    Task { await setServer(server.name, enabled: !server.enabled) }
+                }
+                .disabled(!isMCPCapabilityAvailable || mutatingServer != nil)
+
+                Button("Delete", role: .destructive) {
+                    Task { await deleteServer(server.name) }
+                }
+                .disabled(!isMCPCapabilityAvailable || mutatingServer != nil)
             }
-            .disabled(testingServer != nil || !server.enabled)
         }
     }
 
@@ -686,10 +740,76 @@ private struct NativeMCPPanel: View {
                 search: search,
                 category: category
             )
-            statusMessage = "Loaded \(response?.total ?? servers.count) MCP servers."
+            if response?.ok == false {
+                statusMessage = response?.error ?? "MCP capability unavailable on the active Workspace gateway."
+            } else {
+                statusMessage = "Loaded \(response?.total ?? servers.count) MCP servers."
+            }
         } catch {
             statusMessage = "Error: \(error.localizedDescription)"
         }
+    }
+
+    private func createServer() async {
+        guard let connection = appState.activeConnection else { return }
+        let name = newServerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = newServerCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !command.isEmpty else { return }
+        mutatingServer = "__create__"
+        defer { mutatingServer = nil }
+        do {
+            _ = try await appState.caelWorkspaceAPIService.createMCPCommandServer(
+                connection: connection,
+                name: name,
+                command: command,
+                args: shellWords(newServerArgs),
+                enabled: newServerEnabled
+            )
+            newServerName = ""
+            newServerCommand = ""
+            newServerArgs = ""
+            statusMessage = "Added MCP server \(name)."
+            await loadServers()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func setServer(_ name: String, enabled: Bool) async {
+        guard let connection = appState.activeConnection else { return }
+        mutatingServer = name
+        defer { mutatingServer = nil }
+        do {
+            _ = try await appState.caelWorkspaceAPIService.configureMCPServer(
+                connection: connection,
+                name: name,
+                enabled: enabled
+            )
+            statusMessage = "Updated MCP server \(name)."
+            await loadServers()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteServer(_ name: String) async {
+        guard let connection = appState.activeConnection else { return }
+        mutatingServer = name
+        defer { mutatingServer = nil }
+        do {
+            _ = try await appState.caelWorkspaceAPIService.deleteMCPServer(connection: connection, name: name)
+            testResults[name] = nil
+            statusMessage = "Deleted MCP server \(name)."
+            await loadServers()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func shellWords(_ value: String) -> [String] {
+        value
+            .split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" })
+            .map(String.init)
     }
 
     private func testServer(_ name: String) async {
