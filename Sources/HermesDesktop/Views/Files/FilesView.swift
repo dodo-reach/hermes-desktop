@@ -600,6 +600,7 @@ private struct WorkspaceFileEditorPane: View {
     let onReload: () -> Void
     let onSave: () -> Void
     let onRemove: (() -> Void)?
+    @State private var showSaveReview = false
 
     private var isDirty: Bool {
         document?.isDirty == true
@@ -632,6 +633,20 @@ private struct WorkspaceFileEditorPane: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(isPresented: $showSaveReview) {
+            if let document {
+                WorkspaceFileSaveReviewSheet(
+                    reference: reference,
+                    document: document,
+                    editedText: text,
+                    onCancel: { showSaveReview = false },
+                    onConfirm: {
+                        showSaveReview = false
+                        onSave()
+                    }
+                )
+            }
+        }
     }
 
     private var headerPanel: some View {
@@ -686,7 +701,9 @@ private struct WorkspaceFileEditorPane: View {
             Button(L10n.string("Reload"), action: onReload)
             .disabled(isLoading)
 
-            Button(L10n.string("Save"), action: onSave)
+            Button(L10n.string("Save")) {
+                showSaveReview = true
+            }
             .buttonStyle(.borderedProminent)
             .disabled(!isDirty || isLoading || !hasLoaded)
 
@@ -737,6 +754,256 @@ private struct WorkspaceFileEditorPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
+
+private struct WorkspaceFileSaveReviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let reference: WorkspaceFileReference
+    let document: FileEditorDocument
+    let editedText: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    private var summary: WorkspaceFileChangeSummary {
+        WorkspaceFileChangeSummary(original: document.originalContent, edited: editedText)
+    }
+
+    private var rows: [WorkspaceFileDiffRow] {
+        WorkspaceFileDiffRow.rows(original: document.originalContent, edited: editedText)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.string("Review Save"))
+                        .font(.title2.weight(.semibold))
+
+                    Text(reference.remotePath)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+
+                Spacer(minLength: 12)
+
+                HermesBadge(text: "Unsaved", tint: .orange)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
+                WorkspaceFileChangeMetric(label: "Changed", value: "\(summary.changedLineCount)")
+                WorkspaceFileChangeMetric(label: "Added", value: "\(summary.addedLineCount)")
+                WorkspaceFileChangeMetric(label: "Removed", value: "\(summary.removedLineCount)")
+                WorkspaceFileChangeMetric(label: "Characters", value: summary.characterDeltaText)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.string("Server guard"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Text(document.remoteContentHash.map { L10n.string("Save will use the last loaded content hash: %@", $0) } ?? L10n.string("Reload this file before saving so the server can detect remote changes."))
+                    .font(.caption)
+                    .foregroundStyle(document.remoteContentHash == nil ? .orange : .secondary)
+                    .textSelection(.enabled)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(L10n.string("Changed lines"))
+                        .font(.headline)
+
+                    Spacer()
+
+                    if rows.count > WorkspaceFileDiffRow.previewLimit {
+                        Text(L10n.string("Showing %@ of %@", "\(WorkspaceFileDiffRow.previewLimit)", "\(rows.count)"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        if rows.isEmpty {
+                            Text(L10n.string("No line-level changes detected."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ForEach(rows.prefix(WorkspaceFileDiffRow.previewLimit)) { row in
+                                WorkspaceFileDiffRowView(row: row)
+                            }
+                        }
+                    }
+                    .padding(10)
+                }
+                .frame(minHeight: 180, maxHeight: 300)
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+            }
+
+            HStack {
+                Button(L10n.string("Cancel")) {
+                    dismiss()
+                    onCancel()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button(L10n.string("Save to Workspace")) {
+                    dismiss()
+                    onConfirm()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(document.remoteContentHash == nil)
+            }
+        }
+        .padding(22)
+        .frame(width: 680)
+        .frame(minHeight: 560)
+    }
+}
+
+private struct WorkspaceFileChangeSummary {
+    let changedLineCount: Int
+    let addedLineCount: Int
+    let removedLineCount: Int
+    let originalCharacterCount: Int
+    let editedCharacterCount: Int
+
+    init(original: String, edited: String) {
+        let originalLines = WorkspaceFileDiffRow.lines(original)
+        let editedLines = WorkspaceFileDiffRow.lines(edited)
+        let sharedCount = min(originalLines.count, editedLines.count)
+        let changed = (0..<sharedCount).filter { originalLines[$0] != editedLines[$0] }.count
+
+        self.changedLineCount = changed
+        self.addedLineCount = max(0, editedLines.count - originalLines.count)
+        self.removedLineCount = max(0, originalLines.count - editedLines.count)
+        self.originalCharacterCount = original.count
+        self.editedCharacterCount = edited.count
+    }
+
+    var characterDeltaText: String {
+        let delta = editedCharacterCount - originalCharacterCount
+        if delta > 0 { return "+\(delta)" }
+        return "\(delta)"
+    }
+}
+
+private struct WorkspaceFileChangeMetric: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(L10n.string(label))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct WorkspaceFileDiffRow: Identifiable {
+    enum Kind {
+        case added
+        case removed
+    }
+
+    static let previewLimit = 120
+    let id: String
+    let kind: Kind
+    let lineNumber: Int
+    let text: String
+
+    static func rows(original: String, edited: String) -> [WorkspaceFileDiffRow] {
+        let originalLines = lines(original)
+        let editedLines = lines(edited)
+        let maxCount = max(originalLines.count, editedLines.count)
+        var rows: [WorkspaceFileDiffRow] = []
+
+        for index in 0..<maxCount {
+            let lineNumber = index + 1
+            let originalLine = index < originalLines.count ? originalLines[index] : nil
+            let editedLine = index < editedLines.count ? editedLines[index] : nil
+
+            switch (originalLine, editedLine) {
+            case let (old?, new?) where old != new:
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-removed", kind: .removed, lineNumber: lineNumber, text: old))
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-added", kind: .added, lineNumber: lineNumber, text: new))
+            case let (old?, nil):
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-removed", kind: .removed, lineNumber: lineNumber, text: old))
+            case let (nil, new?):
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-added", kind: .added, lineNumber: lineNumber, text: new))
+            default:
+                break
+            }
+        }
+
+        return rows
+    }
+
+    static func lines(_ value: String) -> [String] {
+        value.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    }
+}
+
+private struct WorkspaceFileDiffRowView: View {
+    let row: WorkspaceFileDiffRow
+
+    private var marker: String {
+        switch row.kind {
+        case .added: return "+"
+        case .removed: return "-"
+        }
+    }
+
+    private var tint: Color {
+        switch row.kind {
+        case .added: return .green
+        case .removed: return .red
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(marker)
+                .font(.system(.caption, design: .monospaced).weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 12)
+
+            Text("\(row.lineNumber)")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 38, alignment: .trailing)
+
+            Text(row.text.isEmpty ? " " : row.text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
 
 private struct WorkspaceFileBrowserSheet: View {
     @EnvironmentObject private var appState: AppState
@@ -835,6 +1102,15 @@ private struct WorkspaceFileBrowserSheet: View {
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            if let notice = appState.workspaceFileBrowserNotice {
+                Text(notice)
+                    .font(.subheadline)
+                    .foregroundStyle(.green)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
             browserContent

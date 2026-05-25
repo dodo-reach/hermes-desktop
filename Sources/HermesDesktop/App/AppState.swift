@@ -102,6 +102,7 @@ final class AppState: ObservableObject {
     @Published var workspaceFileDocuments: [String: FileEditorDocument] = [:]
     @Published var workspaceFileBrowserListing: RemoteDirectoryListing?
     @Published var workspaceFileBrowserError: String?
+    @Published var workspaceFileBrowserNotice: String?
     @Published var isLoadingWorkspaceFileBrowser = false
     @Published var workspacePreviewFile: WorkspacePreviewFile?
     @Published var workspacePreviewError: String?
@@ -914,6 +915,7 @@ final class AppState: ObservableObject {
             guard isActiveWorkspace(profile) else { return }
             isLoadingWorkspaceFileBrowser = false
             workspaceFileBrowserError = error.localizedDescription
+            workspaceFileBrowserNotice = nil
             setStatusMessage(L10n.string("Unable to browse remote files"))
         }
     }
@@ -926,6 +928,7 @@ final class AppState: ObservableObject {
         do {
             _ = try await caelWorkspaceAPIService.makeWorkspaceDirectory(connection: profile, path: targetPath)
             guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserNotice = L10n.string("Folder created")
             setStatusMessage(L10n.string("Folder created"))
             await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
         } catch {
@@ -944,6 +947,7 @@ final class AppState: ObservableObject {
         do {
             _ = try await caelWorkspaceAPIService.renameWorkspacePath(connection: profile, from: source, to: destination)
             guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserNotice = L10n.string("Renamed to %@", destination)
             setStatusMessage(L10n.string("File renamed"))
             await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
         } catch {
@@ -961,6 +965,7 @@ final class AppState: ObservableObject {
         do {
             try await caelWorkspaceAPIService.deleteWorkspacePath(connection: profile, path: targetPath)
             guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserNotice = L10n.string("Deleted %@", targetPath)
             setStatusMessage(L10n.string("Path deleted"))
             await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
         } catch {
@@ -977,6 +982,7 @@ final class AppState: ObservableObject {
 
         isUploadingWorkspaceFile = true
         workspaceFileBrowserError = nil
+        workspaceFileBrowserNotice = nil
 
         do {
             let didAccess = localFileURL.startAccessingSecurityScopedResource()
@@ -1004,7 +1010,11 @@ final class AppState: ObservableObject {
             )
             guard isActiveWorkspace(profile) else { return }
             isUploadingWorkspaceFile = false
-            setStatusMessage(L10n.string("%@ uploaded", result.path ?? localFileURL.lastPathComponent))
+            let uploadedPath = result.path ?? localFileURL.lastPathComponent
+            let sizeText = result.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
+            workspaceFileBrowserNotice = sizeText.map { L10n.string("Uploaded %@ (%@)", uploadedPath, $0) } ??
+                L10n.string("Uploaded %@", uploadedPath)
+            setStatusMessage(L10n.string("%@ uploaded", uploadedPath))
             await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
         } catch {
             guard isActiveWorkspace(profile) else { return }
@@ -4417,6 +4427,7 @@ final class AppState: ObservableObject {
         workspaceFileDocuments = [:]
         workspaceFileBrowserListing = nil
         workspaceFileBrowserError = nil
+        workspaceFileBrowserNotice = nil
         isLoadingWorkspaceFileBrowser = false
         workspacePreviewFile = nil
         workspacePreviewError = nil
