@@ -910,6 +910,17 @@ private struct WorkspaceSessionActiveRunCard: View {
         run.status.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    private var statusTint: Color {
+        switch run.status.lowercased() {
+        case "error", "failed":
+            return .red
+        case "complete", "completed", "succeeded":
+            return .green
+        default:
+            return .cyan
+        }
+    }
+
     private var detailText: String {
         if let errorMessage = run.errorMessage, !errorMessage.isEmpty {
             return errorMessage
@@ -923,13 +934,17 @@ private struct WorkspaceSessionActiveRunCard: View {
         return L10n.string("Server-owned chat turn is being tracked by the Workspace run ledger.")
     }
 
+    private var recentLifecycleEvents: [WorkspaceSessionRunLifecycleEvent] {
+        Array(run.lifecycleEvents.suffix(6))
+    }
+
     var body: some View {
         HermesSurfacePanel {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
                     Label(statusText, systemImage: run.status == "error" ? "exclamationmark.triangle.fill" : "waveform.path.ecg")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(run.status == "error" ? .red : .cyan)
+                        .foregroundStyle(statusTint)
 
                     Text(run.runId)
                         .font(.caption2.monospaced())
@@ -937,6 +952,12 @@ private struct WorkspaceSessionActiveRunCard: View {
                         .lineLimit(1)
 
                     Spacer()
+
+                    if let lastEventAt = run.lastEventAt {
+                        Text(runLedgerTimestamp(lastEventAt))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Text(detailText)
@@ -944,19 +965,105 @@ private struct WorkspaceSessionActiveRunCard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(4)
 
+                if !recentLifecycleEvents.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.string("Run Events"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(recentLifecycleEvents) { event in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(nonBlank(event.emoji) ?? (event.isError ? "!" : "-"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(event.isError ? .red : .secondary)
+                                    .frame(width: 16, alignment: .center)
+
+                                Text(event.text)
+                                    .font(.caption)
+                                    .foregroundStyle(event.isError ? .red : .secondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if let timestamp = event.timestamp {
+                                    Text(runLedgerTimestamp(timestamp))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
                 if !run.toolCalls.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(run.toolCalls.prefix(3)) { tool in
-                            Text("\(tool.name) · \(tool.phase)")
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.quaternary, in: Capsule())
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.string("Tools"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(run.toolCalls.prefix(6)) { tool in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    HermesBadge(
+                                        text: tool.phase.replacingOccurrences(of: "_", with: " ").capitalized,
+                                        tint: toolPhaseTint(tool.phase),
+                                        systemImage: "wrench.and.screwdriver.fill",
+                                        isMonospaced: false
+                                    )
+
+                                    Text(tool.name)
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(1)
+
+                                    Spacer()
+                                }
+
+                                if let preview = nonBlank(tool.preview) {
+                                    Text(preview)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(4)
+                                        .textSelection(.enabled)
+                                }
+
+                                if let result = nonBlank(tool.result) {
+                                    Text(result)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(4)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                     }
                 }
             }
         }
+    }
+
+    private func toolPhaseTint(_ phase: String) -> Color {
+        switch phase.lowercased() {
+        case "complete", "completed", "succeeded", "success":
+            return .green
+        case "error", "failed":
+            return .red
+        default:
+            return .blue
+        }
+    }
+
+    private func nonBlank(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private func runLedgerTimestamp(_ value: Double) -> String {
+        let seconds = value > 10_000_000_000 ? value / 1000 : value
+        let date = Date(timeIntervalSince1970: seconds)
+        return DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
     }
 }
 
