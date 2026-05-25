@@ -201,6 +201,11 @@ struct CaelProviderUsageCard: Codable, Identifiable {
     let status: String
     let plan: String?
     let message: String?
+    let caelConfigured: Bool?
+    let caelDefault: Bool?
+    let caelModel: String?
+    let caelModels: [String]?
+    let monitorKind: String?
     let updatedAt: String
     let source: String
     let confidence: String

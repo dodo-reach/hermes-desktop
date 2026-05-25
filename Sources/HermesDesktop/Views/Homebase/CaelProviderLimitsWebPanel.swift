@@ -5,8 +5,8 @@ struct CaelProviderLimitsWebPanel: View {
 
     var body: some View {
         HermesSurfacePanel(
-            title: "Provider Remaining Limits",
-            subtitle: "Native provider limit cards sourced from the Cael Workspace usage API."
+            title: "Cael Model Usage Limits",
+            subtitle: "Active Cael model providers are shown first; external monitors remain secondary."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
@@ -34,6 +34,22 @@ struct CaelProviderLimitsWebPanel: View {
         appState.activeConnection?.caelWorkspaceURL(path: "/usage") ?? ConnectionProfile().caelWorkspaceURL(path: "/usage")
     }
 
+    private func sortedProviders(_ providers: [CaelProviderUsageCard]) -> [CaelProviderUsageCard] {
+        providers.sorted { left, right in
+            let leftRank = providerRank(left)
+            let rightRank = providerRank(right)
+            if leftRank != rightRank { return leftRank < rightRank }
+            return left.label.localizedCaseInsensitiveCompare(right.label) == .orderedAscending
+        }
+    }
+
+    private func providerRank(_ provider: CaelProviderUsageCard) -> Int {
+        if provider.caelDefault == true { return 0 }
+        if provider.caelConfigured == true { return 1 }
+        if provider.monitorKind == "cael" { return 2 }
+        return 3
+    }
+
     @ViewBuilder
     private var content: some View {
         if appState.isLoadingCaelProviderUsage,
@@ -48,12 +64,62 @@ struct CaelProviderLimitsWebPanel: View {
             )
             .frame(maxWidth: .infinity, minHeight: 220)
         } else if let limits = appState.caelProviderUsageLimits {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
-                ForEach(limits.providers) { provider in
-                    CaelProviderUsageNativeCard(provider: provider)
+            VStack(alignment: .leading, spacing: 14) {
+                CaelModelRosterStrip(providers: sortedProviders(limits.providers))
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
+                    ForEach(sortedProviders(limits.providers)) { provider in
+                        CaelProviderUsageNativeCard(provider: provider)
+                    }
                 }
             }
         }
+    }
+}
+
+
+private struct CaelModelRosterStrip: View {
+    let providers: [CaelProviderUsageCard]
+
+    private var caelProviders: [CaelProviderUsageCard] {
+        providers.filter { $0.caelConfigured == true || $0.monitorKind == "cael" }
+    }
+
+    var body: some View {
+        HermesInsetSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Label("Active Cael model roster", systemImage: "cpu")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    HermesBadge(text: "\(caelProviders.count) Cael monitors", tint: .accentColor)
+                }
+
+                if caelProviders.isEmpty {
+                    Text("No Cael-configured model providers were reported by /api/usage/limits.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    FlowLayout(spacing: 6) {
+                        ForEach(caelProviders) { provider in
+                            Text(rosterLabel(for: provider))
+                                .font(.caption.weight(provider.caelDefault == true ? .semibold : .regular))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background((provider.caelDefault == true ? Color.accentColor : Color.secondary).opacity(0.12), in: Capsule())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func rosterLabel(for provider: CaelProviderUsageCard) -> String {
+        let model = provider.caelModel ?? provider.caelModels?.first ?? "configured"
+        if provider.caelDefault == true {
+            return "Default: \(provider.label) / \(model)"
+        }
+        return "\(provider.label) / \(model)"
     }
 }
 
@@ -89,16 +155,35 @@ private struct CaelProviderUsageNativeCard: View {
                     CaelProviderUsageRow(row: row)
                 }
 
-                if !provider.badges.isEmpty {
-                    FlowLayout(spacing: 6) {
-                        ForEach(provider.badges) { badge in
-                            Text("\(badge.label): \(badge.value)")
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.secondary.opacity(0.10), in: Capsule())
-                        }
+                FlowLayout(spacing: 6) {
+                    if provider.caelDefault == true {
+                        CaelProviderBadge(label: "Cael default", tint: .accentColor)
+                    } else if provider.caelConfigured == true || provider.monitorKind == "cael" {
+                        CaelProviderBadge(label: "Cael model", tint: .blue)
                     }
+
+                    if let caelModel = provider.caelModel {
+                        Text(caelModel)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.secondary.opacity(0.10), in: Capsule())
+                    }
+
+                    ForEach(provider.badges) { badge in
+                        Text("\(badge.label): \(badge.value)")
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.secondary.opacity(0.10), in: Capsule())
+                    }
+                }
+
+                if let models = provider.caelModels, models.count > 1 {
+                    Text("Cael models: \(models.joined(separator: ", "))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text(provider.source)
