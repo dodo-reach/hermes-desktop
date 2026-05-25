@@ -1929,6 +1929,7 @@ private struct NativeMCPPanel: View {
     @State private var response: WorkspaceMCPListResponse?
     @State private var testResults: [String: WorkspaceMCPTestResponse] = [:]
     @State private var discoverResults: [String: WorkspaceMCPDiscoverResponse] = [:]
+    @State private var logResults: [String: WorkspaceMCPLogsResponse] = [:]
     @State private var hubSources: [WorkspaceMCPHubSource] = []
     @State private var presets: [WorkspaceMCPPreset] = []
     @State private var hubSearch = "github"
@@ -1939,6 +1940,7 @@ private struct NativeMCPPanel: View {
     @State private var isSearchingHub = false
     @State private var testingServer: String?
     @State private var discoveringServer: String?
+    @State private var loadingLogsServer: String?
     @State private var mutatingServer: String?
     @State private var newServerName = ""
     @State private var newServerCommand = ""
@@ -2170,6 +2172,14 @@ private struct NativeMCPPanel: View {
                     tint: discovery.ok ? .green : .orange
                 )
             }
+            if let logs = logResults[server.name] {
+                MirrorRow(
+                    title: logs.ok ? "Log tail" : "Log tail unavailable",
+                    detail: logDetail(logs),
+                    badge: logs.lines.isEmpty ? nil : "\(logs.lines.count) lines",
+                    tint: logs.ok ? .blue : .orange
+                )
+            }
             HStack(spacing: 8) {
                 Button(testingServer == server.name ? "Testing..." : "Test") {
                     Task { await testServer(server.name) }
@@ -2180,6 +2190,11 @@ private struct NativeMCPPanel: View {
                     Task { await discoverServer(server) }
                 }
                 .disabled(!isMCPCapabilityAvailable || discoveringServer != nil || !server.enabled)
+
+                Button(loadingLogsServer == server.name ? "Loading..." : "Logs") {
+                    Task { await loadLogs(server.name) }
+                }
+                .disabled(loadingLogsServer != nil)
 
                 Button(server.enabled ? "Disable" : "Enable") {
                     Task { await setServer(server.name, enabled: !server.enabled) }
@@ -2263,6 +2278,8 @@ private struct NativeMCPPanel: View {
         do {
             _ = try await appState.caelWorkspaceAPIService.deleteMCPServer(connection: connection, name: name)
             testResults[name] = nil
+            discoverResults[name] = nil
+            logResults[name] = nil
             statusMessage = "Deleted MCP server \(name)."
             await loadServers()
         } catch {
@@ -2319,6 +2336,23 @@ private struct NativeMCPPanel: View {
             let result = try await appState.caelWorkspaceAPIService.discoverMCPServer(connection: connection, server: server)
             discoverResults[server.name] = result
             statusMessage = "Discovered \(result.tools.count) tools for \(server.name)."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadLogs(_ name: String) async {
+        guard let connection = appState.activeConnection else { return }
+        loadingLogsServer = name
+        defer { loadingLogsServer = nil }
+        do {
+            let result = try await appState.caelWorkspaceAPIService.loadMCPServerLogs(connection: connection, name: name)
+            logResults[name] = result
+            if result.ok {
+                statusMessage = result.lines.isEmpty ? "No recent MCP logs for \(name)." : "Loaded \(result.lines.count) log lines for \(name)."
+            } else {
+                statusMessage = "MCP logs unavailable for \(name): \(result.error ?? "unknown error")."
+            }
         } catch {
             statusMessage = "Error: \(error.localizedDescription)"
         }
@@ -2384,6 +2418,14 @@ private struct NativeMCPPanel: View {
         if let error = result.error, !error.isEmpty { return error }
         let tools = result.tools.prefix(8).map(\.name).joined(separator: ", ")
         return tools.isEmpty ? "No tools reported by discovery." : tools
+    }
+
+    private func logDetail(_ result: WorkspaceMCPLogsResponse) -> String {
+        if !result.lines.isEmpty {
+            return result.lines.suffix(12).joined(separator: "\n")
+        }
+        if let error = result.error, !error.isEmpty { return error }
+        return "The shared logs endpoint opened, but no log lines were emitted before the desktop timeout."
     }
 
     private func registrySourceDetail(_ source: WorkspaceMCPHubSource) -> String {

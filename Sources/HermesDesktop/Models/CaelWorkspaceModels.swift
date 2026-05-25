@@ -1147,6 +1147,12 @@ struct WorkspaceMCPDiscoverResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceMCPLogsResponse: Decodable {
+    let ok: Bool
+    let lines: [String]
+    let error: String?
+}
+
 struct WorkspaceMCPHubSourcesResponse: Decodable {
     let ok: Bool?
     let sources: [WorkspaceMCPHubSource]
