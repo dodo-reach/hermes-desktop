@@ -145,6 +145,36 @@ struct WorkspaceAgentStartResponse: Codable {
     }
 }
 
+struct WorkspaceCrewStatusResponse: Codable {
+    let crew: [WorkspaceCrewMember]
+    let fetchedAt: Double?
+}
+
+struct WorkspaceCrewMember: Codable, Identifiable, Hashable {
+    let id: String
+    let displayName: String
+    let humanLabel: String?
+    let role: String
+    let specialty: String?
+    let mission: String?
+    let skills: [String]?
+    let capabilities: [String]?
+    let profileFound: Bool
+    let gatewayState: String
+    let processAlive: Bool
+    let model: String
+    let provider: String
+    let lastSessionTitle: String?
+    let lastSessionAt: Double?
+    let sessionCount: Int
+    let messageCount: Int
+    let toolCallCount: Int
+    let totalTokens: Int
+    let estimatedCostUsd: Double?
+    let cronJobCount: Int
+    let assignedTaskCount: Int
+}
+
 struct CaelProfileDetail: Codable {
     let name: String
     let path: String

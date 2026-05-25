@@ -151,6 +151,10 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         try await loadJSON(connection: connection, path: "/api/profiles/list", responseType: CaelProfilesListResponse.self)
     }
 
+    func loadCrewStatus(connection: ConnectionProfile) async throws -> WorkspaceCrewStatusResponse {
+        try await loadJSON(connection: connection, path: "/api/crew-status", responseType: WorkspaceCrewStatusResponse.self)
+    }
+
     func readProfile(connection: ConnectionProfile, name: String) async throws -> CaelProfileDetail {
         let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
         let response = try await loadJSON(
@@ -319,6 +323,31 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
             body: CaelProfileDescriptionUpdateRequest(
                 name: name,
                 patch: CaelProfileDescriptionPatch(description: description)
+            ),
+            responseType: CaelProfileMutationResponse.self
+        )
+    }
+
+    @discardableResult
+    func updateProfileOperationsConfig(
+        connection: ConnectionProfile,
+        name: String,
+        model: String?,
+        provider: String?,
+        systemPrompt: String?,
+        description: String?
+    ) async throws -> CaelProfileMutationResponse {
+        try await postJSON(
+            connection: connection,
+            path: "/api/profiles/update",
+            body: CaelProfileOperationsUpdateRequest(
+                name: name,
+                patch: CaelProfileOperationsPatch(
+                    model: model?.nilIfBlank,
+                    provider: provider?.nilIfBlank,
+                    systemPrompt: systemPrompt?.nilIfBlank,
+                    description: description?.nilIfBlank
+                )
             ),
             responseType: CaelProfileMutationResponse.self
         )
@@ -1297,6 +1326,25 @@ private struct CaelProfileDescriptionPatch: Encodable {
 private struct CaelProfileDescriptionUpdateRequest: Encodable {
     let name: String
     let patch: CaelProfileDescriptionPatch
+}
+
+private struct CaelProfileOperationsPatch: Encodable {
+    let model: String?
+    let provider: String?
+    let systemPrompt: String?
+    let description: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case provider
+        case systemPrompt = "system_prompt"
+        case description
+    }
+}
+
+private struct CaelProfileOperationsUpdateRequest: Encodable {
+    let name: String
+    let patch: CaelProfileOperationsPatch
 }
 
 

@@ -347,15 +347,23 @@ private struct NativeOperationsAgentsPanel: View {
     @EnvironmentObject private var appState: AppState
 
     @State private var profiles: [CaelProfileSummary] = []
+    @State private var crew: [WorkspaceCrewMember] = []
     @State private var activeProfileName = "default"
     @State private var isLoading = false
     @State private var isCreating = false
     @State private var isStartingRuntime = false
+    @State private var isSavingProfile = false
+    @State private var isLoadingEditDetail = false
     @State private var operationProfileName: String?
     @State private var errorMessage: String?
     @State private var runtimeMessage: String?
     @State private var newAgentName = ""
     @State private var newAgentModel = ""
+    @State private var editingProfile: CaelProfileSummary?
+    @State private var editModel = ""
+    @State private var editProvider = ""
+    @State private var editDescription = ""
+    @State private var editSystemPrompt = ""
     @State private var profilePendingDelete: CaelProfileSummary?
 
     var body: some View {
@@ -367,6 +375,7 @@ private struct NativeOperationsAgentsPanel: View {
                 VStack(alignment: .leading, spacing: 16) {
                     controlsRow
                     createRow
+                    crewSummaryRow
 
                     if let errorMessage {
                         MirrorRow(title: "Error", detail: errorMessage, badge: "Attention", tint: .orange)
@@ -393,7 +402,7 @@ private struct NativeOperationsAgentsPanel: View {
             }
         }
         .task(id: appState.activeConnectionID) {
-            await loadProfiles()
+            await loadAll()
         }
         .alert(
             "Delete operations agent?",
@@ -413,12 +422,15 @@ private struct NativeOperationsAgentsPanel: View {
         } message: {
             Text("This removes the server-side Hermes profile for this operations agent.")
         }
+        .sheet(item: $editingProfile) { profile in
+            editSheet(profile)
+        }
     }
 
     private var controlsRow: some View {
         HStack(spacing: 10) {
             Button {
-                Task { await loadProfiles() }
+                Task { await loadAll() }
             } label: {
                 Label("Refresh Agents", systemImage: "arrow.clockwise")
             }
@@ -467,15 +479,42 @@ private struct NativeOperationsAgentsPanel: View {
         }
     }
 
+    private var crewSummaryRow: some View {
+        HStack(spacing: 10) {
+            OperationMiniStat(label: "profiles", value: "\(profiles.count)")
+            OperationMiniStat(label: "crew", value: "\(crew.count)")
+            OperationMiniStat(label: "running", value: "\(crew.filter(\.processAlive).count)")
+            OperationMiniStat(label: "sessions", value: "\(crew.reduce(0) { $0 + $1.sessionCount })")
+            OperationMiniStat(label: "jobs", value: "\(crew.reduce(0) { $0 + $1.cronJobCount })")
+        }
+    }
+
     private func agentCard(_ profile: CaelProfileSummary) -> some View {
-        MirrorListCard(title: profile.resolvedDisplayName, emptyText: "No operations agent detail reported.") {
+        let crewMember = crewMember(for: profile)
+        return MirrorListCard(title: profile.resolvedDisplayName, emptyText: "No operations agent detail reported.") {
             MirrorRow(
                 title: profile.active ? "Active profile" : "Profile agent",
                 detail: profile.description?.nilIfBlank ?? profile.path,
                 badge: profile.active ? "Active" : (profile.exists ? "Ready" : "Missing"),
                 tint: profile.active ? .green : (profile.exists ? .blue : .orange)
             )
-            MirrorRow(title: "Model", detail: profile.model?.nilIfBlank ?? "Not configured", badge: profile.provider?.nilIfBlank, tint: profile.model?.nilIfBlank == nil ? .orange : .cyan)
+            MirrorRow(title: "Model", detail: profile.model?.nilIfBlank ?? crewMember?.model.nilIfBlank ?? "Not configured", badge: profile.provider?.nilIfBlank ?? crewMember?.provider.nilIfBlank, tint: (profile.model?.nilIfBlank ?? crewMember?.model.nilIfBlank) == nil ? .orange : .cyan)
+            if let crewMember {
+                MirrorRow(
+                    title: "Gateway",
+                    detail: crewMember.processAlive ? "Process alive; \(crewMember.gatewayState)." : "No live process reported; \(crewMember.gatewayState).",
+                    badge: crewMember.profileFound ? "Profile" : "Missing",
+                    tint: crewMember.processAlive ? .green : .orange
+                )
+                MirrorRow(
+                    title: "Workload",
+                    detail: "\(crewMember.sessionCount) sessions, \(crewMember.messageCount) messages, \(crewMember.toolCallCount) tool calls, \(crewMember.cronJobCount) jobs, \(crewMember.assignedTaskCount) tasks.",
+                    tint: .secondary
+                )
+                if let lastSessionAt = crewMember.lastSessionAt {
+                    MirrorRow(title: "Last session", detail: formatTimestamp(lastSessionAt), tint: .secondary)
+                }
+            }
             HStack(spacing: 10) {
                 OperationMiniStat(label: "skills", value: "\(profile.skillCount)")
                 OperationMiniStat(label: "sessions", value: "\(profile.sessionCount)")
@@ -489,6 +528,14 @@ private struct NativeOperationsAgentsPanel: View {
 
     private func actionButtons(_ profile: CaelProfileSummary) -> some View {
         HStack(spacing: 8) {
+            Button {
+                Task { await beginEdit(profile) }
+            } label: {
+                Label("Edit", systemImage: "slider.horizontal.3")
+            }
+            .buttonStyle(.bordered)
+            .disabled(operationProfileName != nil)
+
             Button {
                 Task { await activateProfile(profile) }
             } label: {
@@ -506,6 +553,63 @@ private struct NativeOperationsAgentsPanel: View {
             .disabled(profile.name == "default" || operationProfileName != nil)
         }
         .controlSize(.small)
+    }
+
+    private func editSheet(_ profile: CaelProfileSummary) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Edit Operations Agent")
+                        .font(.title3.weight(.semibold))
+                    Text(profile.name)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isLoadingEditDetail || isSavingProfile {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            TextField("Model", text: $editModel)
+                .textFieldStyle(.roundedBorder)
+            TextField("Provider", text: $editProvider)
+                .textFieldStyle(.roundedBorder)
+            TextField("Description", text: $editDescription)
+                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("System prompt")
+                    .font(.subheadline.weight(.semibold))
+                TextEditor(text: $editSystemPrompt)
+                    .font(.body)
+                    .frame(minHeight: 180)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+                    }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    editingProfile = nil
+                }
+                Button(isSavingProfile ? "Saving" : "Save") {
+                    Task { await saveProfileEdits() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSavingProfile || appState.activeConnection == nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 560)
+        .frame(minHeight: 520)
+    }
+
+    private func loadAll() async {
+        await loadProfiles()
+        await loadCrewStatus()
     }
 
     private func loadProfiles() async {
@@ -527,6 +631,20 @@ private struct NativeOperationsAgentsPanel: View {
         }
     }
 
+    private func loadCrewStatus() async {
+        guard let connection = appState.activeConnection else {
+            crew = []
+            return
+        }
+
+        do {
+            let response = try await appState.caelWorkspaceAPIService.loadCrewStatus(connection: connection)
+            crew = response.crew
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func createAgent() async {
         guard let connection = appState.activeConnection else { return }
         let name = normalizedProfileName(newAgentName)
@@ -542,9 +660,54 @@ private struct NativeOperationsAgentsPanel: View {
             newAgentName = ""
             newAgentModel = ""
             isCreating = false
-            await loadProfiles()
+            await loadAll()
         } catch {
             isCreating = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func beginEdit(_ profile: CaelProfileSummary) async {
+        editModel = profile.model ?? ""
+        editProvider = profile.provider ?? ""
+        editDescription = profile.description ?? ""
+        editSystemPrompt = ""
+        editingProfile = profile
+        guard let connection = appState.activeConnection else { return }
+        isLoadingEditDetail = true
+        do {
+            let detail = try await appState.caelWorkspaceAPIService.readProfile(connection: connection, name: profile.name)
+            guard editingProfile?.name == profile.name else { return }
+            editModel = stringValue(detail.config["model"]) ?? editModel
+            editProvider = stringValue(detail.config["provider"]) ?? editProvider
+            editSystemPrompt = stringValue(detail.config["system_prompt"]) ?? ""
+            editDescription = detail.description
+            isLoadingEditDetail = false
+        } catch {
+            isLoadingEditDetail = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveProfileEdits() async {
+        guard let connection = appState.activeConnection,
+              let editingProfile else { return }
+        isSavingProfile = true
+        errorMessage = nil
+        do {
+            _ = try await appState.caelWorkspaceAPIService.updateProfileOperationsConfig(
+                connection: connection,
+                name: editingProfile.name,
+                model: editModel,
+                provider: editProvider,
+                systemPrompt: editSystemPrompt,
+                description: editDescription
+            )
+            isSavingProfile = false
+            self.editingProfile = nil
+            await loadAll()
+        } catch {
+            isSavingProfile = false
             errorMessage = error.localizedDescription
         }
     }
@@ -557,7 +720,7 @@ private struct NativeOperationsAgentsPanel: View {
             _ = try await appState.caelWorkspaceAPIService.activateProfile(connection: connection, name: profile.name)
             await appState.switchHermesProfile(to: profile.name)
             operationProfileName = nil
-            await loadProfiles()
+            await loadAll()
         } catch {
             operationProfileName = nil
             errorMessage = error.localizedDescription
@@ -571,7 +734,7 @@ private struct NativeOperationsAgentsPanel: View {
         do {
             _ = try await appState.caelWorkspaceAPIService.deleteProfile(connection: connection, name: profile.name)
             operationProfileName = nil
-            await loadProfiles()
+            await loadAll()
         } catch {
             operationProfileName = nil
             errorMessage = error.localizedDescription
@@ -588,11 +751,16 @@ private struct NativeOperationsAgentsPanel: View {
             runtimeMessage = response.pid.map { "\(response.displayMessage) pid \($0)" } ?? response.displayMessage
             isStartingRuntime = false
             await appState.refreshCaelWorkspace()
-            await loadProfiles()
+            await loadAll()
         } catch {
             isStartingRuntime = false
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func crewMember(for profile: CaelProfileSummary) -> WorkspaceCrewMember? {
+        let crewID = profile.name == "default" ? "workspace" : profile.name
+        return crew.first { $0.id == crewID }
     }
 
     private func normalizedProfileName(_ value: String) -> String {
@@ -609,11 +777,21 @@ private struct NativeOperationsAgentsPanel: View {
         return normalized.range(of: #"^[a-z0-9][a-z0-9_-]*$"#, options: .regularExpression) != nil
     }
 
+    private func stringValue(_ value: CaelJSONValue?) -> String? {
+        guard case let .string(text) = value else { return nil }
+        return text
+    }
+
+    private func formatTimestamp(_ value: Double) -> String {
+        let seconds = value > 1_000_000_000_000 ? value / 1000 : value
+        return Date(timeIntervalSince1970: seconds).formatted(date: .abbreviated, time: .shortened)
+    }
+
     private func tint(forStatus status: String) -> Color {
-        switch status {
-        case "ready", "available", "complete", "online", "ok": return .green
-        case "active", "running": return .cyan
-        case "setup-needed", "warning", "error", "needs_attention": return .orange
+        switch status.lowercased() {
+        case "ready", "available", "complete", "online", "ok", "running": return .green
+        case "active": return .cyan
+        case "setup-needed", "warning", "error", "needs_attention", "unknown": return .orange
         default: return .blue
         }
     }
