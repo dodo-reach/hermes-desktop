@@ -152,6 +152,7 @@ struct CommandCenterMirrorView: View {
 
     private var memorySection: some View {
         VStack(alignment: .leading, spacing: 16) {
+            NativeKnowledgeFabricPanel()
             brainSourcesPanel
             memoryArtifactsPanel
         }
@@ -334,6 +335,245 @@ private struct MirrorGridOrEmpty<Item: Identifiable, Content: View>: View {
                 }
             }
         }
+    }
+}
+
+private struct NativeKnowledgeFabricPanel: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var query = "Hermes Cael parity"
+    @State private var scope = "both"
+    @State private var mode = "knowledge"
+    @State private var agentSource = ""
+    @State private var documentID = ""
+    @State private var health: KnowledgeFabricHealthResponse?
+    @State private var searchResponse: KnowledgeFabricSearchResponse?
+    @State private var documentResponse: KnowledgeFabricSearchResponse?
+    @State private var errorMessage: String?
+    @State private var isLoadingHealth = false
+    @State private var isSearching = false
+    @State private var isLookingUpDocument = false
+
+    var body: some View {
+        HermesSurfacePanel(
+            title: "Knowledge Fabric",
+            subtitle: "Search the scoped second brain through the shared :3077 Memory Fabric contract."
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                headerRow
+                searchControls
+
+                if let errorMessage {
+                    MirrorRow(title: "Error", detail: errorMessage, badge: "Attention", tint: .orange)
+                }
+
+                if let searchResponse {
+                    resultSection(title: "Search Results", response: searchResponse)
+                }
+
+                documentControls
+
+                if let documentResponse {
+                    resultSection(title: "Document Lookup", response: documentResponse)
+                }
+            }
+        }
+        .task(id: appState.activeConnectionID) {
+            await refreshHealth()
+        }
+    }
+
+    private var headerRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(health?.statusLabel ?? "Checking")
+                    .font(.subheadline.weight(.semibold))
+                Text(health?.endpoint ?? "https://memory.visualgraphx.com")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            if isLoadingHealth {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Button("Refresh") {
+                Task { await refreshHealth() }
+            }
+            .disabled(isLoadingHealth)
+        }
+    }
+
+    private var searchControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("Search Memory Fabric", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    Task { await runSearch() }
+                }
+
+            HStack(alignment: .center, spacing: 12) {
+                Picker("Scope", selection: $scope) {
+                    Text("Both").tag("both")
+                    Text("Business").tag("business")
+                    Text("Personal").tag("personal")
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 360)
+
+                Picker("Mode", selection: $mode) {
+                    Text("Knowledge").tag("knowledge")
+                    Text("Agent").tag("agent")
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 260)
+
+                if mode == "agent" {
+                    TextField("Agent source", text: $agentSource)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 180)
+                }
+
+                Button("Search") {
+                    Task { await runSearch() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSearching || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if isSearching {
+                ProgressView("Searching Knowledge Fabric...")
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private var documentControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Document lookup")
+                .font(.headline)
+            HStack(spacing: 12) {
+                TextField("doc id or canonical id", text: $documentID)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        Task { await lookupDocument() }
+                    }
+                Button("Lookup") {
+                    Task { await lookupDocument() }
+                }
+                .disabled(isLookingUpDocument || documentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if isLookingUpDocument {
+                ProgressView("Loading document...")
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private func resultSection(title: String, response: KnowledgeFabricSearchResponse) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline)
+            let results = response.scopedResults
+            if results.isEmpty {
+                Text("No scoped results returned.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 12, alignment: .top)], spacing: 12) {
+                    ForEach(results) { result in
+                        resultCard(result)
+                    }
+                }
+            }
+        }
+    }
+
+    private func resultCard(_ result: KnowledgeFabricScopedResult) -> some View {
+        MirrorListCard(title: result.displayScope, emptyText: "No Knowledge Fabric detail reported.") {
+            MirrorRow(
+                title: result.ok == false ? "Unavailable" : "Result",
+                detail: preview(result.summary, maxLength: 600),
+                badge: result.ok == false ? "Error" : "Memory",
+                tint: result.ok == false ? .orange : .green
+            )
+
+            let evidence = result.data?.evidence ?? []
+            ForEach(Array(evidence.prefix(4))) { item in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item.title ?? item.docID ?? "Evidence")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    Text(preview(item.snippet ?? item.canonicalDocID ?? "", maxLength: 260))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let docID = item.docID ?? item.canonicalDocID {
+                        Button("Lookup document") {
+                            documentID = docID
+                            scope = result.scopeKey == "personal" ? "personal" : "business"
+                            Task { await lookupDocument() }
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func refreshHealth() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoadingHealth = true
+        defer { isLoadingHealth = false }
+        do {
+            health = try await appState.caelWorkspaceAPIService.loadKnowledgeFabricHealth(connection: connection)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func runSearch() async {
+        guard let connection = appState.activeConnection else { return }
+        isSearching = true
+        errorMessage = nil
+        defer { isSearching = false }
+        do {
+            searchResponse = try await appState.caelWorkspaceAPIService.searchKnowledgeFabric(
+                connection: connection,
+                query: query,
+                scope: scope,
+                mode: mode,
+                agentSource: agentSource
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func lookupDocument() async {
+        guard let connection = appState.activeConnection else { return }
+        isLookingUpDocument = true
+        errorMessage = nil
+        defer { isLookingUpDocument = false }
+        do {
+            documentResponse = try await appState.caelWorkspaceAPIService.lookupKnowledgeFabricDocument(
+                connection: connection,
+                docID: documentID,
+                scope: scope
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func preview(_ value: String, maxLength: Int) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\n\n", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.count <= maxLength { return normalized.isEmpty ? "No preview available." : normalized }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return String(normalized[..<index]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 }
 

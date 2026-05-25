@@ -496,6 +496,137 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
     }
 
+    func loadKnowledgeFabricHealth(connection: ConnectionProfile) async throws -> KnowledgeFabricHealthResponse {
+        try await loadJSON(
+            connection: connection,
+            path: "/api/knowledge/fabric/health",
+            responseType: KnowledgeFabricHealthResponse.self
+        )
+    }
+
+    func searchKnowledgeFabric(
+        connection: ConnectionProfile,
+        query: String,
+        scope: String,
+        mode: String,
+        agentSource: String? = nil
+    ) async throws -> KnowledgeFabricSearchResponse {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else {
+            throw SSHTransportError.invalidResponse("Knowledge Fabric search query is required.")
+        }
+
+        if scope == "both" {
+            async let business: KnowledgeFabricScopedResult? = try? await searchKnowledgeFabricScope(
+                connection: connection,
+                query: normalizedQuery,
+                scope: "business",
+                mode: mode,
+                agentSource: agentSource
+            ).scopedResults.first?.withFallbackScope("business")
+            async let personal: KnowledgeFabricScopedResult? = try? await searchKnowledgeFabricScope(
+                connection: connection,
+                query: normalizedQuery,
+                scope: "personal",
+                mode: mode,
+                agentSource: agentSource
+            ).scopedResults.first?.withFallbackScope("personal")
+
+            let results = await (business, personal)
+            return KnowledgeFabricSearchResponse(
+                ok: results.0 != nil || results.1 != nil,
+                endpoint: nil,
+                memoryScope: nil,
+                data: nil,
+                scopes: KnowledgeFabricScopedResults(business: results.0, personal: results.1),
+                error: results.0 == nil && results.1 == nil ? "Both Knowledge Fabric scopes failed." : nil
+            )
+        }
+
+        return try await searchKnowledgeFabricScope(
+            connection: connection,
+            query: normalizedQuery,
+            scope: scope,
+            mode: mode,
+            agentSource: agentSource
+        )
+    }
+
+    func lookupKnowledgeFabricDocument(
+        connection: ConnectionProfile,
+        docID: String,
+        scope: String
+    ) async throws -> KnowledgeFabricSearchResponse {
+        let normalizedDocID = docID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedDocID.isEmpty else {
+            throw SSHTransportError.invalidResponse("Knowledge Fabric document id is required.")
+        }
+
+        if scope == "both" {
+            async let business: KnowledgeFabricScopedResult? = try? await lookupKnowledgeFabricDocumentScope(
+                connection: connection,
+                docID: normalizedDocID,
+                scope: "business"
+            ).scopedResults.first?.withFallbackScope("business")
+            async let personal: KnowledgeFabricScopedResult? = try? await lookupKnowledgeFabricDocumentScope(
+                connection: connection,
+                docID: normalizedDocID,
+                scope: "personal"
+            ).scopedResults.first?.withFallbackScope("personal")
+
+            let results = await (business, personal)
+            return KnowledgeFabricSearchResponse(
+                ok: results.0 != nil || results.1 != nil,
+                endpoint: nil,
+                memoryScope: nil,
+                data: nil,
+                scopes: KnowledgeFabricScopedResults(business: results.0, personal: results.1),
+                error: results.0 == nil && results.1 == nil ? "Both Knowledge Fabric document lookups failed." : nil
+            )
+        }
+
+        return try await lookupKnowledgeFabricDocumentScope(
+            connection: connection,
+            docID: normalizedDocID,
+            scope: scope
+        )
+    }
+
+    private func searchKnowledgeFabricScope(
+        connection: ConnectionProfile,
+        query: String,
+        scope: String,
+        mode: String,
+        agentSource: String?
+    ) async throws -> KnowledgeFabricSearchResponse {
+        let endpoint = mode == "agent" ? "/api/knowledge/fabric/agent-search" : "/api/knowledge/fabric/search"
+        return try await postJSON(
+            connection: connection,
+            path: endpoint,
+            body: KnowledgeFabricSearchRequest(
+                query: query,
+                memoryScope: scope,
+                mode: mode == "agent" ? nil : "local",
+                maxResults: 8,
+                agentSource: agentSource?.nilIfBlank
+            ),
+            responseType: KnowledgeFabricSearchResponse.self
+        )
+    }
+
+    private func lookupKnowledgeFabricDocumentScope(
+        connection: ConnectionProfile,
+        docID: String,
+        scope: String
+    ) async throws -> KnowledgeFabricSearchResponse {
+        try await postJSON(
+            connection: connection,
+            path: "/api/knowledge/fabric/document-record",
+            body: KnowledgeFabricDocumentRequest(docId: docID, memoryScope: scope),
+            responseType: KnowledgeFabricSearchResponse.self
+        )
+    }
+
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
         var components = URLComponents()
         components.path = "/api/files"
@@ -741,6 +872,19 @@ private struct CaelProfileDescriptionPatch: Encodable {
 private struct CaelProfileDescriptionUpdateRequest: Encodable {
     let name: String
     let patch: CaelProfileDescriptionPatch
+}
+
+private struct KnowledgeFabricSearchRequest: Encodable {
+    let query: String
+    let memoryScope: String
+    let mode: String?
+    let maxResults: Int
+    let agentSource: String?
+}
+
+private struct KnowledgeFabricDocumentRequest: Encodable {
+    let docId: String
+    let memoryScope: String
 }
 
 private struct CaelWorkspaceFilesListResponse: Decodable {

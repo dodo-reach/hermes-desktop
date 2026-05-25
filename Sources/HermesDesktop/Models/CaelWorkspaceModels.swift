@@ -583,3 +583,224 @@ struct CaelCommandCenterVaultRef: Codable, Identifiable {
     let vaultHref: String?
     let secretValue: String?
 }
+
+struct KnowledgeFabricHealthResponse: Decodable {
+    let ok: Bool?
+    let endpoint: String?
+    let configured: Bool?
+    let warning: String?
+    let error: String?
+
+    var statusLabel: String {
+        if ok == true { return "Online" }
+        if configured == false { return "Not configured" }
+        return "Needs attention"
+    }
+}
+
+struct KnowledgeFabricSearchResponse: Decodable {
+    let ok: Bool?
+    let endpoint: String?
+    let memoryScope: String?
+    let data: KnowledgeFabricPayload?
+    let scopes: KnowledgeFabricScopedResults?
+    let error: String?
+
+    var scopedResults: [KnowledgeFabricScopedResult] {
+        if let scopes {
+            return [
+                scopes.business?.withFallbackScope("business"),
+                scopes.personal?.withFallbackScope("personal")
+            ].compactMap { $0 }
+        }
+        return [KnowledgeFabricScopedResult(
+            ok: ok,
+            tool: nil,
+            endpoint: endpoint,
+            memoryScope: memoryScope,
+            data: data,
+            error: error,
+            fallbackScope: memoryScope ?? "memory"
+        )]
+    }
+}
+
+struct KnowledgeFabricScopedResults: Decodable {
+    let business: KnowledgeFabricScopedResult?
+    let personal: KnowledgeFabricScopedResult?
+}
+
+struct KnowledgeFabricScopedResult: Decodable, Identifiable {
+    let ok: Bool?
+    let tool: String?
+    let endpoint: String?
+    let memoryScope: String?
+    let data: KnowledgeFabricPayload?
+    let error: String?
+    private let fallbackScope: String?
+
+    init(
+        ok: Bool?,
+        tool: String?,
+        endpoint: String?,
+        memoryScope: String?,
+        data: KnowledgeFabricPayload?,
+        error: String?,
+        fallbackScope: String?
+    ) {
+        self.ok = ok
+        self.tool = tool
+        self.endpoint = endpoint
+        self.memoryScope = memoryScope
+        self.data = data
+        self.error = error
+        self.fallbackScope = fallbackScope
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case tool
+        case endpoint
+        case memoryScope
+        case data
+        case error
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ok = try container.decodeIfPresent(Bool.self, forKey: .ok)
+        self.tool = try container.decodeIfPresent(String.self, forKey: .tool)
+        self.endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint)
+        self.memoryScope = try container.decodeIfPresent(String.self, forKey: .memoryScope)
+        self.data = try container.decodeIfPresent(KnowledgeFabricPayload.self, forKey: .data)
+        self.error = try container.decodeIfPresent(String.self, forKey: .error)
+        self.fallbackScope = nil
+    }
+
+    var id: String {
+        "\(scopeKey)-\(data?.query ?? data?.document?.canonicalDocID ?? data?.document?.title ?? error ?? "result")"
+    }
+
+    var scopeKey: String {
+        (memoryScope ?? fallbackScope ?? "memory").lowercased()
+    }
+
+    var displayScope: String {
+        switch scopeKey {
+        case "business": return "Business / Dev Server"
+        case "personal": return "Personal / BigMac"
+        default: return scopeKey.capitalized
+        }
+    }
+
+    var summary: String {
+        if let error, !error.isEmpty { return error }
+        if let answer = data?.answer, !answer.isEmpty { return answer }
+        if let document = data?.document {
+            return document.summary?.nilIfBlank ?? document.title?.nilIfBlank ?? "Document record returned without a summary."
+        }
+        return data?.text?.nilIfBlank ?? "No structured Knowledge Fabric payload returned."
+    }
+
+    func withFallbackScope(_ scope: String) -> KnowledgeFabricScopedResult {
+        KnowledgeFabricScopedResult(
+            ok: ok,
+            tool: tool,
+            endpoint: endpoint,
+            memoryScope: memoryScope,
+            data: data,
+            error: error,
+            fallbackScope: scope
+        )
+    }
+}
+
+struct KnowledgeFabricPayload: Decodable {
+    let status: String?
+    let answer: String?
+    let mode: String?
+    let query: String?
+    let workspace: String?
+    let evidence: [KnowledgeFabricEvidence]
+    let document: KnowledgeFabricDocument?
+    let text: String?
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.singleValueContainer(),
+           let text = try? container.decode(String.self) {
+            self.status = nil
+            self.answer = nil
+            self.mode = nil
+            self.query = nil
+            self.workspace = nil
+            self.evidence = []
+            self.document = nil
+            self.text = text
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.status = try container.decodeIfPresent(String.self, forKey: .status)
+        self.answer = try container.decodeIfPresent(String.self, forKey: .answer)
+        self.mode = try container.decodeIfPresent(String.self, forKey: .mode)
+        self.query = try container.decodeIfPresent(String.self, forKey: .query)
+        self.workspace = try container.decodeIfPresent(String.self, forKey: .workspace)
+        self.evidence = try container.decodeIfPresent([KnowledgeFabricEvidence].self, forKey: .evidence) ?? []
+        self.document = try container.decodeIfPresent(KnowledgeFabricDocument.self, forKey: .document)
+        self.text = nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case answer
+        case mode
+        case query
+        case workspace
+        case evidence
+        case document
+    }
+}
+
+struct KnowledgeFabricEvidence: Decodable, Identifiable {
+    let docID: String?
+    let canonicalDocID: String?
+    let title: String?
+    let workspace: String?
+    let sourceTag: String?
+    let capturedAt: String?
+    let snippet: String?
+
+    var id: String {
+        docID ?? canonicalDocID ?? title ?? snippet ?? "evidence"
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case docID = "doc_id"
+        case canonicalDocID = "canonical_doc_id"
+        case title
+        case workspace
+        case sourceTag = "source_tag"
+        case capturedAt = "captured_at"
+        case snippet
+    }
+}
+
+struct KnowledgeFabricDocument: Decodable {
+    let canonicalDocID: String?
+    let title: String?
+    let summary: String?
+    let sourceSystem: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case canonicalDocID = "canonical_doc_id"
+        case title
+        case summary
+        case sourceSystem = "source_system"
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self
+    }
+}
