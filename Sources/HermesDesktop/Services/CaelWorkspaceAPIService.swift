@@ -86,15 +86,124 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return try await loadJSON(connection: connection, path: path, responseType: CaelProviderUsageLimits.self)
     }
 
+    func loadProfiles(connection: ConnectionProfile) async throws -> CaelProfilesListResponse {
+        try await loadJSON(connection: connection, path: "/api/profiles/list", responseType: CaelProfilesListResponse.self)
+    }
+
+    func readProfile(connection: ConnectionProfile, name: String) async throws -> CaelProfileDetail {
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let response = try await loadJSON(
+            connection: connection,
+            path: "/api/profiles/read?name=\(encodedName)",
+            responseType: CaelProfileDetailResponse.self
+        )
+        return response.profile
+    }
+
+    @discardableResult
+    func createProfile(
+        connection: ConnectionProfile,
+        name: String,
+        cloneFrom: String? = nil,
+        provider: String? = nil,
+        model: String? = nil
+    ) async throws -> CaelProfileMutationResponse {
+        try await postJSON(
+            connection: connection,
+            path: "/api/profiles/create",
+            body: CaelProfileCreateRequest(
+                name: name,
+                cloneFrom: cloneFrom?.nilIfBlank,
+                model: model?.nilIfBlank,
+                provider: provider?.nilIfBlank
+            ),
+            responseType: CaelProfileMutationResponse.self
+        )
+    }
+
+    @discardableResult
+    func activateProfile(connection: ConnectionProfile, name: String) async throws -> CaelProfileMutationResponse {
+        try await postJSON(
+            connection: connection,
+            path: "/api/profiles/activate",
+            body: CaelProfileNameRequest(name: name),
+            responseType: CaelProfileMutationResponse.self
+        )
+    }
+
+    @discardableResult
+    func renameProfile(connection: ConnectionProfile, oldName: String, newName: String) async throws -> CaelProfileMutationResponse {
+        try await postJSON(
+            connection: connection,
+            path: "/api/profiles/rename",
+            body: CaelProfileRenameRequest(oldName: oldName, newName: newName),
+            responseType: CaelProfileMutationResponse.self
+        )
+    }
+
+    @discardableResult
+    func deleteProfile(connection: ConnectionProfile, name: String) async throws -> CaelProfileMutationResponse {
+        try await postJSON(
+            connection: connection,
+            path: "/api/profiles/delete",
+            body: CaelProfileNameRequest(name: name),
+            responseType: CaelProfileMutationResponse.self
+        )
+    }
+
+    @discardableResult
+    func updateProfileDescription(connection: ConnectionProfile, name: String, description: String) async throws -> CaelProfileMutationResponse {
+        try await postJSON(
+            connection: connection,
+            path: "/api/profiles/update",
+            body: CaelProfileDescriptionUpdateRequest(
+                name: name,
+                patch: CaelProfileDescriptionPatch(description: description)
+            ),
+            responseType: CaelProfileMutationResponse.self
+        )
+    }
+
     private func loadJSON<Response: Decodable>(
         connection: ConnectionProfile,
         path: String,
         responseType: Response.Type
     ) async throws -> Response {
+        try await requestJSON(connection: connection, path: path, method: "GET", body: nil, responseType: responseType)
+    }
+
+    private func postJSON<Body: Encodable, Response: Decodable>(
+        connection: ConnectionProfile,
+        path: String,
+        body: Body,
+        responseType: Response.Type
+    ) async throws -> Response {
+        let bodyData = try JSONEncoder().encode(body)
+        guard let bodyString = String(data: bodyData, encoding: .utf8) else {
+            throw SSHTransportError.invalidResponse("Workspace API request body was not valid UTF-8.")
+        }
+        return try await requestJSON(
+            connection: connection,
+            path: path,
+            method: "POST",
+            body: bodyString,
+            responseType: responseType
+        )
+    }
+
+    private func requestJSON<Response: Decodable>(
+        connection: ConnectionProfile,
+        path: String,
+        method: String,
+        body: String?,
+        responseType: Response.Type
+    ) async throws -> Response {
         let payload = try JSONEncoder().encode(CaelWorkspaceAPIRequest(
             baseURL: connection.resolvedCaelWorkspaceBaseURL,
             path: path,
-            hermesHome: connection.remoteHermesHomePath
+            hermesHome: connection.remoteHermesHomePath,
+            method: method,
+            body: body
         ))
         let requestLiteral = String(data: payload, encoding: .utf8) ?? "{}"
         let script = """
@@ -108,6 +217,9 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         import urllib.request
 
         request = json.loads(\(String(reflecting: requestLiteral)))
+        method = str(request.get("method") or "GET").upper()
+        body = request.get("body")
+        data = body.encode("utf-8") if isinstance(body, str) else None
         hermes_home = pathlib.Path.home() / ".hermes"
         store_path = hermes_home / "workspace-sessions.json"
         now_ms = int(time.time() * 1000)
@@ -133,13 +245,18 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
             pass
 
         url = request["baseURL"].rstrip("/") + request["path"]
+        headers = {
+            "Accept": "application/json",
+            "Cookie": "claude-auth=" + token,
+            "User-Agent": "CaelDesktop/1.0 native-api",
+        }
+        if data is not None:
+            headers["Content-Type"] = "application/json"
         http_request = urllib.request.Request(
             url,
-            headers={
-                "Accept": "application/json",
-                "Cookie": "claude-auth=" + token,
-                "User-Agent": "CaelDesktop/1.0 native-api",
-            },
+            data=data,
+            headers=headers,
+            method=method,
         )
 
         try:
@@ -177,4 +294,38 @@ private struct CaelWorkspaceAPIRequest: Encodable {
     let baseURL: String
     let path: String
     let hermesHome: String
+    let method: String
+    let body: String?
+}
+
+private struct CaelProfileNameRequest: Encodable {
+    let name: String
+}
+
+private struct CaelProfileCreateRequest: Encodable {
+    let name: String
+    let cloneFrom: String?
+    let model: String?
+    let provider: String?
+}
+
+private struct CaelProfileRenameRequest: Encodable {
+    let oldName: String
+    let newName: String
+}
+
+private struct CaelProfileDescriptionPatch: Encodable {
+    let description: String
+}
+
+private struct CaelProfileDescriptionUpdateRequest: Encodable {
+    let name: String
+    let patch: CaelProfileDescriptionPatch
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }

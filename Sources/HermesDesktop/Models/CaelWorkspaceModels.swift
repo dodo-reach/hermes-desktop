@@ -47,6 +47,110 @@ struct CaelWorkspaceContextSurface: Codable, Identifiable {
     let boundary: String
 }
 
+enum CaelJSONValue: Codable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: CaelJSONValue])
+    case array([CaelJSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([CaelJSONValue].self) {
+            self = .array(value)
+        } else if let value = try? container.decode([String: CaelJSONValue].self) {
+            self = .object(value)
+        } else {
+            self = .null
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case let .string(value):
+            try container.encode(value)
+        case let .number(value):
+            try container.encode(value)
+        case let .bool(value):
+            try container.encode(value)
+        case let .object(value):
+            try container.encode(value)
+        case let .array(value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
+    }
+}
+
+struct CaelProfilesListResponse: Codable {
+    let profiles: [CaelProfileSummary]
+    let activeProfile: String
+}
+
+struct CaelProfileSummary: Codable, Identifiable, Hashable {
+    var id: String { name }
+    let name: String
+    let path: String
+    let active: Bool
+    let exists: Bool
+    let model: String?
+    let provider: String?
+    let description: String?
+    let displayName: String?
+    let skillCount: Int
+    let sessionCount: Int
+    let hasEnv: Bool
+    let updatedAt: String?
+
+    var resolvedDisplayName: String {
+        if let displayName, !displayName.isEmpty {
+            return displayName
+        }
+        return name == "default" ? ConnectionProfile.defaultAgentDisplayName : name
+    }
+}
+
+struct CaelProfileDetailResponse: Codable {
+    let profile: CaelProfileDetail
+}
+
+struct CaelProfileMutationResponse: Codable {
+    let ok: Bool?
+    let profile: CaelProfileDetail?
+    let error: String?
+}
+
+struct CaelProfileDetail: Codable {
+    let name: String
+    let path: String
+    let active: Bool
+    let config: [String: CaelJSONValue]
+    let description: String
+    let displayName: String?
+    let envPath: String?
+    let hasEnv: Bool
+    let sessionsDir: String?
+    let skillsDir: String?
+
+    var resolvedDisplayName: String {
+        if let displayName, !displayName.isEmpty {
+            return displayName
+        }
+        return name == "default" ? ConnectionProfile.defaultAgentDisplayName : name
+    }
+}
+
 struct CaelCommandCenterContract: Codable {
     let id: String
     let version: String
@@ -479,4 +583,3 @@ struct CaelCommandCenterVaultRef: Codable, Identifiable {
     let vaultHref: String?
     let secretValue: String?
 }
-

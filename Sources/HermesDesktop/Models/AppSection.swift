@@ -148,9 +148,9 @@ enum AppSection: String, CaseIterable, Identifiable {
 
     var isCommandCenterMirrorSection: Bool {
         switch self {
-        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp:
             return true
-        case .connections, .overview, .files, .sessions, .workflows, .cronjobs, .kanban, .usage, .skills, .terminal:
+        case .connections, .overview, .files, .sessions, .workflows, .cronjobs, .kanban, .usage, .skills, .profiles, .terminal:
             return false
         }
     }

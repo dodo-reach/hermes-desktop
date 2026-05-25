@@ -312,8 +312,10 @@ struct RootView: View {
             FilesView(splitLayout: $filesSplitLayout)
         case .sessions:
             EmptyView()
-        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp:
             CommandCenterMirrorView(section: appState.selectedSection)
+        case .profiles:
+            ProfilesView()
         case .workflows:
             WorkflowsView(splitLayout: $workflowsSplitLayout)
         case .cronjobs:
