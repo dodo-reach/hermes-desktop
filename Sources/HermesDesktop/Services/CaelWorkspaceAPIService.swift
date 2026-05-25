@@ -606,6 +606,37 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return task
     }
 
+    @discardableResult
+    func linkWorkspaceTaskSession(connection: ConnectionProfile, taskID: String, sessionID: String?) async throws -> WorkspaceTask {
+        let response = try await patchJSON(
+            connection: connection,
+            path: "/api/hermes-tasks/\(taskID)",
+            body: WorkspaceTaskSessionLinkRequest(sessionID: sessionID),
+            responseType: WorkspaceTaskMutationResponse.self
+        )
+        guard let task = response.task else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API did not return a linked task.")
+        }
+        return task
+    }
+
+    @discardableResult
+    func launchWorkspaceTaskSession(connection: ConnectionProfile, taskID: String) async throws -> WorkspaceTaskLaunchResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/hermes-tasks/\(taskID)?action=launch",
+            body: WorkspaceEmptyRequest(),
+            responseType: WorkspaceTaskLaunchResponse.self
+        )
+        guard response.error == nil else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not launch this task.")
+        }
+        guard response.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+            throw SSHTransportError.invalidResponse("Workspace API did not return a task session id.")
+        }
+        return response
+    }
+
     func deleteWorkspaceTask(connection: ConnectionProfile, taskID: String) async throws {
         let response = try await deleteJSON(
             connection: connection,
@@ -1599,6 +1630,23 @@ private struct WorkspaceTaskUpdateRequest: Encodable {
     let priority: WorkspaceTaskPriority?
     let assignee: String?
     let tags: [String]?
+}
+
+private struct WorkspaceTaskSessionLinkRequest: Encodable {
+    let sessionID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let sessionID {
+            try container.encode(sessionID, forKey: .sessionID)
+        } else {
+            try container.encodeNil(forKey: .sessionID)
+        }
+    }
 }
 
 private struct WorkspaceTaskMoveRequest: Encodable {

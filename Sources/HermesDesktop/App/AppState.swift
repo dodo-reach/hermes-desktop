@@ -2892,6 +2892,90 @@ final class AppState: ObservableObject {
         }
     }
 
+
+    func launchWorkspaceKanbanTaskSession(taskID: String) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+        setStatusMessage(L10n.string("Launching Workspace task session..."))
+
+        do {
+            let launch = try await caelWorkspaceAPIService.launchWorkspaceTaskSession(connection: profile, taskID: taskID)
+            let sessionID = launch.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !sessionID.isEmpty else {
+                throw SSHTransportError.invalidResponse("Workspace API did not return a task session id.")
+            }
+            _ = try await caelWorkspaceAPIService.linkWorkspaceTaskSession(connection: profile, taskID: taskID, sessionID: sessionID)
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            await openWorkspaceTaskSession(sessionID: sessionID)
+            setStatusMessage(L10n.string("Workspace task session launched"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to launch Workspace task session"))
+        }
+    }
+
+    func linkWorkspaceKanbanTaskSession(taskID: String, sessionID: String?) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+        let trimmedSessionID = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedSessionID = trimmedSessionID.isEmpty ? nil : trimmedSessionID
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            _ = try await caelWorkspaceAPIService.linkWorkspaceTaskSession(
+                connection: profile,
+                taskID: taskID,
+                sessionID: normalizedSessionID
+            )
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(normalizedSessionID == nil ? L10n.string("Workspace task session link cleared") : L10n.string("Workspace task session linked"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to link Workspace task session"))
+        }
+    }
+
+    func openWorkspaceTaskSession(sessionID: String) async {
+        let normalizedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionID.isEmpty else { return }
+
+        stopSessionTUI()
+        isNewSessionComposerActive = false
+        selectedSessionDetailMode = .chat
+        selectedSection = .sessions
+        await loadSessions(
+            reset: true,
+            query: "",
+            preferredSessionID: normalizedSessionID,
+            allowsFallbackSelection: false,
+            updatesSelection: false
+        )
+        await loadSessionDetail(sessionID: normalizedSessionID)
+    }
+
     func addKanbanComment(taskID: String, body: String) async -> Bool {
         guard let profile = activeConnection else { return false }
         guard !isOperatingOnKanbanTask else { return false }

@@ -514,6 +514,15 @@ struct KanbanView: View {
                 onMove: { taskID, status in
                     await appState.moveWorkspaceKanbanTask(taskID: taskID, to: status)
                 },
+                onLaunch: { taskID in
+                    await appState.launchWorkspaceKanbanTaskSession(taskID: taskID)
+                },
+                onLinkSession: { taskID, sessionID in
+                    await appState.linkWorkspaceKanbanTaskSession(taskID: taskID, sessionID: sessionID)
+                },
+                onOpenSession: { sessionID in
+                    await appState.openWorkspaceTaskSession(sessionID: sessionID)
+                },
                 onDelete: { taskID in
                     await appState.deleteWorkspaceKanbanTask(taskID: taskID)
                 }
@@ -828,7 +837,13 @@ private struct WorkspaceTaskDetailView: View {
     let onCreate: () -> Void
     let onEdit: (KanbanTask) -> Void
     let onMove: (String, KanbanTaskStatus) async -> Void
+    let onLaunch: (String) async -> Void
+    let onLinkSession: (String, String?) async -> Void
+    let onOpenSession: (String) async -> Void
     let onDelete: (String) async -> Void
+
+    @State private var isLinkingSession = false
+    @State private var sessionLinkDraft = ""
 
     var body: some View {
         HermesSurfacePanel(title: "Workspace Task", subtitle: "Shared with web and mobile /tasks.") {
@@ -865,37 +880,20 @@ private struct WorkspaceTaskDetailView: View {
                             WorkspaceTaskFact(label: "ID", value: task.id)
                             WorkspaceTaskFact(label: "Assignee", value: task.assignee ?? "Unassigned")
                             WorkspaceTaskFact(label: "Priority", value: task.priorityLabel)
+                            if let sessionID = normalizedSessionID(task.sessionID) {
+                                WorkspaceTaskFact(label: "Session", value: sessionID)
+                            }
                         }
                     }
 
-                    HStack(spacing: 8) {
-                        Button {
-                            onEdit(task)
-                        } label: {
-                            Label(L10n.string("Edit"), systemImage: "pencil")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            workspaceTaskActions(task)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(operationInFlight)
 
-                        Menu {
-                            ForEach([KanbanTaskStatus.triage, .ready, .running, .review, .blocked, .done], id: \.rawValue) { status in
-                                Button(L10n.string(status.displayTitle)) {
-                                    Task { await onMove(task.id, status) }
-                                }
-                            }
-                        } label: {
-                            Label(L10n.string("Move"), systemImage: "arrow.right")
+                        VStack(alignment: .leading, spacing: 8) {
+                            workspaceTaskActions(task)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(operationInFlight)
-                        Button(role: .destructive) {
-                            Task { await onDelete(task.id) }
-                        } label: {
-                            Label(L10n.string("Delete"), systemImage: "trash")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(operationInFlight)
-
                     }
 
                     Text("Deletes use the canonical /api/hermes-tasks backend so web and desktop mutate the same task ledger.")
@@ -919,6 +917,152 @@ private struct WorkspaceTaskDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .sheet(isPresented: $isLinkingSession) {
+            if let task {
+                WorkspaceTaskLinkSessionSheet(
+                    taskTitle: task.resolvedTitle,
+                    sessionID: $sessionLinkDraft,
+                    operationInFlight: operationInFlight,
+                    onCancel: {
+                        isLinkingSession = false
+                    },
+                    onSave: { sessionID in
+                        await onLinkSession(task.id, sessionID)
+                        isLinkingSession = false
+                    }
+                )
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func workspaceTaskActions(_ task: KanbanTask) -> some View {
+        Button {
+            onEdit(task)
+        } label: {
+            Label(L10n.string("Edit"), systemImage: "pencil")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+
+        Button {
+            Task { await onLaunch(task.id) }
+        } label: {
+            Label(L10n.string("Launch Session"), systemImage: "bubble.left.and.text.bubble.right")
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(operationInFlight)
+
+        if let sessionID = normalizedSessionID(task.sessionID) {
+            Button {
+                Task { await onOpenSession(sessionID) }
+            } label: {
+                Label(L10n.string("Open Session"), systemImage: "arrow.right.circle")
+            }
+            .buttonStyle(.bordered)
+            .disabled(operationInFlight)
+        }
+
+        Button {
+            sessionLinkDraft = normalizedSessionID(task.sessionID) ?? ""
+            isLinkingSession = true
+        } label: {
+            Label(L10n.string("Link Session"), systemImage: "link")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+
+        Menu {
+            ForEach([KanbanTaskStatus.triage, .ready, .running, .review, .blocked, .done], id: \.rawValue) { status in
+                Button(L10n.string(status.displayTitle)) {
+                    Task { await onMove(task.id, status) }
+                }
+            }
+
+            if normalizedSessionID(task.sessionID) != nil {
+                Divider()
+                Button(L10n.string("Clear Session Link")) {
+                    Task { await onLinkSession(task.id, nil) }
+                }
+            }
+        } label: {
+            Label(L10n.string("More"), systemImage: "ellipsis.circle")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+
+        Button(role: .destructive) {
+            Task { await onDelete(task.id) }
+        } label: {
+            Label(L10n.string("Delete"), systemImage: "trash")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+    }
+
+    private func normalizedSessionID(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct WorkspaceTaskLinkSessionSheet: View {
+    let taskTitle: String
+    @Binding var sessionID: String
+    let operationInFlight: Bool
+    let onCancel: () -> Void
+    let onSave: (String?) async -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Link Session"))
+                    .font(.title3.weight(.semibold))
+                Text(taskTitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Session ID"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField(L10n.string("session-id"), text: $sessionID)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+
+            Text(L10n.string("Launch creates a new Workspace session automatically. Link is for attaching an existing session to this task ledger."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button(L10n.string("Cancel")) {
+                    onCancel()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button(L10n.string("Clear Link")) {
+                    Task { await onSave(nil) }
+                }
+                .disabled(operationInFlight)
+
+                Button(L10n.string("Save Link")) {
+                    let trimmed = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task { await onSave(trimmed.isEmpty ? nil : trimmed) }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(operationInFlight)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
     }
 }
 

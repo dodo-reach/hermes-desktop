@@ -9,6 +9,13 @@ struct WorkspaceTaskMutationResponse: Decodable, Sendable {
     let error: String?
 }
 
+struct WorkspaceTaskLaunchResponse: Decodable, Sendable {
+    let sessionId: String?
+    let briefing: String?
+    let task: WorkspaceTask?
+    let error: String?
+}
+
 struct WorkspaceTaskDeleteResponse: Decodable, Sendable {
     let ok: Bool?
     let error: String?
@@ -27,6 +34,7 @@ struct WorkspaceTask: Codable, Identifiable, Hashable, Sendable {
     let createdBy: String
     let createdAt: String?
     let updatedAt: String?
+    let sessionID: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -41,6 +49,7 @@ struct WorkspaceTask: Codable, Identifiable, Hashable, Sendable {
         case createdBy = "created_by"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case sessionID = "session_id"
     }
 
     var kanbanTask: KanbanTask {
@@ -73,7 +82,8 @@ struct WorkspaceTask: Codable, Identifiable, Hashable, Sendable {
             commentCount: 0,
             eventCount: 0,
             runCount: 0,
-            latestEventAt: Self.unixSeconds(from: updatedAt)
+            latestEventAt: Self.unixSeconds(from: updatedAt),
+            sessionID: sessionID
         )
     }
 
