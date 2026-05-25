@@ -150,6 +150,7 @@ final class AppState: ObservableObject {
     private let automaticUpdateCheckInterval: TimeInterval = 24 * 60 * 60
     private var statusTask: Task<Void, Never>?
     private var sessionTranscriptPollingTask: Task<Void, Never>?
+    private var acceptedWorkspaceSessionMonitorTask: Task<Void, Never>?
     private var gatewayChatService: HermesGatewayChatService?
     private var gatewayEventsTask: Task<Void, Never>?
     private var nativeChatStatusWorkspaceScopeFingerprint: String?
@@ -1364,17 +1365,25 @@ final class AppState: ObservableObject {
         appendPendingUserLiveMessage(prompt: trimmedPrompt)
 
         do {
-            let provisionalSessionID = UUID().uuidString
+            let createdSession = try await caelWorkspaceAPIService.createWorkspaceChatSession(
+                connection: profile,
+                label: String(trimmedPrompt.prefix(80))
+            )
+            let serverSessionID = (createdSession.sessionKey ?? createdSession.friendlyId ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !serverSessionID.isEmpty else {
+                throw SSHTransportError.invalidResponse("Workspace API did not return a session key for the new chat session.")
+            }
             let sendResponse = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
                 connection: profile,
-                sessionKey: provisionalSessionID,
+                sessionKey: serverSessionID,
                 message: trimmedPrompt,
                 autoApproveCommands: autoApproveCommands
             )
             guard isActiveWorkspace(profile) else { return false }
 
             let responseSessionID = sendResponse.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let createdSessionID = responseSessionID.isEmpty ? provisionalSessionID : responseSessionID
+            let createdSessionID = responseSessionID.isEmpty ? serverSessionID : responseSessionID
             isSendingSessionMessage = false
             pendingSessionTurn = nil
             sessionSearchQuery = ""
@@ -3771,19 +3780,58 @@ final class AppState: ObservableObject {
 
     private func scheduleAcceptedWorkspaceSessionRefresh(sessionID: String, connection: ConnectionProfile) {
         let workspaceScopeFingerprint = connection.workspaceScopeFingerprint
-        Task { [weak self] in
-            for delay in [1_200_000_000, 5_000_000_000, 15_000_000_000, 30_000_000_000] as [UInt64] {
-                try? await Task.sleep(nanoseconds: delay)
-                await self?.refreshAcceptedWorkspaceSession(sessionID: sessionID, workspaceScopeFingerprint: workspaceScopeFingerprint)
+        acceptedWorkspaceSessionMonitorTask?.cancel()
+        acceptedWorkspaceSessionMonitorTask = Task { [weak self] in
+            let startedAt = Date()
+            var sawActiveRun = false
+            var emptyRunChecks = 0
+
+            for delay in [1.2, 3, 5, 8, 13] as [Double] {
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+
+                let run = await self?.refreshAcceptedWorkspaceSession(
+                    sessionID: sessionID,
+                    workspaceScopeFingerprint: workspaceScopeFingerprint
+                )
+                if let run {
+                    sawActiveRun = true
+                    emptyRunChecks = 0
+                    if Self.isTerminalWorkspaceRunStatus(run.status) { return }
+                } else {
+                    emptyRunChecks += 1
+                    if sawActiveRun { return }
+                }
+            }
+
+            while !Task.isCancelled, Date().timeIntervalSince(startedAt) < 10 * 60 {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { return }
+
+                let run = await self?.refreshAcceptedWorkspaceSession(
+                    sessionID: sessionID,
+                    workspaceScopeFingerprint: workspaceScopeFingerprint
+                )
+                if let run {
+                    sawActiveRun = true
+                    emptyRunChecks = 0
+                    if Self.isTerminalWorkspaceRunStatus(run.status) { return }
+                } else {
+                    emptyRunChecks += 1
+                    if sawActiveRun || emptyRunChecks >= 2 { return }
+                }
             }
         }
     }
 
-    private func refreshAcceptedWorkspaceSession(sessionID: String, workspaceScopeFingerprint: String) async {
+    @discardableResult
+    private func refreshAcceptedWorkspaceSession(sessionID: String, workspaceScopeFingerprint: String) async -> WorkspaceSessionActiveRun? {
         guard let profile = activeConnection,
-              profile.workspaceScopeFingerprint == workspaceScopeFingerprint else { return }
+              profile.workspaceScopeFingerprint == workspaceScopeFingerprint else { return nil }
+        var activeRun: WorkspaceSessionActiveRun?
         if selectedSessionID == sessionID {
-            _ = await refreshWorkspaceSessionActiveRun(sessionID: sessionID, connection: profile)
+            activeRun = await refreshWorkspaceSessionActiveRun(sessionID: sessionID, connection: profile)
             let loadedWorkspaceHistory = await hydrateWorkspaceSessionHistory(sessionID: sessionID, connection: profile)
             if !loadedWorkspaceHistory {
                 await loadSessionDetail(sessionID: sessionID)
@@ -3796,6 +3844,16 @@ final class AppState: ObservableObject {
             allowsFallbackSelection: false,
             updatesSelection: false
         )
+        return activeRun
+    }
+
+    nonisolated private static func isTerminalWorkspaceRunStatus(_ status: String) -> Bool {
+        switch status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "complete", "completed", "succeeded", "success", "done", "failed", "failure", "error", "cancelled", "canceled":
+            return true
+        default:
+            return false
+        }
     }
 
     private func upsertAcceptedWorkspaceSessionSummary(sessionID: String, prompt: String, messageCount: Int) {
