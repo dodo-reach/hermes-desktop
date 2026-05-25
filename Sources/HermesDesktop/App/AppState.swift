@@ -1339,16 +1339,8 @@ final class AppState: ObservableObject {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPrompt.isEmpty else { return false }
 
-        let existingVisibleSessionIDs = Set((sessions + pinnedSessionSummaries).map(\.id))
-
-        if await preferredChatTransport(for: profile) == .native {
-            return await startNativeSessionTurn(
-                prompt: trimmedPrompt,
-                sessionID: nil,
-                autoApproveCommands: autoApproveCommands,
-                existingVisibleSessionIDs: existingVisibleSessionIDs
-            )
-        }
+        // Normal desktop composer sends use the same Workspace API as the web
+        // app so both clients share the server-owned run ledger.
 
         isSendingSessionMessage = true
         pendingSessionTurn = PendingSessionTurn(
@@ -1580,13 +1572,8 @@ final class AppState: ObservableObject {
             return false
         }
 
-        if await preferredChatTransport(for: profile) == .native {
-            return await startNativeSessionTurn(
-                prompt: trimmedPrompt,
-                sessionID: selectedSessionID,
-                autoApproveCommands: autoApproveCommands
-            )
-        }
+        // Normal desktop composer sends use the same Workspace API as the web
+        // app so focus loss and active-run recovery behave identically.
 
         isSendingSessionMessage = true
         pendingSessionTurn = PendingSessionTurn(
