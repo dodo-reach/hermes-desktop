@@ -943,6 +943,44 @@ struct WorkspaceSessionHistoryResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceSessionActiveRunResponse: Decodable {
+    let ok: Bool
+    let run: WorkspaceSessionActiveRun?
+    let error: String?
+}
+
+struct WorkspaceSessionActiveRun: Decodable, Equatable {
+    let runId: String
+    let sessionKey: String
+    let friendlyId: String?
+    let status: String
+    let createdAt: Double?
+    let updatedAt: Double?
+    let lastEventAt: Double?
+    let assistantText: String?
+    let thinkingText: String?
+    let toolCalls: [WorkspaceSessionRunToolCall]
+    let lifecycleEvents: [WorkspaceSessionRunLifecycleEvent]
+    let errorMessage: String?
+}
+
+struct WorkspaceSessionRunToolCall: Decodable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let phase: String
+    let preview: String?
+    let result: String?
+}
+
+struct WorkspaceSessionRunLifecycleEvent: Decodable, Equatable, Identifiable {
+    let text: String
+    let emoji: String?
+    let timestamp: Double?
+    let isError: Bool
+
+    var id: String { "\(timestamp ?? 0)-\(text)" }
+}
+
 
 struct WorkspaceMCPListResponse: Decodable {
     let servers: [WorkspaceMCPServer]

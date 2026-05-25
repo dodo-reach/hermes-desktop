@@ -210,6 +210,22 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return response
     }
 
+    func loadWorkspaceSessionActiveRun(
+        connection: ConnectionProfile,
+        sessionKey: String
+    ) async throws -> WorkspaceSessionActiveRunResponse {
+        let encodedSession = Self.pathSegment(sessionKey)
+        let response = try await loadJSON(
+            connection: connection,
+            path: "/api/sessions/\(encodedSession)/active-run",
+            responseType: WorkspaceSessionActiveRunResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not load active run state.")
+        }
+        return response
+    }
+
     @discardableResult
     func deleteProfile(connection: ConnectionProfile, name: String) async throws -> CaelProfileMutationResponse {
         try await postJSON(

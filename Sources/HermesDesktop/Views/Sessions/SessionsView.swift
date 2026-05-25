@@ -43,6 +43,7 @@ struct SessionsView: View {
                 } ?? false,
                 isSessionPinned: selectedSession.map { appState.isSessionPinned($0.id) } ?? false,
                 sessionCompactionNotice: appState.sessionCompactionNotice,
+                activeRun: appState.workspaceSessionActiveRun,
                 pendingTurn: appState.pendingSessionTurn,
                 liveMessages: appState.liveSessionMessageDisplays,
                 liveToolActivityCards: appState.liveToolActivityCards,

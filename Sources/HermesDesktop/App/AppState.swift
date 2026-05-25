@@ -35,6 +35,7 @@ final class AppState: ObservableObject {
     @Published var liveToolActivityCards: [HermesToolActivityCard] = []
     @Published var sessionPromptCards: [HermesPromptCard] = []
     @Published var sessionCompactionNotice: SessionCompactionNotice?
+    @Published var workspaceSessionActiveRun: WorkspaceSessionActiveRun?
     @Published private(set) var nativeChatBootstrapStatus: HermesChatBootstrapStatus?
     @Published var hasMoreSessions = false
     @Published var totalSessionsCount = 0
@@ -1197,6 +1198,7 @@ final class AppState: ObservableObject {
         selectedSessionID = sessionID
         sessionsError = nil
         sessionConversationError = nil
+        workspaceSessionActiveRun = nil
 
         do {
             let messages = try await sessionBrowserService.loadTranscript(
@@ -1224,6 +1226,7 @@ final class AppState: ObservableObject {
         sessionCompactionNotice = nil
         sessionsError = nil
         sessionConversationError = nil
+        workspaceSessionActiveRun = nil
         selectedSessionDetailMode = .chat
         stopSessionTUI()
     }
@@ -3671,6 +3674,7 @@ final class AppState: ObservableObject {
         guard let profile = activeConnection,
               profile.workspaceScopeFingerprint == workspaceScopeFingerprint else { return }
         if selectedSessionID == sessionID {
+            _ = await refreshWorkspaceSessionActiveRun(sessionID: sessionID, connection: profile)
             let loadedWorkspaceHistory = await hydrateWorkspaceSessionHistory(sessionID: sessionID, connection: profile)
             if !loadedWorkspaceHistory {
                 await loadSessionDetail(sessionID: sessionID)
@@ -3702,6 +3706,21 @@ final class AppState: ObservableObject {
         } else {
             sessions.insert(summary, at: 0)
             totalSessionsCount = max(totalSessionsCount, sessions.count)
+        }
+    }
+
+    @discardableResult
+    private func refreshWorkspaceSessionActiveRun(sessionID: String, connection: ConnectionProfile) async -> WorkspaceSessionActiveRun? {
+        do {
+            let response = try await caelWorkspaceAPIService.loadWorkspaceSessionActiveRun(
+                connection: connection,
+                sessionKey: sessionID
+            )
+            guard isActiveWorkspace(connection), selectedSessionID == sessionID else { return nil }
+            workspaceSessionActiveRun = response.run
+            return response.run
+        } catch {
+            return nil
         }
     }
 

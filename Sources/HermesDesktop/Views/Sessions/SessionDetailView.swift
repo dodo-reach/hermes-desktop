@@ -80,6 +80,7 @@ struct SessionDetailView: View {
     let isDeletingSession: Bool
     let isSessionPinned: Bool
     let sessionCompactionNotice: SessionCompactionNotice?
+    let activeRun: WorkspaceSessionActiveRun?
     let pendingTurn: PendingSessionTurn?
     let liveMessages: [SessionMessageDisplay]
     let liveToolActivityCards: [HermesToolActivityCard]
@@ -414,7 +415,7 @@ struct SessionDetailView: View {
     private func nativeConversationContent(for session: SessionSummary) -> some View {
         let matchingPendingTurn = pendingTurn?.sessionID == session.id ? pendingTurn : nil
 
-        if allChatMessages.isEmpty && matchingPendingTurn == nil && liveToolActivityCards.isEmpty && promptCards.isEmpty {
+        if allChatMessages.isEmpty && matchingPendingTurn == nil && liveToolActivityCards.isEmpty && promptCards.isEmpty && activeRunForSession(session) == nil {
             HermesSurfacePanel {
                 ContentUnavailableView(
                     L10n.string("No transcript entries"),
@@ -425,6 +426,10 @@ struct SessionDetailView: View {
             }
         } else {
             LazyVStack(alignment: .leading, spacing: 14) {
+                if let run = activeRunForSession(session) {
+                    WorkspaceSessionActiveRunCard(run: run)
+                }
+
                 ForEach(allChatMessages) { message in
                     MessageCard(
                         message: message,
@@ -462,6 +467,11 @@ struct SessionDetailView: View {
         return (messages + liveMessages).filter { message in
             seen.insert(message.id).inserted
         }
+    }
+
+    private func activeRunForSession(_ session: SessionSummary) -> WorkspaceSessionActiveRun? {
+        guard let activeRun, activeRun.sessionKey == session.id else { return nil }
+        return activeRun
     }
 
     private var composerDock: some View {
@@ -888,6 +898,64 @@ private final class SessionScrollOffsetProbeView: NSView {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             coordinator?.attach(to: enclosingScrollView)
+        }
+    }
+}
+
+
+private struct WorkspaceSessionActiveRunCard: View {
+    let run: WorkspaceSessionActiveRun
+
+    private var statusText: String {
+        run.status.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private var detailText: String {
+        if let errorMessage = run.errorMessage, !errorMessage.isEmpty {
+            return errorMessage
+        }
+        if let thinkingText = run.thinkingText, !thinkingText.isEmpty {
+            return thinkingText
+        }
+        if let assistantText = run.assistantText, !assistantText.isEmpty {
+            return assistantText
+        }
+        return L10n.string("Server-owned chat turn is being tracked by the Workspace run ledger.")
+    }
+
+    var body: some View {
+        HermesSurfacePanel {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Label(statusText, systemImage: run.status == "error" ? "exclamationmark.triangle.fill" : "waveform.path.ecg")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(run.status == "error" ? .red : .cyan)
+
+                    Text(run.runId)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer()
+                }
+
+                Text(detailText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+
+                if !run.toolCalls.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(run.toolCalls.prefix(3)) { tool in
+                            Text("\(tool.name) · \(tool.phase)")
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary, in: Capsule())
+                        }
+                    }
+                }
+            }
         }
     }
 }
