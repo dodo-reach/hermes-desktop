@@ -1149,6 +1149,28 @@ struct WorkspaceMCPPreset: Decodable, Identifiable {
     let template: WorkspaceMCPPresetTemplate?
 }
 
+struct WorkspaceMCPHubSearchResponse: Decodable {
+    let ok: Bool?
+    let results: [WorkspaceMCPHubEntry]
+    let source: String?
+    let total: Int?
+    let warnings: [String]?
+    let error: String?
+}
+
+struct WorkspaceMCPHubEntry: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let description: String?
+    let source: String?
+    let homepage: String?
+    let tags: [String]?
+    let trust: String?
+    let template: WorkspaceMCPPresetTemplate?
+    let installCommand: String?
+    let installed: Bool?
+}
+
 struct WorkspaceMCPPresetTemplate: Decodable {
     let name: String?
     let transportType: String?

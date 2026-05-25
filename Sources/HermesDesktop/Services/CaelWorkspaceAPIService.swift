@@ -1087,6 +1087,19 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         try await loadJSON(connection: connection, path: "/api/mcp/presets", responseType: WorkspaceMCPPresetsResponse.self)
     }
 
+    func searchMCPHub(connection: ConnectionProfile, query: String, limit: Int = 12) async throws -> WorkspaceMCPHubSearchResponse {
+        let queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "source", value: "all"),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        return try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/mcp/hub-search", queryItems: queryItems),
+            responseType: WorkspaceMCPHubSearchResponse.self
+        )
+    }
+
     @discardableResult
     func createMCPCommandServer(
         connection: ConnectionProfile,

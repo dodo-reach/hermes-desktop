@@ -1133,8 +1133,12 @@ private struct NativeMCPPanel: View {
     @State private var discoverResults: [String: WorkspaceMCPDiscoverResponse] = [:]
     @State private var hubSources: [WorkspaceMCPHubSource] = []
     @State private var presets: [WorkspaceMCPPreset] = []
+    @State private var hubSearch = "github"
+    @State private var hubSearchResults: [WorkspaceMCPHubEntry] = []
+    @State private var hubSearchSummary: String?
     @State private var statusMessage: String?
     @State private var isLoading = false
+    @State private var isSearchingHub = false
     @State private var testingServer: String?
     @State private var discoveringServer: String?
     @State private var mutatingServer: String?
@@ -1284,9 +1288,63 @@ private struct NativeMCPPanel: View {
                     }
                 }
             }
+
+            marketplaceSearchPanel
         }
         .padding(12)
         .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var marketplaceSearchPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("Marketplace search")
+                    .font(.headline)
+                TextField("Search MCP catalog", text: $hubSearch)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        Task { await searchMCPMarketplace() }
+                    }
+                Button(isSearchingHub ? "Searching..." : "Search Hub") {
+                    Task { await searchMCPMarketplace() }
+                }
+                .disabled(isSearchingHub || hubSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let hubSearchSummary {
+                Text(hubSearchSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if hubSearchResults.isEmpty {
+                Text("Search uses /api/mcp/hub-search. Results can be staged into the Add Server form; writes still obey the active gateway capability state.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10, alignment: .top)], spacing: 10) {
+                    ForEach(hubSearchResults.prefix(9)) { entry in
+                        VStack(alignment: .leading, spacing: 8) {
+                            MirrorRow(
+                                title: entry.name,
+                                detail: hubEntryDetail(entry),
+                                badge: entry.installed == true ? "Installed" : entry.trust,
+                                tint: entry.installed == true ? .green : .blue
+                            )
+                            HStack {
+                                Spacer()
+                                Button("Stage") {
+                                    stageHubEntry(entry)
+                                }
+                                .disabled(entry.template?.command?.nilIfBlank == nil)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
+        }
     }
 
     private func serverCard(_ server: WorkspaceMCPServer) -> some View {
@@ -1466,6 +1524,46 @@ private struct NativeMCPPanel: View {
         } catch {
             statusMessage = "Error: \(error.localizedDescription)"
         }
+    }
+
+    private func searchMCPMarketplace() async {
+        guard let connection = appState.activeConnection else { return }
+        let query = hubSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        isSearchingHub = true
+        defer { isSearchingHub = false }
+        do {
+            let result = try await appState.caelWorkspaceAPIService.searchMCPHub(connection: connection, query: query)
+            hubSearchResults = result.results
+            let warning = result.warnings?.first?.nilIfBlank
+            hubSearchSummary = [
+                "\(result.results.count) of \(result.total ?? result.results.count) results from \(result.source ?? "hub").",
+                result.ok == false ? result.error?.nilIfBlank : nil,
+                warning
+            ].compactMap { $0 }.joined(separator: " ")
+        } catch {
+            hubSearchSummary = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func stageHubEntry(_ entry: WorkspaceMCPHubEntry) {
+        guard let template = entry.template, let command = template.command?.nilIfBlank else {
+            statusMessage = "Only command-backed MCP templates can be staged in Desktop right now."
+            return
+        }
+        newServerName = template.name?.nilIfBlank ?? entry.name
+        newServerCommand = command
+        newServerArgs = (template.args ?? []).joined(separator: " ")
+        newServerEnabled = true
+        statusMessage = "Staged MCP template \(entry.name). Review the Add command MCP server form before adding."
+    }
+
+    private func hubEntryDetail(_ entry: WorkspaceMCPHubEntry) -> String {
+        [
+            entry.description?.nilIfBlank,
+            entry.source?.nilIfBlank.map { "Source: \($0)" },
+            entry.tags?.prefix(4).joined(separator: ", ").nilIfBlank
+        ].compactMap { $0 }.joined(separator: "\n")
     }
 
     private func serverDetail(_ server: WorkspaceMCPServer) -> String {
