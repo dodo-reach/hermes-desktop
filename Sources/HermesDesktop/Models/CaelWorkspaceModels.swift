@@ -1109,6 +1109,56 @@ struct WorkspaceMCPMutationResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceMCPDiscoverResponse: Decodable {
+    let ok: Bool
+    let tools: [WorkspaceMCPTool]
+    let error: String?
+}
+
+struct WorkspaceMCPHubSourcesResponse: Decodable {
+    let ok: Bool?
+    let sources: [WorkspaceMCPHubSource]
+    let source: String?
+    let error: String?
+}
+
+struct WorkspaceMCPHubSource: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let url: String
+    let trust: String?
+    let format: String?
+    let enabled: Bool?
+    let builtin: Bool?
+}
+
+struct WorkspaceMCPPresetsResponse: Decodable {
+    let ok: Bool?
+    let presets: [WorkspaceMCPPreset]
+    let source: String?
+    let error: String?
+}
+
+struct WorkspaceMCPPreset: Decodable, Identifiable {
+    let id: String
+    let name: String?
+    let description: String?
+    let category: String?
+    let homepage: String?
+    let tags: [String]?
+    let template: WorkspaceMCPPresetTemplate?
+}
+
+struct WorkspaceMCPPresetTemplate: Decodable {
+    let name: String?
+    let transportType: String?
+    let command: String?
+    let args: [String]?
+    let url: String?
+    let authType: String?
+    let toolMode: String?
+}
+
 struct WorkspaceMCPTool: Decodable, Identifiable {
     var id: String { name }
     let name: String

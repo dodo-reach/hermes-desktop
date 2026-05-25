@@ -1011,6 +1011,38 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return response
     }
 
+    func discoverMCPServer(connection: ConnectionProfile, server: WorkspaceMCPServer) async throws -> WorkspaceMCPDiscoverResponse {
+        guard let command = server.command?.nilIfBlank else {
+            throw SSHTransportError.invalidResponse("MCP discovery currently supports command-backed servers only.")
+        }
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/mcp/discover",
+            body: WorkspaceMCPCreateRequest(
+                name: server.name,
+                enabled: server.enabled,
+                transportType: server.transportType,
+                command: command,
+                args: server.args,
+                authType: server.authType,
+                toolMode: server.toolMode
+            ),
+            responseType: WorkspaceMCPDiscoverResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "MCP discover failed.")
+        }
+        return response
+    }
+
+    func loadMCPHubSources(connection: ConnectionProfile) async throws -> WorkspaceMCPHubSourcesResponse {
+        try await loadJSON(connection: connection, path: "/api/mcp/hub-sources", responseType: WorkspaceMCPHubSourcesResponse.self)
+    }
+
+    func loadMCPPresets(connection: ConnectionProfile) async throws -> WorkspaceMCPPresetsResponse {
+        try await loadJSON(connection: connection, path: "/api/mcp/presets", responseType: WorkspaceMCPPresetsResponse.self)
+    }
+
     @discardableResult
     func createMCPCommandServer(
         connection: ConnectionProfile,

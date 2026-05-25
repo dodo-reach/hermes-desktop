@@ -1130,9 +1130,13 @@ private struct NativeMCPPanel: View {
     @State private var category = "All"
     @State private var response: WorkspaceMCPListResponse?
     @State private var testResults: [String: WorkspaceMCPTestResponse] = [:]
+    @State private var discoverResults: [String: WorkspaceMCPDiscoverResponse] = [:]
+    @State private var hubSources: [WorkspaceMCPHubSource] = []
+    @State private var presets: [WorkspaceMCPPreset] = []
     @State private var statusMessage: String?
     @State private var isLoading = false
     @State private var testingServer: String?
+    @State private var discoveringServer: String?
     @State private var mutatingServer: String?
     @State private var newServerName = ""
     @State private var newServerCommand = ""
@@ -1187,6 +1191,8 @@ private struct NativeMCPPanel: View {
 
                 createServerForm
 
+                registrySummary
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 12, alignment: .top)], spacing: 12) {
                     ForEach(servers) { server in
                         serverCard(server)
@@ -1236,6 +1242,53 @@ private struct NativeMCPPanel: View {
             !newServerCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var registrySummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("MCP registry")
+                    .font(.headline)
+                Spacer()
+                Button("Load Registry") {
+                    Task { await loadMCPRegistry() }
+                }
+                .disabled(isLoading)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
+                MirrorListCard(title: "Hub Sources", emptyText: "No hub sources loaded.") {
+                    if hubSources.isEmpty {
+                        Text("Registry sources are loaded on demand from the shared Workspace API.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(hubSources.prefix(4)) { source in
+                            MirrorRow(
+                                title: source.name,
+                                detail: registrySourceDetail(source),
+                                badge: source.enabled == false ? "Disabled" : source.trust,
+                                tint: source.enabled == false ? .orange : .green
+                            )
+                        }
+                    }
+                }
+
+                MirrorListCard(title: "Presets", emptyText: "No presets loaded.") {
+                    if presets.isEmpty {
+                        Text("Presets stay server-side; Desktop only renders safe metadata and command templates.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(presets.prefix(6)) { preset in
+                            MirrorRow(title: preset.name ?? preset.id, detail: presetDetail(preset), badge: preset.category, tint: .blue)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private func serverCard(_ server: WorkspaceMCPServer) -> some View {
         MirrorListCard(title: server.name, emptyText: "No MCP server detail reported.") {
             MirrorRow(
@@ -1253,11 +1306,24 @@ private struct NativeMCPPanel: View {
                     tint: result.ok ? .green : .orange
                 )
             }
+            if let discovery = discoverResults[server.name] {
+                MirrorRow(
+                    title: "Discovery",
+                    detail: discoverDetail(discovery),
+                    badge: "\(discovery.tools.count) tools",
+                    tint: discovery.ok ? .green : .orange
+                )
+            }
             HStack(spacing: 8) {
                 Button(testingServer == server.name ? "Testing..." : "Test") {
                     Task { await testServer(server.name) }
                 }
                 .disabled(!isMCPCapabilityAvailable || testingServer != nil || !server.enabled)
+
+                Button(discoveringServer == server.name ? "Discovering..." : "Discover") {
+                    Task { await discoverServer(server) }
+                }
+                .disabled(!isMCPCapabilityAvailable || discoveringServer != nil || !server.enabled)
 
                 Button(server.enabled ? "Disable" : "Enable") {
                     Task { await setServer(server.name, enabled: !server.enabled) }
@@ -1367,6 +1433,41 @@ private struct NativeMCPPanel: View {
         }
     }
 
+    private func loadMCPRegistry() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            async let sourcesResponse = appState.caelWorkspaceAPIService.loadMCPHubSources(connection: connection)
+            async let presetsResponse = appState.caelWorkspaceAPIService.loadMCPPresets(connection: connection)
+            let (sources, loadedPresets) = try await (sourcesResponse, presetsResponse)
+            hubSources = sources.sources
+            presets = loadedPresets.presets
+            let sourceWarning = sources.ok == false ? sources.error?.nilIfBlank : nil
+            let presetWarning = loadedPresets.ok == false ? loadedPresets.error?.nilIfBlank : nil
+            statusMessage = [
+                "Loaded \(hubSources.count) MCP hub sources and \(presets.count) presets.",
+                sourceWarning,
+                presetWarning
+            ].compactMap { $0 }.joined(separator: " ")
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func discoverServer(_ server: WorkspaceMCPServer) async {
+        guard let connection = appState.activeConnection else { return }
+        discoveringServer = server.name
+        defer { discoveringServer = nil }
+        do {
+            let result = try await appState.caelWorkspaceAPIService.discoverMCPServer(connection: connection, server: server)
+            discoverResults[server.name] = result
+            statusMessage = "Discovered \(result.tools.count) tools for \(server.name)."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
     private func serverDetail(_ server: WorkspaceMCPServer) -> String {
         let target = server.url ?? [server.command, server.args.joined(separator: " ")].compactMap { $0 }.joined(separator: " ")
         if let lastError = server.lastError, !lastError.isEmpty {
@@ -1381,6 +1482,33 @@ private struct NativeMCPPanel: View {
         if !tools.isEmpty { return tools }
         if let latency = result.latencyMs { return "\(Int(latency)) ms" }
         return "No tools reported."
+    }
+
+    private func discoverDetail(_ result: WorkspaceMCPDiscoverResponse) -> String {
+        if let error = result.error, !error.isEmpty { return error }
+        let tools = result.tools.prefix(8).map(\.name).joined(separator: ", ")
+        return tools.isEmpty ? "No tools reported by discovery." : tools
+    }
+
+    private func registrySourceDetail(_ source: WorkspaceMCPHubSource) -> String {
+        [
+            source.url,
+            source.format?.nilIfBlank.map { "format: \($0)" },
+            source.builtin == true ? "built-in" : nil
+        ].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    private func presetDetail(_ preset: WorkspaceMCPPreset) -> String {
+        let template = preset.template
+        let target = template?.url?.nilIfBlank ?? [template?.command, template?.args?.joined(separator: " ")]
+            .compactMap { $0?.nilIfBlank }
+            .joined(separator: " ")
+            .nilIfBlank
+        return [
+            preset.description?.nilIfBlank,
+            target,
+            template?.transportType?.nilIfBlank.map { "transport: \($0)" }
+        ].compactMap { $0 }.joined(separator: "\n")
     }
 
     private func tint(_ status: String) -> Color {
