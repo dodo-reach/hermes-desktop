@@ -2740,8 +2740,13 @@ private struct NativeMemoryKnowledgeFilesPanel: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            knowledgePages = try await appState.caelWorkspaceAPIService.listKnowledgePages(connection: connection).pages
-            statusMessage = "Loaded \(knowledgePages.count) knowledge pages."
+            let response = try await appState.caelWorkspaceAPIService.listKnowledgePages(connection: connection)
+            knowledgePages = response.pages
+            if let root = response.knowledgeRoot?.nilIfBlank {
+                statusMessage = "Loaded \(knowledgePages.count) knowledge pages from \(root)."
+            } else {
+                statusMessage = "Loaded \(knowledgePages.count) knowledge pages."
+            }
         } catch {
             statusMessage = "Error: \(error.localizedDescription)"
         }

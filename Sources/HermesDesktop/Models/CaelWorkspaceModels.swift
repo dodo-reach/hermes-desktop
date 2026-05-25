@@ -910,6 +910,7 @@ struct WorkspaceMemorySearchMatch: Decodable, Identifiable {
 struct WorkspaceKnowledgeListResponse: Decodable {
     let pages: [WorkspaceKnowledgePage]
     let exists: Bool?
+    let knowledgeRoot: String?
 }
 
 struct WorkspaceKnowledgePage: Decodable, Identifiable {
