@@ -102,6 +102,12 @@ final class AppState: ObservableObject {
     @Published var workspaceFileBrowserListing: RemoteDirectoryListing?
     @Published var workspaceFileBrowserError: String?
     @Published var isLoadingWorkspaceFileBrowser = false
+    @Published var toolArtifacts: [ToolArtifactSummary] = []
+    @Published var selectedToolArtifactID: String?
+    @Published var selectedToolArtifactDetail: ToolArtifactDetail?
+    @Published var toolArtifactsError: String?
+    @Published var isLoadingToolArtifacts = false
+    @Published var isLoadingToolArtifactDetail = false
     @Published var pendingSectionSelection: AppSection?
     @Published var showDiscardChangesAlert = false
     @Published var pendingNewConnectionEditorRequestID: UUID?
@@ -952,6 +958,58 @@ final class AppState: ObservableObject {
             guard isActiveWorkspace(profile) else { return }
             workspaceFileBrowserError = error.localizedDescription
             setStatusMessage(L10n.string("Unable to delete path"))
+        }
+    }
+
+    func loadToolArtifacts(resetSelection: Bool = false) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingToolArtifacts { return }
+
+        isLoadingToolArtifacts = true
+        toolArtifactsError = nil
+
+        do {
+            let artifacts = try await caelWorkspaceAPIService.loadToolArtifacts(connection: profile, limit: 100)
+            guard isActiveWorkspace(profile) else { return }
+            toolArtifacts = artifacts
+            if resetSelection || selectedToolArtifactID == nil || !artifacts.contains(where: { $0.id == selectedToolArtifactID }) {
+                selectedToolArtifactID = artifacts.first?.id
+                selectedToolArtifactDetail = nil
+            }
+            isLoadingToolArtifacts = false
+            if let selectedToolArtifactID {
+                await loadToolArtifactDetail(id: selectedToolArtifactID)
+            }
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingToolArtifacts = false
+            toolArtifactsError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to load artifacts"))
+        }
+    }
+
+    func selectToolArtifact(_ artifactID: String) async {
+        selectedToolArtifactID = artifactID
+        await loadToolArtifactDetail(id: artifactID)
+    }
+
+    func loadToolArtifactDetail(id artifactID: String) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingToolArtifactDetail { return }
+
+        isLoadingToolArtifactDetail = true
+        toolArtifactsError = nil
+
+        do {
+            let detail = try await caelWorkspaceAPIService.loadToolArtifact(connection: profile, id: artifactID)
+            guard isActiveWorkspace(profile) else { return }
+            selectedToolArtifactDetail = detail
+            isLoadingToolArtifactDetail = false
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingToolArtifactDetail = false
+            toolArtifactsError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to load artifact detail"))
         }
     }
 

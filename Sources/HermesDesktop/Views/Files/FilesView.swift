@@ -21,6 +21,7 @@ struct FilesView: View {
 
                 filesToolbar
                 libraryPanel
+                toolArtifactsPanel
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, 20)
@@ -32,6 +33,9 @@ struct FilesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: selectedFileLoadTaskID) {
             await appState.loadSelectedWorkspaceFile()
+        }
+        .task(id: appState.activeConnectionID) {
+            await appState.loadToolArtifacts(resetSelection: true)
         }
         .sheet(isPresented: $showBrowserSheet) {
             WorkspaceFileBrowserSheet()
@@ -107,6 +111,61 @@ struct FilesView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var toolArtifactsPanel: some View {
+        HermesSurfacePanel(
+            title: "Tool Artifacts",
+            subtitle: "Externalized tool output from Workspace sessions."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    if appState.isLoadingToolArtifacts {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        Task {
+                            await appState.loadToolArtifacts(resetSelection: false)
+                        }
+                    } label: {
+                        Label(L10n.string("Refresh"), systemImage: "arrow.clockwise")
+                    }
+                    .controlSize(.small)
+                    .disabled(appState.isLoadingToolArtifacts)
+                }
+
+                if let errorMessage = appState.toolArtifactsError {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                } else if appState.toolArtifacts.isEmpty {
+                    Text(L10n.string("No tool artifacts surfaced."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(appState.toolArtifacts.prefix(8)) { artifact in
+                                ToolArtifactRow(
+                                    artifact: artifact,
+                                    isSelected: artifact.id == appState.selectedToolArtifactID
+                                ) {
+                                    Task {
+                                        await appState.selectToolArtifact(artifact.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                }
+            }
         }
     }
 
@@ -265,31 +324,41 @@ struct FilesView: View {
     private var editorPane: some View {
         Group {
             if let selectedReference {
-                WorkspaceFileEditorPane(
-                    reference: selectedReference,
-                    document: currentDocument,
-                    text: editorBinding,
-                    onReload: {
-                        if currentDocument?.isDirty == true {
-                            showReloadDiscardAlert = true
-                        } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let artifact = appState.selectedToolArtifactDetail {
+                        ToolArtifactDetailPanel(
+                            artifact: artifact,
+                            isLoading: appState.isLoadingToolArtifactDetail
+                        )
+                    }
+
+                    WorkspaceFileEditorPane(
+                        reference: selectedReference,
+                        document: currentDocument,
+                        text: editorBinding,
+                        onReload: {
+                            if currentDocument?.isDirty == true {
+                                showReloadDiscardAlert = true
+                            } else {
+                                Task {
+                                    await appState.loadWorkspaceFile(selectedReference, forceReload: true)
+                                }
+                            }
+                        },
+                        onSave: {
                             Task {
-                                await appState.loadWorkspaceFile(selectedReference, forceReload: true)
+                                await appState.saveWorkspaceFile(fileID: selectedReference.id)
+                            }
+                        },
+                        onRemove: selectedReference.bookmarkID.map { bookmarkID in
+                            {
+                                bookmarkPendingRemoval = bookmarkID
+                                showRemoveBookmarkAlert = true
                             }
                         }
-                    },
-                    onSave: {
-                        Task {
-                            await appState.saveWorkspaceFile(fileID: selectedReference.id)
-                        }
-                    },
-                    onRemove: selectedReference.bookmarkID.map { bookmarkID in
-                        {
-                            bookmarkPendingRemoval = bookmarkID
-                            showRemoveBookmarkAlert = true
-                        }
-                    }
-                )
+                    )
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 ScrollView {
                     HermesSurfacePanel {
@@ -343,6 +412,115 @@ struct FilesView: View {
 
     private var selectedFileLoadTaskID: String {
         "\(appState.activeConnectionID?.uuidString ?? "none")|\(appState.selectedWorkspaceFileID)"
+    }
+}
+
+private struct ToolArtifactRow: View {
+    let artifact: ToolArtifactSummary
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: iconName)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+
+                    Text(artifact.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(artifact.kind)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                }
+
+                Text(artifact.preview.isEmpty ? artifact.summary : artifact.preview)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var iconName: String {
+        switch artifact.kind {
+        case "diff":
+            "plus.forwardslash.minus"
+        case "terminal_log":
+            "terminal"
+        case "file_read":
+            "doc.text.magnifyingglass"
+        case "skill_doc":
+            "puzzlepiece"
+        default:
+            "doc.text"
+        }
+    }
+}
+
+private struct ToolArtifactDetailPanel: View {
+    let artifact: ToolArtifactDetail
+    let isLoading: Bool
+
+    var body: some View {
+        HermesSurfacePanel(
+            title: artifact.title,
+            subtitle: "\(artifact.kind) / \(artifact.sessionId)"
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.contentSize), countStyle: .file))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(DateFormatters.relativeFormatter().localizedString(for: artifact.createdDate, relativeTo: .now))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                Text(artifact.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                ScrollView {
+                    Text(artifact.content.isEmpty ? artifact.preview : artifact.content)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .frame(maxHeight: 180)
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 22)
     }
 }
 

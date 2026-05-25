@@ -275,6 +275,31 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
     }
 
+    func loadToolArtifacts(connection: ConnectionProfile, sessionId: String? = nil, limit: Int = 100) async throws -> [ToolArtifactSummary] {
+        let response = try await loadJSON(
+            connection: connection,
+            path: artifactsAPIPath(sessionId: sessionId, limit: limit),
+            responseType: ToolArtifactsListResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not load tool artifacts.")
+        }
+        return response.artifacts
+    }
+
+    func loadToolArtifact(connection: ConnectionProfile, id artifactId: String) async throws -> ToolArtifactDetail {
+        let encodedId = artifactId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? artifactId
+        let response = try await loadJSON(
+            connection: connection,
+            path: "/api/artifacts/\(encodedId)",
+            responseType: ToolArtifactDetailResponse.self
+        )
+        guard response.ok, let artifact = response.artifact else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not load artifact \(artifactId).")
+        }
+        return artifact
+    }
+
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
         var components = URLComponents()
         components.path = "/api/files"
@@ -290,6 +315,17 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
         components.queryItems = queryItems
         return components.string ?? "/api/files"
+    }
+
+    private func artifactsAPIPath(sessionId: String?, limit: Int) -> String {
+        var components = URLComponents()
+        components.path = "/api/artifacts"
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let sessionId, !sessionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "sessionId", value: sessionId))
+        }
+        components.queryItems = queryItems
+        return components.string ?? "/api/artifacts"
     }
 
     private func loadJSON<Response: Decodable>(
@@ -557,6 +593,18 @@ private struct CaelWorkspaceFileMutationRequest: Encodable {
 private struct CaelWorkspaceFileMutationResponse: Decodable {
     let ok: Bool
     let path: String?
+    let error: String?
+}
+
+private struct ToolArtifactsListResponse: Decodable {
+    let ok: Bool
+    let artifacts: [ToolArtifactSummary]
+    let error: String?
+}
+
+private struct ToolArtifactDetailResponse: Decodable {
+    let ok: Bool
+    let artifact: ToolArtifactDetail?
     let error: String?
 }
 
