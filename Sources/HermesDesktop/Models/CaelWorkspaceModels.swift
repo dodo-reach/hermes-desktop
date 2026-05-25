@@ -799,6 +799,126 @@ struct KnowledgeFabricDocument: Decodable {
     }
 }
 
+
+struct WorkspaceMemoryListResponse: Decodable {
+    let files: [WorkspaceMemoryFile]
+}
+
+struct WorkspaceMemoryFile: Decodable, Identifiable {
+    var id: String { path }
+    let path: String
+    let name: String
+    let size: Int
+    let modified: String
+}
+
+struct WorkspaceMemoryReadResponse: Decodable {
+    let path: String?
+    let content: String?
+}
+
+struct WorkspaceMemorySearchResponse: Decodable {
+    let results: [WorkspaceMemorySearchMatch]
+}
+
+struct WorkspaceMemorySearchMatch: Decodable, Identifiable {
+    var id: String { "\(path):\(line):\(text)" }
+    let path: String
+    let line: Int
+    let text: String
+}
+
+struct WorkspaceKnowledgeListResponse: Decodable {
+    let pages: [WorkspaceKnowledgePage]
+    let exists: Bool?
+}
+
+struct WorkspaceKnowledgePage: Decodable, Identifiable {
+    var id: String { path }
+    let path: String
+    let name: String
+    let title: String
+    let type: String?
+    let domain: String?
+    let status: String?
+    let tags: [String]
+    let summary: String?
+    let created: String?
+    let updated: String?
+    let size: Int
+    let modified: String
+    let wikilinks: [String]
+}
+
+struct WorkspaceKnowledgeReadResponse: Decodable {
+    let page: WorkspaceKnowledgePage?
+    let content: String?
+    let backlinks: [String]?
+}
+
+struct WorkspaceKnowledgeSearchResponse: Decodable {
+    let results: [WorkspaceKnowledgeSearchMatch]
+}
+
+struct WorkspaceKnowledgeSearchMatch: Decodable, Identifiable {
+    var id: String { "\(path):\(line):\(text)" }
+    let path: String
+    let title: String
+    let line: Int
+    let text: String
+}
+
+struct WorkspaceSecondBrainSourcesResponse: Decodable {
+    let ok: Bool
+    let sources: [WorkspaceSecondBrainSource]?
+    let error: String?
+}
+
+struct WorkspaceSecondBrainSource: Decodable, Identifiable {
+    let id: String
+    let label: String
+    let category: String
+    let description: String
+    let refPrefix: String
+    let writable: Bool
+    let exists: Bool
+    let status: String
+}
+
+struct WorkspaceSecondBrainListResponse: Decodable {
+    let ok: Bool
+    let source: WorkspaceSecondBrainSource?
+    let root: String?
+    let entries: [WorkspaceSecondBrainEntry]?
+    let error: String?
+}
+
+struct WorkspaceSecondBrainEntry: Decodable, Identifiable {
+    var id: String { ref }
+    let name: String
+    let path: String
+    let ref: String
+    let type: String
+    let size: Int?
+    let modifiedAt: String?
+}
+
+struct WorkspaceSecondBrainReadResponse: Decodable {
+    let ok: Bool
+    let source: WorkspaceSecondBrainSource?
+    let path: String?
+    let ref: String?
+    let content: String?
+    let hash: String?
+    let error: String?
+}
+
+struct WorkspaceSecondBrainWriteResponse: Decodable {
+    let ok: Bool?
+    let hash: String?
+    let error: String?
+}
+
 private extension String {
     var nilIfBlank: String? {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self

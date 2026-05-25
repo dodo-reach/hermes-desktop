@@ -153,6 +153,7 @@ struct CommandCenterMirrorView: View {
     private var memorySection: some View {
         VStack(alignment: .leading, spacing: 16) {
             NativeKnowledgeFabricPanel()
+            NativeMemoryKnowledgeFilesPanel()
             brainSourcesPanel
             memoryArtifactsPanel
         }
@@ -574,6 +575,404 @@ private struct NativeKnowledgeFabricPanel: View {
         if normalized.count <= maxLength { return normalized.isEmpty ? "No preview available." : normalized }
         let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
         return String(normalized[..<index]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+}
+
+
+private struct NativeMemoryKnowledgeFilesPanel: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var tab = "memory"
+    @State private var query = "Hermes Cael"
+    @State private var memoryFiles: [WorkspaceMemoryFile] = []
+    @State private var memoryMatches: [WorkspaceMemorySearchMatch] = []
+    @State private var knowledgePages: [WorkspaceKnowledgePage] = []
+    @State private var knowledgeMatches: [WorkspaceKnowledgeSearchMatch] = []
+    @State private var selectedTitle = ""
+    @State private var selectedPath = ""
+    @State private var selectedContent = ""
+    @State private var secondBrainSources: [WorkspaceSecondBrainSource] = []
+    @State private var secondBrainSourceID = ""
+    @State private var secondBrainFolder = ""
+    @State private var secondBrainEntries: [WorkspaceSecondBrainEntry] = []
+    @State private var secondBrainHash = ""
+    @State private var statusMessage: String?
+    @State private var isLoading = false
+    @State private var isSaving = false
+
+    private var activeSecondBrainSource: WorkspaceSecondBrainSource? {
+        secondBrainSources.first { $0.id == secondBrainSourceID }
+    }
+
+    var body: some View {
+        HermesSurfacePanel(
+            title: "Memory / Knowledge Files",
+            subtitle: "Native file-backed memory, wiki, and second-brain actions through the shared Workspace API."
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    Picker("Source", selection: $tab) {
+                        Text("Memory").tag("memory")
+                        Text("Knowledge").tag("knowledge")
+                        Text("Second Brain").tag("second")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 420)
+
+                    Button("Refresh") {
+                        Task { await refreshActiveTab() }
+                    }
+                    .disabled(isLoading)
+
+                    if isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                if let statusMessage {
+                    MirrorRow(title: "Status", detail: statusMessage, tint: statusMessage.lowercased().contains("error") ? .orange : .blue)
+                }
+
+                switch tab {
+                case "knowledge":
+                    knowledgeBody
+                case "second":
+                    secondBrainBody
+                default:
+                    memoryBody
+                }
+            }
+        }
+        .task(id: appState.activeConnectionID) {
+            await refreshActiveTab()
+        }
+        .onChange(of: tab) { _, _ in
+            Task { await refreshActiveTab() }
+        }
+    }
+
+    private var memoryBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            searchRow(placeholder: "Search memory files")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
+                ForEach(memoryFiles.prefix(8)) { file in
+                    Button {
+                        Task { await readMemory(file.path, title: file.name) }
+                    } label: {
+                        MirrorRow(title: file.name, detail: file.path, badge: formatBytes(file.size), tint: .blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if !memoryMatches.isEmpty {
+                resultRows(memoryMatches.map { ($0.path, "Line \($0.line)", $0.text) }) { path in
+                    Task { await readMemory(path, title: path) }
+                }
+            }
+            previewEditor(readOnly: true)
+        }
+    }
+
+    private var knowledgeBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            searchRow(placeholder: "Search knowledge wiki")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
+                ForEach(knowledgePages.prefix(8)) { page in
+                    Button {
+                        Task { await readKnowledge(page.path, title: page.title) }
+                    } label: {
+                        MirrorRow(title: page.title, detail: page.summary ?? page.path, badge: page.status ?? "wiki", tint: .purple)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if !knowledgeMatches.isEmpty {
+                resultRows(knowledgeMatches.map { ($0.path, $0.title, $0.text) }) { path in
+                    Task { await readKnowledge(path, title: path) }
+                }
+            }
+            previewEditor(readOnly: true)
+        }
+    }
+
+    private var secondBrainBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Picker("Second Brain Source", selection: $secondBrainSourceID) {
+                    ForEach(secondBrainSources) { source in
+                        Text("\(source.label) (\(source.status))").tag(source.id)
+                    }
+                }
+                .frame(maxWidth: 420)
+
+                Button("Up") {
+                    secondBrainFolder = parentPath(secondBrainFolder)
+                    Task { await listSecondBrainEntries() }
+                }
+                .disabled(secondBrainFolder.isEmpty)
+
+                Text("/\(secondBrainFolder)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            if let activeSecondBrainSource {
+                MirrorRow(
+                    title: activeSecondBrainSource.category.capitalized,
+                    detail: activeSecondBrainSource.description,
+                    badge: activeSecondBrainSource.writable ? "Writable" : "Read-only",
+                    tint: activeSecondBrainSource.writable ? .green : .secondary
+                )
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
+                ForEach(secondBrainEntries.prefix(12)) { entry in
+                    Button {
+                        if entry.type == "folder" {
+                            secondBrainFolder = entry.path
+                            Task { await listSecondBrainEntries() }
+                        } else {
+                            Task { await readSecondBrain(entry.path) }
+                        }
+                    } label: {
+                        MirrorRow(
+                            title: entry.name,
+                            detail: entry.ref,
+                            badge: entry.type == "folder" ? "Folder" : formatBytes(entry.size ?? 0),
+                            tint: entry.type == "folder" ? .cyan : .blue
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            previewEditor(readOnly: activeSecondBrainSource?.writable != true) {
+                Task { await saveSecondBrain() }
+            }
+        }
+        .onChange(of: secondBrainSourceID) { _, _ in
+            secondBrainFolder = ""
+            Task { await listSecondBrainEntries() }
+        }
+    }
+
+    private func searchRow(placeholder: String) -> some View {
+        HStack(spacing: 12) {
+            TextField(placeholder, text: $query)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    Task { await runSearch() }
+                }
+            Button("Search") {
+                Task { await runSearch() }
+            }
+            .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    private func resultRows(_ rows: [(String, String, String)], onSelect: @escaping (String) -> Task<Void, Never>) -> some View {
+        MirrorListCard(title: "Search Results", emptyText: "No search results.") {
+            ForEach(Array(rows.prefix(8)), id: \.0) { row in
+                Button {
+                    _ = onSelect(row.0)
+                } label: {
+                    MirrorRow(title: row.1, detail: "\(row.0)\n\(preview(row.2, maxLength: 180))", tint: .green)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func previewEditor(readOnly: Bool, saveAction: (() -> Void)? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !selectedTitle.isEmpty {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(selectedTitle)
+                            .font(.headline)
+                        Text(selectedPath)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let saveAction, !readOnly {
+                        Button(isSaving ? "Saving..." : "Save") {
+                            saveAction()
+                        }
+                        .disabled(isSaving || secondBrainHash.isEmpty)
+                    }
+                }
+                TextEditor(text: $selectedContent)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 260)
+                    .disabled(readOnly)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.quaternary, lineWidth: 1)
+                    )
+            }
+        }
+    }
+
+    private func refreshActiveTab() async {
+        switch tab {
+        case "knowledge":
+            await loadKnowledgePages()
+        case "second":
+            await loadSecondBrainSources()
+        default:
+            await loadMemoryFiles()
+        }
+    }
+
+    private func loadMemoryFiles() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            memoryFiles = try await appState.caelWorkspaceAPIService.listMemoryFiles(connection: connection).files
+            statusMessage = "Loaded \(memoryFiles.count) memory files."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func readMemory(_ path: String, title: String) async {
+        guard let connection = appState.activeConnection else { return }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.readMemoryFile(connection: connection, path: path)
+            selectedTitle = title
+            selectedPath = response.path ?? path
+            selectedContent = response.content ?? ""
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadKnowledgePages() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            knowledgePages = try await appState.caelWorkspaceAPIService.listKnowledgePages(connection: connection).pages
+            statusMessage = "Loaded \(knowledgePages.count) knowledge pages."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func readKnowledge(_ path: String, title: String) async {
+        guard let connection = appState.activeConnection else { return }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.readKnowledgePage(connection: connection, path: path)
+            selectedTitle = response.page?.title ?? title
+            selectedPath = response.page?.path ?? path
+            selectedContent = response.content ?? ""
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func runSearch() async {
+        guard let connection = appState.activeConnection else { return }
+        do {
+            if tab == "knowledge" {
+                knowledgeMatches = try await appState.caelWorkspaceAPIService.searchKnowledgePages(connection: connection, query: query).results
+                statusMessage = "Found \(knowledgeMatches.count) knowledge matches."
+            } else {
+                memoryMatches = try await appState.caelWorkspaceAPIService.searchMemoryFiles(connection: connection, query: query).results
+                statusMessage = "Found \(memoryMatches.count) memory matches."
+            }
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadSecondBrainSources() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.listSecondBrainSources(connection: connection)
+            secondBrainSources = response.sources ?? []
+            if secondBrainSourceID.isEmpty {
+                secondBrainSourceID = secondBrainSources.first(where: { $0.status == "available" })?.id ?? secondBrainSources.first?.id ?? ""
+            }
+            await listSecondBrainEntries()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func listSecondBrainEntries() async {
+        guard let connection = appState.activeConnection, !secondBrainSourceID.isEmpty else { return }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.listSecondBrainEntries(
+                connection: connection,
+                source: secondBrainSourceID,
+                path: secondBrainFolder
+            )
+            secondBrainEntries = response.entries ?? []
+            statusMessage = "Loaded \(secondBrainEntries.count) second-brain entries."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func readSecondBrain(_ path: String) async {
+        guard let connection = appState.activeConnection, !secondBrainSourceID.isEmpty else { return }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.readSecondBrainFile(
+                connection: connection,
+                source: secondBrainSourceID,
+                path: path
+            )
+            selectedTitle = path
+            selectedPath = response.path ?? path
+            selectedContent = response.content ?? ""
+            secondBrainHash = response.hash ?? ""
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func saveSecondBrain() async {
+        guard let connection = appState.activeConnection, !secondBrainSourceID.isEmpty, !selectedPath.isEmpty else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.writeSecondBrainFile(
+                connection: connection,
+                source: secondBrainSourceID,
+                path: selectedPath,
+                content: selectedContent,
+                expectedHash: secondBrainHash
+            )
+            secondBrainHash = response.hash ?? secondBrainHash
+            statusMessage = "Saved second-brain file with hash guard."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func parentPath(_ value: String) -> String {
+        guard let index = value.lastIndex(of: "/") else { return "" }
+        return String(value[..<index])
+    }
+
+    private func formatBytes(_ size: Int) -> String {
+        if size < 1024 { return "\(size) B" }
+        if size < 1024 * 1024 { return String(format: "%.1f KB", Double(size) / 1024) }
+        return String(format: "%.1f MB", Double(size) / (1024 * 1024))
+    }
+
+    private func preview(_ value: String, maxLength: Int) -> String {
+        let normalized = value.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.count <= maxLength { return normalized }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return String(normalized[..<index]) + "..."
     }
 }
 

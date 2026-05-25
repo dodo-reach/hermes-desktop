@@ -592,6 +592,104 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         )
     }
 
+
+    func listMemoryFiles(connection: ConnectionProfile) async throws -> WorkspaceMemoryListResponse {
+        try await loadJSON(connection: connection, path: "/api/memory/list", responseType: WorkspaceMemoryListResponse.self)
+    }
+
+    func readMemoryFile(connection: ConnectionProfile, path filePath: String) async throws -> WorkspaceMemoryReadResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/memory/read", queryItems: [URLQueryItem(name: "path", value: filePath)]),
+            responseType: WorkspaceMemoryReadResponse.self
+        )
+    }
+
+    func searchMemoryFiles(connection: ConnectionProfile, query: String) async throws -> WorkspaceMemorySearchResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/memory/search", queryItems: [URLQueryItem(name: "q", value: query)]),
+            responseType: WorkspaceMemorySearchResponse.self
+        )
+    }
+
+    func listKnowledgePages(connection: ConnectionProfile) async throws -> WorkspaceKnowledgeListResponse {
+        try await loadJSON(connection: connection, path: "/api/knowledge/list", responseType: WorkspaceKnowledgeListResponse.self)
+    }
+
+    func readKnowledgePage(connection: ConnectionProfile, path pagePath: String) async throws -> WorkspaceKnowledgeReadResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/knowledge/read", queryItems: [URLQueryItem(name: "path", value: pagePath)]),
+            responseType: WorkspaceKnowledgeReadResponse.self
+        )
+    }
+
+    func searchKnowledgePages(connection: ConnectionProfile, query: String) async throws -> WorkspaceKnowledgeSearchResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/knowledge/search", queryItems: [URLQueryItem(name: "q", value: query)]),
+            responseType: WorkspaceKnowledgeSearchResponse.self
+        )
+    }
+
+    func listSecondBrainSources(connection: ConnectionProfile) async throws -> WorkspaceSecondBrainSourcesResponse {
+        try await loadJSON(connection: connection, path: "/api/second-brain/sources", responseType: WorkspaceSecondBrainSourcesResponse.self)
+    }
+
+    func listSecondBrainEntries(connection: ConnectionProfile, source: String, path folderPath: String) async throws -> WorkspaceSecondBrainListResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath(
+                "/api/second-brain/list",
+                queryItems: [
+                    URLQueryItem(name: "source", value: source),
+                    URLQueryItem(name: "path", value: folderPath)
+                ]
+            ),
+            responseType: WorkspaceSecondBrainListResponse.self
+        )
+    }
+
+    func readSecondBrainFile(connection: ConnectionProfile, source: String, path filePath: String) async throws -> WorkspaceSecondBrainReadResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath(
+                "/api/second-brain/read",
+                queryItems: [
+                    URLQueryItem(name: "source", value: source),
+                    URLQueryItem(name: "path", value: filePath)
+                ]
+            ),
+            responseType: WorkspaceSecondBrainReadResponse.self
+        )
+    }
+
+    @discardableResult
+    func writeSecondBrainFile(
+        connection: ConnectionProfile,
+        source: String,
+        path filePath: String,
+        content: String,
+        expectedHash: String
+    ) async throws -> WorkspaceSecondBrainWriteResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/second-brain/write",
+            body: WorkspaceSecondBrainWriteRequest(
+                source: source,
+                path: filePath,
+                content: content,
+                expectedHash: expectedHash
+            ),
+            responseType: WorkspaceSecondBrainWriteResponse.self
+        )
+        guard response.ok != false else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Second Brain write failed.")
+        }
+        return response
+    }
+
     private func searchKnowledgeFabricScope(
         connection: ConnectionProfile,
         query: String,
@@ -625,6 +723,14 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
             body: KnowledgeFabricDocumentRequest(docId: docID, memoryScope: scope),
             responseType: KnowledgeFabricSearchResponse.self
         )
+    }
+
+
+    private func apiPath(_ path: String, queryItems: [URLQueryItem]) -> String {
+        var components = URLComponents()
+        components.path = path
+        components.queryItems = queryItems
+        return components.string ?? path
     }
 
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
@@ -885,6 +991,14 @@ private struct KnowledgeFabricSearchRequest: Encodable {
 private struct KnowledgeFabricDocumentRequest: Encodable {
     let docId: String
     let memoryScope: String
+}
+
+
+private struct WorkspaceSecondBrainWriteRequest: Encodable {
+    let source: String
+    let path: String
+    let content: String
+    let expectedHash: String
 }
 
 private struct CaelWorkspaceFilesListResponse: Decodable {
