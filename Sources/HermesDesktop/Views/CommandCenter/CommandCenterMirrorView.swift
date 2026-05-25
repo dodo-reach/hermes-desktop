@@ -348,6 +348,7 @@ private struct NativeOperationsAgentsPanel: View {
 
     @State private var profiles: [CaelProfileSummary] = []
     @State private var crew: [WorkspaceCrewMember] = []
+    @State private var jobs: [CronJob] = []
     @State private var activeProfileName = "default"
     @State private var isLoading = false
     @State private var isCreating = false
@@ -355,6 +356,8 @@ private struct NativeOperationsAgentsPanel: View {
     @State private var isSavingProfile = false
     @State private var isLoadingEditDetail = false
     @State private var operationProfileName: String?
+    @State private var operationJobID: String?
+    @State private var operationSessionKey: String?
     @State private var errorMessage: String?
     @State private var runtimeMessage: String?
     @State private var newAgentName = ""
@@ -364,6 +367,9 @@ private struct NativeOperationsAgentsPanel: View {
     @State private var editProvider = ""
     @State private var editDescription = ""
     @State private var editSystemPrompt = ""
+    @State private var operationChatDrafts: [String: String] = [:]
+    @State private var operationChatMessages: [String: [SessionMessage]] = [:]
+    @State private var operationChatNotices: [String: String] = [:]
     @State private var profilePendingDelete: CaelProfileSummary?
 
     var body: some View {
@@ -486,6 +492,7 @@ private struct NativeOperationsAgentsPanel: View {
             OperationMiniStat(label: "running", value: "\(crew.filter(\.processAlive).count)")
             OperationMiniStat(label: "sessions", value: "\(crew.reduce(0) { $0 + $1.sessionCount })")
             OperationMiniStat(label: "jobs", value: "\(crew.reduce(0) { $0 + $1.cronJobCount })")
+            OperationMiniStat(label: "ops jobs", value: "\(jobs.filter { $0.name.hasPrefix("ops:") }.count)")
         }
     }
 
@@ -523,6 +530,8 @@ private struct NativeOperationsAgentsPanel: View {
                 }
             }
             actionButtons(profile)
+            operationJobsPanel(profile)
+            operationChatPanel(profile)
         }
     }
 
@@ -553,6 +562,137 @@ private struct NativeOperationsAgentsPanel: View {
             .disabled(profile.name == "default" || operationProfileName != nil)
         }
         .controlSize(.small)
+    }
+
+
+    private func operationJobsPanel(_ profile: CaelProfileSummary) -> some View {
+        let profileJobs = operationJobs(for: profile)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Operations jobs")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Refresh") {
+                    Task { await loadOperationJobs() }
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+            }
+
+            if profileJobs.isEmpty {
+                Text("No `ops:\(profile.name):` jobs reported by /api/claude-jobs.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(profileJobs.prefix(4)) { job in
+                        HStack(alignment: .center, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(operationJobTitle(job, profile: profile))
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(job.resolvedScheduleDisplay)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 8)
+                            Button {
+                                Task { await toggleOperationJob(job) }
+                            } label: {
+                                Image(systemName: job.isPaused || !job.enabled ? "play.circle" : "pause.circle")
+                            }
+                            .help(job.isPaused || !job.enabled ? "Resume job" : "Pause job")
+                            .disabled(operationJobID == job.id)
+
+                            Button {
+                                Task { await runOperationJob(job) }
+                            } label: {
+                                Image(systemName: "bolt.circle")
+                            }
+                            .help("Run job now")
+                            .disabled(operationJobID == job.id)
+                        }
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
+        }
+    }
+
+    private func operationChatPanel(_ profile: CaelProfileSummary) -> some View {
+        let sessionKey = operationSessionKey(for: profile)
+        let messages = Array((operationChatMessages[profile.name] ?? []).suffix(4))
+        let draft = Binding(
+            get: { operationChatDrafts[profile.name] ?? "" },
+            set: { operationChatDrafts[profile.name] = $0 }
+        )
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Operations chat")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(sessionKey)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Button("Refresh") {
+                    Task { await loadOperationChat(profile) }
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+            }
+
+            if messages.isEmpty {
+                Text("No recent messages in the shared agent session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(messages) { message in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(message.role.displayTitle)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(message.role == .user ? Color.accentColor : Color.secondary)
+                            Text(message.content?.nilIfBlank ?? "No message content.")
+                                .font(.caption)
+                                .lineLimit(3)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
+
+            if let notice = operationChatNotices[profile.name]?.nilIfBlank {
+                Text(notice)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                TextField("Message \(profile.resolvedDisplayName)", text: draft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        Task { await sendOperationChat(profile) }
+                    }
+                Button {
+                    Task { await sendOperationChat(profile) }
+                } label: {
+                    Label(operationSessionKey == sessionKey ? "Sending" : "Send", systemImage: "paperplane")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(operationSessionKey == sessionKey || draft.wrappedValue.nilIfBlank == nil)
+            }
+        }
+        .task(id: profile.name) {
+            await loadOperationChat(profile)
+        }
     }
 
     private func editSheet(_ profile: CaelProfileSummary) -> some View {
@@ -610,6 +750,7 @@ private struct NativeOperationsAgentsPanel: View {
     private func loadAll() async {
         await loadProfiles()
         await loadCrewStatus()
+        await loadOperationJobs()
     }
 
     private func loadProfiles() async {
@@ -642,6 +783,114 @@ private struct NativeOperationsAgentsPanel: View {
             crew = response.crew
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+
+    private func loadOperationJobs() async {
+        guard let connection = appState.activeConnection else {
+            jobs = []
+            return
+        }
+
+        do {
+            jobs = try await appState.caelWorkspaceAPIService.loadWorkspaceCronJobs(connection: connection)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func operationJobs(for profile: CaelProfileSummary) -> [CronJob] {
+        let prefix = "ops:\(profile.name):"
+        return jobs
+            .filter { $0.name.hasPrefix(prefix) }
+            .sorted { left, right in
+                let leftDate = left.nextRunAt ?? left.lastRunAt ?? .distantFuture
+                let rightDate = right.nextRunAt ?? right.lastRunAt ?? .distantFuture
+                return leftDate < rightDate
+            }
+    }
+
+    private func operationJobTitle(_ job: CronJob, profile: CaelProfileSummary) -> String {
+        let prefix = "ops:\(profile.name):"
+        if job.name.hasPrefix(prefix) {
+            return job.name.dropFirst(prefix.count).replacingOccurrences(of: "-", with: " ").capitalized
+        }
+        return job.resolvedName
+    }
+
+    private func runOperationJob(_ job: CronJob) async {
+        guard let connection = appState.activeConnection else { return }
+        operationJobID = job.id
+        errorMessage = nil
+        do {
+            try await appState.caelWorkspaceAPIService.triggerWorkspaceCronJob(connection: connection, jobID: job.id)
+            operationJobID = nil
+            await loadOperationJobs()
+        } catch {
+            operationJobID = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func toggleOperationJob(_ job: CronJob) async {
+        guard let connection = appState.activeConnection else { return }
+        operationJobID = job.id
+        errorMessage = nil
+        do {
+            if job.isPaused || !job.enabled {
+                try await appState.caelWorkspaceAPIService.resumeWorkspaceCronJob(connection: connection, jobID: job.id)
+            } else {
+                try await appState.caelWorkspaceAPIService.pauseWorkspaceCronJob(connection: connection, jobID: job.id)
+            }
+            operationJobID = nil
+            await loadOperationJobs()
+        } catch {
+            operationJobID = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func operationSessionKey(for profile: CaelProfileSummary) -> String {
+        "agent:main:ops-\(profile.name)"
+    }
+
+    private func loadOperationChat(_ profile: CaelProfileSummary) async {
+        guard let connection = appState.activeConnection else { return }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.loadWorkspaceSessionHistory(
+                connection: connection,
+                sessionKey: operationSessionKey(for: profile),
+                limit: 50
+            )
+            operationChatMessages[profile.name] = response.messages
+            operationChatNotices[profile.name] = response.ok == false ? (response.error ?? "Session history unavailable.") : nil
+        } catch {
+            operationChatNotices[profile.name] = error.localizedDescription
+        }
+    }
+
+    private func sendOperationChat(_ profile: CaelProfileSummary) async {
+        guard let connection = appState.activeConnection,
+              let message = operationChatDrafts[profile.name]?.nilIfBlank else { return }
+        let sessionKey = operationSessionKey(for: profile)
+        operationSessionKey = sessionKey
+        operationChatNotices[profile.name] = nil
+        do {
+            _ = try await appState.caelWorkspaceAPIService.sendWorkspaceSessionMessage(
+                connection: connection,
+                sessionKey: sessionKey,
+                message: message,
+                autoApproveCommands: false
+            )
+            operationChatDrafts[profile.name] = ""
+            operationChatNotices[profile.name] = "Accepted by shared Workspace session runner."
+            operationSessionKey = nil
+            await loadOperationChat(profile)
+            await appState.refreshCaelWorkspace()
+        } catch {
+            operationSessionKey = nil
+            operationChatNotices[profile.name] = error.localizedDescription
         }
     }
 
