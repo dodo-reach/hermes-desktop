@@ -920,6 +920,30 @@ struct WorkspaceSecondBrainWriteResponse: Decodable {
 }
 
 
+struct WorkspaceSessionCreateResponse: Decodable {
+    let ok: Bool?
+    let sessionKey: String?
+    let friendlyId: String?
+    let error: String?
+}
+
+struct WorkspaceSessionSendResponse: Decodable {
+    let ok: Bool
+    let sessionKey: String?
+    let queued: Bool?
+    let serverSide: Bool?
+    let error: String?
+}
+
+struct WorkspaceSessionHistoryResponse: Decodable {
+    let ok: Bool?
+    let messages: [SessionMessage]
+    let sessionKey: String?
+    let source: String?
+    let error: String?
+}
+
+
 struct WorkspaceMCPListResponse: Decodable {
     let servers: [WorkspaceMCPServer]
     let total: Int

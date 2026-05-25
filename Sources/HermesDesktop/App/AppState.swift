@@ -1356,35 +1356,39 @@ final class AppState: ObservableObject {
         sessionConversationError = nil
         sessionsError = nil
 
+        appendPendingUserLiveMessage(prompt: trimmedPrompt)
+
         do {
-            let turnResult = try await hermesChatService.sendMessage(
-                trimmedPrompt,
-                sessionID: nil,
+            let provisionalSessionID = UUID().uuidString
+            let sendResponse = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
                 connection: profile,
+                sessionKey: provisionalSessionID,
+                message: trimmedPrompt,
                 autoApproveCommands: autoApproveCommands
             )
             guard isActiveWorkspace(profile) else { return false }
 
+            let responseSessionID = sendResponse.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let createdSessionID = responseSessionID.isEmpty ? provisionalSessionID : responseSessionID
             isSendingSessionMessage = false
             pendingSessionTurn = nil
             sessionSearchQuery = ""
+            selectedSessionDetailMode = .chat
+            isNewSessionComposerActive = false
+            selectedSessionID = createdSessionID
+            upsertAcceptedWorkspaceSessionSummary(
+                sessionID: createdSessionID,
+                prompt: trimmedPrompt,
+                messageCount: max(sessionMessages.count + liveSessionMessageDisplays.count, 1)
+            )
+            scheduleAcceptedWorkspaceSessionRefresh(sessionID: createdSessionID, connection: profile)
             await loadSessions(
                 reset: true,
                 query: "",
-                preferredSessionID: turnResult.sessionID,
-                allowsFallbackSelection: false
+                preferredSessionID: createdSessionID,
+                allowsFallbackSelection: false,
+                updatesSelection: false
             )
-
-            let createdSessionID = turnResult.sessionID ??
-                likelyNewSessionID(
-                    afterStartingWith: trimmedPrompt,
-                    excluding: existingVisibleSessionIDs
-                ) ??
-                sessions.first?.id
-
-            if let createdSessionID {
-                await loadSessionDetail(sessionID: createdSessionID)
-            }
             return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
@@ -1589,28 +1593,23 @@ final class AppState: ObservableObject {
         )
         sessionConversationError = nil
         sessionsError = nil
-        startSessionTranscriptPolling(sessionID: selectedSessionID, connection: profile)
+        appendPendingUserLiveMessage(prompt: trimmedPrompt)
 
         do {
-            _ = try await hermesChatService.sendMessage(
-                trimmedPrompt,
-                sessionID: selectedSessionID,
+            _ = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
                 connection: profile,
+                sessionKey: selectedSessionID,
+                message: trimmedPrompt,
                 autoApproveCommands: autoApproveCommands
             )
             guard isActiveWorkspace(profile) else { return false }
 
-            stopSessionTranscriptPolling()
-            if self.selectedSessionID == selectedSessionID {
-                await loadSessionDetail(sessionID: selectedSessionID)
-            }
             isSendingSessionMessage = false
             pendingSessionTurn = nil
-            await loadSessions(reset: true, query: sessionSearchQuery)
+            scheduleAcceptedWorkspaceSessionRefresh(sessionID: selectedSessionID, connection: profile)
             return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
-            stopSessionTranscriptPolling()
             isSendingSessionMessage = false
             pendingSessionTurn = nil
             let message = error.localizedDescription
@@ -3656,6 +3655,76 @@ final class AppState: ObservableObject {
         hasAcceptedNativeTurnInFlight = false
         activeNativeTurnResult = nil
         activeNativeTurnCompletion = nil
+    }
+
+    private func scheduleAcceptedWorkspaceSessionRefresh(sessionID: String, connection: ConnectionProfile) {
+        let workspaceScopeFingerprint = connection.workspaceScopeFingerprint
+        Task { [weak self] in
+            for delay in [1_200_000_000, 5_000_000_000, 15_000_000_000, 30_000_000_000] as [UInt64] {
+                try? await Task.sleep(nanoseconds: delay)
+                await self?.refreshAcceptedWorkspaceSession(sessionID: sessionID, workspaceScopeFingerprint: workspaceScopeFingerprint)
+            }
+        }
+    }
+
+    private func refreshAcceptedWorkspaceSession(sessionID: String, workspaceScopeFingerprint: String) async {
+        guard let profile = activeConnection,
+              profile.workspaceScopeFingerprint == workspaceScopeFingerprint else { return }
+        if selectedSessionID == sessionID {
+            let loadedWorkspaceHistory = await hydrateWorkspaceSessionHistory(sessionID: sessionID, connection: profile)
+            if !loadedWorkspaceHistory {
+                await loadSessionDetail(sessionID: sessionID)
+            }
+        }
+        await loadSessions(
+            reset: true,
+            query: sessionSearchQuery,
+            preferredSessionID: sessionID,
+            allowsFallbackSelection: false,
+            updatesSelection: false
+        )
+    }
+
+    private func upsertAcceptedWorkspaceSessionSummary(sessionID: String, prompt: String, messageCount: Int) {
+        let now = SessionTimestamp.unixSeconds(Date().timeIntervalSince1970)
+        let title = String(prompt.prefix(80))
+        let summary = SessionSummary(
+            id: sessionID,
+            title: title,
+            model: nil,
+            startedAt: now,
+            lastActive: now,
+            messageCount: messageCount,
+            preview: prompt
+        )
+        if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+            sessions[index] = summary
+        } else {
+            sessions.insert(summary, at: 0)
+            totalSessionsCount = max(totalSessionsCount, sessions.count)
+        }
+    }
+
+    private func hydrateWorkspaceSessionHistory(sessionID: String, connection: ConnectionProfile) async -> Bool {
+        do {
+            let response = try await caelWorkspaceAPIService.loadWorkspaceSessionHistory(
+                connection: connection,
+                sessionKey: sessionID
+            )
+            guard isActiveWorkspace(connection), selectedSessionID == sessionID else { return false }
+            guard !response.messages.isEmpty else { return false }
+            await setSessionMessages(response.messages, for: connection, sessionID: sessionID)
+            if let last = response.messages.last {
+                upsertAcceptedWorkspaceSessionSummary(
+                    sessionID: sessionID,
+                    prompt: last.content ?? sessionID,
+                    messageCount: response.messages.count
+                )
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func waitForActiveNativeTurnCompletion() async -> Bool {

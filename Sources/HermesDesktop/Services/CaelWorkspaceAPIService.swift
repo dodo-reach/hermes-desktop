@@ -141,6 +141,75 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         )
     }
 
+
+    func createWorkspaceChatSession(connection: ConnectionProfile, label: String? = nil, model: String? = nil) async throws -> WorkspaceSessionCreateResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/sessions",
+            body: WorkspaceSessionCreateRequest(
+                label: label?.nilIfBlank,
+                model: model?.nilIfBlank
+            ),
+            responseType: WorkspaceSessionCreateResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not create a chat session.")
+        }
+        guard response.sessionKey?.isEmpty == false || response.friendlyId?.isEmpty == false else {
+            throw SSHTransportError.invalidResponse("Workspace API did not return a session key for the new chat session.")
+        }
+        return response
+    }
+
+    @discardableResult
+    func sendWorkspaceSessionMessage(
+        connection: ConnectionProfile,
+        sessionKey: String,
+        message: String,
+        autoApproveCommands: Bool
+    ) async throws -> WorkspaceSessionSendResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/session-send",
+            body: WorkspaceSessionSendRequest(
+                sessionKey: sessionKey,
+                message: message,
+                serverSide: true,
+                autoApproveCommands: autoApproveCommands,
+                idempotencyKey: UUID().uuidString
+            ),
+            responseType: WorkspaceSessionSendResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API did not accept the chat message.")
+        }
+        return response
+    }
+
+    func loadWorkspaceSessionHistory(
+        connection: ConnectionProfile,
+        sessionKey: String,
+        limit: Int = 200
+    ) async throws -> WorkspaceSessionHistoryResponse {
+        let path = apiPath(
+            "/api/session-history",
+            queryItems: [
+                URLQueryItem(name: "key", value: sessionKey),
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "includeTools", value: "true")
+            ]
+        )
+        let response = try await loadJSON(
+            connection: connection,
+            path: path,
+            responseType: WorkspaceSessionHistoryResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not load chat history.")
+        }
+        return response
+    }
+
     @discardableResult
     func deleteProfile(connection: ConnectionProfile, name: String) async throws -> CaelProfileMutationResponse {
         try await postJSON(
@@ -1004,6 +1073,20 @@ private struct CaelProfileDescriptionPatch: Encodable {
 private struct CaelProfileDescriptionUpdateRequest: Encodable {
     let name: String
     let patch: CaelProfileDescriptionPatch
+}
+
+
+private struct WorkspaceSessionCreateRequest: Encodable {
+    let label: String?
+    let model: String?
+}
+
+private struct WorkspaceSessionSendRequest: Encodable {
+    let sessionKey: String
+    let message: String
+    let serverSide: Bool
+    let autoApproveCommands: Bool
+    let idempotencyKey: String
 }
 
 private struct KnowledgeFabricSearchRequest: Encodable {
