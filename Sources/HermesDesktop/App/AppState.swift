@@ -725,9 +725,9 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            let snapshot = try await fileEditorService.read(
-                remotePath: reference.remotePath,
-                connection: profile
+            let snapshot = try await caelWorkspaceAPIService.readWorkspaceFile(
+                connection: profile,
+                path: reference.remotePath
             )
             guard isActiveWorkspace(profile) else { return }
             document.content = snapshot.content
@@ -766,11 +766,11 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            let saveResult = try await fileEditorService.write(
-                remotePath: reference.remotePath,
+            let saveResult = try await caelWorkspaceAPIService.writeWorkspaceFile(
+                connection: profile,
+                path: reference.remotePath,
                 content: document.content,
-                expectedContentHash: document.remoteContentHash,
-                connection: profile
+                expectedContentHash: document.remoteContentHash
             )
             guard isActiveWorkspace(profile) else { return }
             document.originalContent = document.content
@@ -886,10 +886,11 @@ final class AppState: ObservableObject {
         workspaceFileBrowserError = nil
 
         do {
-            let listing = try await fileEditorService.listDirectory(
-                remotePath: browsePath,
-                hermesHome: overview?.hermesHome ?? profile.remoteHermesHomePath,
-                connection: profile
+            let listing = try await caelWorkspaceAPIService.listWorkspaceFiles(
+                connection: profile,
+                path: browsePath,
+                maxDepth: 0,
+                maxEntries: 500
             )
             guard isActiveWorkspace(profile) else { return }
             workspaceFileBrowserListing = listing

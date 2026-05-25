@@ -164,6 +164,79 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         )
     }
 
+    func listWorkspaceFiles(
+        connection: ConnectionProfile,
+        path filePath: String,
+        maxDepth: Int = 0,
+        maxEntries: Int = 500
+    ) async throws -> RemoteDirectoryListing {
+        let response = try await loadJSON(
+            connection: connection,
+            path: filesAPIPath(action: "list", path: filePath, maxDepth: maxDepth, maxEntries: maxEntries),
+            responseType: CaelWorkspaceFilesListResponse.self
+        )
+        return response.remoteDirectoryListing(requestedPath: filePath)
+    }
+
+    func readWorkspaceFile(connection: ConnectionProfile, path filePath: String) async throws -> FileSnapshot {
+        let response = try await loadJSON(
+            connection: connection,
+            path: filesAPIPath(action: "read", path: filePath),
+            responseType: CaelWorkspaceFileReadResponse.self
+        )
+        guard response.type == "text" else {
+            throw SSHTransportError.invalidResponse("Workspace API returned a non-text file. Open images and binary artifacts from the web fallback for now.")
+        }
+        guard let contentHash = response.contentHash, !contentHash.isEmpty else {
+            throw SSHTransportError.invalidResponse("Workspace API did not return a content hash for \(filePath).")
+        }
+        return FileSnapshot(content: response.content, contentHash: contentHash)
+    }
+
+    @discardableResult
+    func writeWorkspaceFile(
+        connection: ConnectionProfile,
+        path filePath: String,
+        content: String,
+        expectedContentHash: String?
+    ) async throws -> FileSaveResult {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/files",
+            body: CaelWorkspaceFileWriteRequest(
+                action: "write",
+                path: filePath,
+                content: content,
+                expectedContentHash: expectedContentHash
+            ),
+            responseType: CaelWorkspaceFileWriteResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not save \(filePath).")
+        }
+        guard let contentHash = response.contentHash, !contentHash.isEmpty else {
+            throw SSHTransportError.invalidResponse("Workspace API did not return a saved content hash for \(filePath).")
+        }
+        return FileSaveResult(path: response.path ?? filePath, contentHash: contentHash)
+    }
+
+    private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
+        var components = URLComponents()
+        components.path = "/api/files"
+        var queryItems = [
+            URLQueryItem(name: "action", value: action),
+            URLQueryItem(name: "path", value: filePath)
+        ]
+        if let maxDepth {
+            queryItems.append(URLQueryItem(name: "maxDepth", value: String(maxDepth)))
+        }
+        if let maxEntries {
+            queryItems.append(URLQueryItem(name: "maxEntries", value: String(maxEntries)))
+        }
+        components.queryItems = queryItems
+        return components.string ?? "/api/files"
+    }
+
     private func loadJSON<Response: Decodable>(
         connection: ConnectionProfile,
         path: String,
@@ -323,9 +396,113 @@ private struct CaelProfileDescriptionUpdateRequest: Encodable {
     let patch: CaelProfileDescriptionPatch
 }
 
+private struct CaelWorkspaceFilesListResponse: Decodable {
+    let root: String?
+    let base: String?
+    let entries: [CaelWorkspaceFileEntry]
+
+    func remoteDirectoryListing(requestedPath: String) -> RemoteDirectoryListing {
+        let resolvedPath = Self.absolutePath(base: base, path: root ?? requestedPath)
+        let parent = Self.parentPath(for: resolvedPath, base: base)
+        let mappedEntries = entries.map { $0.remoteDirectoryEntry(base: base) }
+
+        return RemoteDirectoryListing(
+            requestedPath: requestedPath,
+            resolvedPath: resolvedPath,
+            displayPath: resolvedPath,
+            parentPath: parent,
+            parentDisplayPath: parent,
+            entries: mappedEntries,
+            totalEntryCount: mappedEntries.count,
+            isTruncated: false
+        )
+    }
+
+    static func absolutePath(base: String?, path candidate: String) -> String {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~") {
+            return trimmed
+        }
+        guard let base = base?.trimmingCharacters(in: .whitespacesAndNewlines), !base.isEmpty else {
+            return trimmed.isEmpty ? "." : trimmed
+        }
+        let normalizedBase = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard !trimmed.isEmpty else { return normalizedBase }
+        return "\(normalizedBase)/\(trimmed)"
+    }
+
+    static func parentPath(for resolvedPath: String, base: String?) -> String? {
+        let normalizedBase = base?.trimmingCharacters(in: .whitespacesAndNewlines).trimmingTrailingSlash
+        let normalizedPath = resolvedPath.trimmingTrailingSlash
+        if let normalizedBase, normalizedPath == normalizedBase {
+            return nil
+        }
+        let parent = (normalizedPath as NSString).deletingLastPathComponent
+        guard !parent.isEmpty, parent != normalizedPath else { return nil }
+        return parent
+    }
+}
+
+private struct CaelWorkspaceFileEntry: Decodable {
+    let name: String
+    let path: String
+    let type: String
+    let size: Int64?
+    let modifiedAt: String?
+
+    func remoteDirectoryEntry(base: String?) -> RemoteDirectoryEntry {
+        let absolutePath = CaelWorkspaceFilesListResponse.absolutePath(base: base, path: path)
+        return RemoteDirectoryEntry(
+            name: name,
+            path: absolutePath,
+            displayPath: absolutePath,
+            kind: type == "folder" ? .directory : .file,
+            size: size,
+            modifiedAt: Self.modifiedTimestamp(from: modifiedAt),
+            isReadable: true,
+            isWritable: true,
+            isSymlink: false
+        )
+    }
+
+    private static func modifiedTimestamp(from value: String?) -> Double? {
+        guard let value else { return nil }
+        return ISO8601DateFormatter().date(from: value)?.timeIntervalSince1970
+    }
+}
+
+private struct CaelWorkspaceFileReadResponse: Decodable {
+    let type: String
+    let path: String?
+    let content: String
+    let contentHash: String?
+}
+
+private struct CaelWorkspaceFileWriteRequest: Encodable {
+    let action: String
+    let path: String
+    let content: String
+    let expectedContentHash: String?
+}
+
+private struct CaelWorkspaceFileWriteResponse: Decodable {
+    let ok: Bool
+    let path: String?
+    let contentHash: String?
+    let error: String?
+}
+
 private extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var trimmingTrailingSlash: String {
+        var result = self
+        while result.count > 1, result.hasSuffix("/") {
+            result.removeLast()
+        }
+        return result
     }
 }
