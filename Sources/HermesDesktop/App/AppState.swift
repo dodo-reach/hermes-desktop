@@ -144,6 +144,7 @@ final class AppState: ObservableObject {
     private var gatewayWorkspaceScopeFingerprint: String?
     private var gatewaySessionID: String?
     private var activeGatewayAssistantMessageID: String?
+    private var hasAcceptedNativeTurnInFlight = false
     private var activeNativeTurnResult: Bool?
     private var activeNativeTurnCompletion: CheckedContinuation<Bool, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -1515,89 +1516,23 @@ final class AppState: ObservableObject {
             )
             applyGatewaySessionResult(submitResult, preferredSessionID: resolvedSessionID)
 
-            let didComplete = await waitForActiveNativeTurnCompletion()
-            guard isActiveWorkspace(profile) else { return false }
-
-            if didComplete {
-                stopSessionTranscriptPolling()
-                isSendingSessionMessage = false
-                pendingSessionTurn = nil
-                let sourceSessionID = sessionID ?? resolvedSessionID
-                var hydratedSessionIDs = Set<String>()
-
-                let provisionalSessionID = gatewaySessionID ?? sourceSessionID
-                if await hydrateSessionHistoryFromGateway(
-                    sessionID: provisionalSessionID,
-                    using: gatewayChatService,
-                    profile: profile,
-                    updatesSelection: provisionalSessionID == sourceSessionID
-                ) {
-                    if provisionalSessionID == sourceSessionID {
-                        hydratedSessionIDs.insert(provisionalSessionID)
-                    }
-                }
-
-                let refreshQuery = sessionID == nil ? "" : sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                sessionSearchQuery = refreshQuery
-                await loadSessions(
-                    reset: true,
-                    query: refreshQuery,
-                    allowsFallbackSelection: false,
-                    updatesSelection: false
-                )
-
-                let confirmedCompactionNotice = await confirmSessionCompaction(
-                    from: sourceSessionID,
-                    preferredTargetSessionID: gatewaySessionID,
-                    profile: profile
-                )
-                let resolvedCompactedSessionID = confirmedCompactionNotice?.targetSessionID
-                if let confirmedCompactionNotice {
-                    registerSessionCompaction(confirmedCompactionNotice)
-                }
-
-                let canonicalSessionID = resolvedCompletedNativeTurnSessionID(
-                    sourceSessionID: sourceSessionID,
-                    prompt: prompt,
-                    excluding: existingVisibleSessionIDs,
-                    compactedSessionID: resolvedCompactedSessionID
-                )
-
-                if let canonicalSessionID {
-                    let didHydrateCanonicalSession: Bool
-                    if hydratedSessionIDs.contains(canonicalSessionID) {
-                        didHydrateCanonicalSession = true
-                    } else {
-                        didHydrateCanonicalSession = await hydrateSessionHistoryFromGateway(
-                            sessionID: canonicalSessionID,
-                            using: gatewayChatService,
-                            profile: profile
-                        )
-                    }
-
-                    if !didHydrateCanonicalSession &&
-                        (
-                            resolvedCompactedSessionID != nil ||
-                            selectedSessionID != canonicalSessionID ||
-                            sessionMessageDisplays.isEmpty
-                        ) {
-                        await loadSessionDetail(sessionID: canonicalSessionID)
-                    }
-                } else if hydratedSessionIDs.isEmpty {
-                    clearNativeTurnUIState()
-                }
-                return true
-            }
-
             isSendingSessionMessage = false
             pendingSessionTurn = nil
-            clearNativeTurnUIState()
-            let message = sessionConversationError ?? "Native chat did not complete successfully."
-            sessionConversationError = message
-            setStatusMessage(sessionStatusMessage(forConversationError: message, fallback: "Unable to send prompt to Hermes"))
-            return false
+            hasAcceptedNativeTurnInFlight = true
+            Task {
+                await finishAcceptedNativeSessionTurn(
+                    profile: profile,
+                    sessionID: sessionID,
+                    resolvedSessionID: resolvedSessionID,
+                    prompt: prompt,
+                    existingVisibleSessionIDs: existingVisibleSessionIDs,
+                    gatewayChatService: gatewayChatService
+                )
+            }
+            return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
+            hasAcceptedNativeTurnInFlight = false
             isSendingSessionMessage = false
             pendingSessionTurn = nil
             clearNativeTurnUIState()
@@ -1607,6 +1542,97 @@ final class AppState: ObservableObject {
             completeActiveNativeTurn(success: false)
             return false
         }
+    }
+
+    private func finishAcceptedNativeSessionTurn(
+        profile: ConnectionProfile,
+        sessionID: String?,
+        resolvedSessionID: String,
+        prompt: String,
+        existingVisibleSessionIDs: Set<String>,
+        gatewayChatService: HermesGatewayChatService
+    ) async {
+        let didComplete = await waitForActiveNativeTurnCompletion()
+        hasAcceptedNativeTurnInFlight = false
+        guard isActiveWorkspace(profile) else { return }
+
+        if didComplete {
+            stopSessionTranscriptPolling()
+            isSendingSessionMessage = false
+            pendingSessionTurn = nil
+            let sourceSessionID = sessionID ?? resolvedSessionID
+            var hydratedSessionIDs = Set<String>()
+
+            let provisionalSessionID = gatewaySessionID ?? sourceSessionID
+            if await hydrateSessionHistoryFromGateway(
+                sessionID: provisionalSessionID,
+                using: gatewayChatService,
+                profile: profile,
+                updatesSelection: provisionalSessionID == sourceSessionID
+            ) {
+                if provisionalSessionID == sourceSessionID {
+                    hydratedSessionIDs.insert(provisionalSessionID)
+                }
+            }
+
+            let refreshQuery = sessionID == nil ? "" : sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            sessionSearchQuery = refreshQuery
+            await loadSessions(
+                reset: true,
+                query: refreshQuery,
+                allowsFallbackSelection: false,
+                updatesSelection: false
+            )
+
+            let confirmedCompactionNotice = await confirmSessionCompaction(
+                from: sourceSessionID,
+                preferredTargetSessionID: gatewaySessionID,
+                profile: profile
+            )
+            let resolvedCompactedSessionID = confirmedCompactionNotice?.targetSessionID
+            if let confirmedCompactionNotice {
+                registerSessionCompaction(confirmedCompactionNotice)
+            }
+
+            let canonicalSessionID = resolvedCompletedNativeTurnSessionID(
+                sourceSessionID: sourceSessionID,
+                prompt: prompt,
+                excluding: existingVisibleSessionIDs,
+                compactedSessionID: resolvedCompactedSessionID
+            )
+
+            if let canonicalSessionID {
+                let didHydrateCanonicalSession: Bool
+                if hydratedSessionIDs.contains(canonicalSessionID) {
+                    didHydrateCanonicalSession = true
+                } else {
+                    didHydrateCanonicalSession = await hydrateSessionHistoryFromGateway(
+                        sessionID: canonicalSessionID,
+                        using: gatewayChatService,
+                        profile: profile
+                    )
+                }
+
+                if !didHydrateCanonicalSession &&
+                    (
+                        resolvedCompactedSessionID != nil ||
+                        selectedSessionID != canonicalSessionID ||
+                        sessionMessageDisplays.isEmpty
+                    ) {
+                    await loadSessionDetail(sessionID: canonicalSessionID)
+                }
+            } else if hydratedSessionIDs.isEmpty {
+                clearNativeTurnUIState()
+            }
+            return
+        }
+
+        isSendingSessionMessage = false
+        pendingSessionTurn = nil
+        clearNativeTurnUIState()
+        let message = sessionConversationError ?? "Native chat did not complete successfully."
+        sessionConversationError = message
+        setStatusMessage(sessionStatusMessage(forConversationError: message, fallback: "Unable to send prompt to Hermes"))
     }
 
     func deleteSession(_ session: SessionSummary) async {
@@ -3280,6 +3306,7 @@ final class AppState: ObservableObject {
         gatewaySessionID = nil
         activeGatewayAssistantMessageID = nil
         clearNativeTurnUIState()
+        hasAcceptedNativeTurnInFlight = false
         completeActiveNativeTurn(success: false)
         activeNativeTurnResult = nil
         activeNativeTurnCompletion = nil
@@ -3329,6 +3356,7 @@ final class AppState: ObservableObject {
     }
 
     private func prepareActiveNativeTurnWait() {
+        hasAcceptedNativeTurnInFlight = false
         activeNativeTurnResult = nil
         activeNativeTurnCompletion = nil
     }
@@ -3393,13 +3421,13 @@ final class AppState: ObservableObject {
             upsertPromptCard(kind: .secret, payload: event.payload, fallbackSessionID: event.sessionID)
         case "error":
             let message = gatewayValue(in: event.payload, keys: ["message", "error"]) ?? "Unknown gateway error"
-            if isSendingSessionMessage {
+            if isSendingSessionMessage || hasAcceptedNativeTurnInFlight {
                 appendLiveSystemMessage(message)
             }
             sessionConversationError = message
             completeActiveNativeTurn(success: false)
         case "gateway.closed":
-            if isSendingSessionMessage {
+            if isSendingSessionMessage || hasAcceptedNativeTurnInFlight {
                 let message = gatewayValue(in: event.payload, keys: ["error"]) ?? "Native chat disconnected."
                 appendLiveSystemMessage(message)
                 sessionConversationError = message
@@ -3808,6 +3836,7 @@ final class AppState: ObservableObject {
             isSendingSessionMessage = false
             sessionConversationError = nil
             pendingSessionTurn = nil
+            hasAcceptedNativeTurnInFlight = false
             sessionCompactionNotice = nil
             selectedSessionDetailMode = .transcript
             stopSessionTUI()
@@ -3916,6 +3945,7 @@ final class AppState: ObservableObject {
         isSendingSessionMessage = false
         sessionConversationError = nil
         pendingSessionTurn = nil
+        hasAcceptedNativeTurnInFlight = false
         sessionCompactionNotice = nil
         selectedSessionDetailMode = .transcript
         stopSessionTUI()
