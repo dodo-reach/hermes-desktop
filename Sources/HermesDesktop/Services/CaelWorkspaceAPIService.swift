@@ -86,6 +86,67 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return try await loadJSON(connection: connection, path: path, responseType: CaelProviderUsageLimits.self)
     }
 
+    func loadWorkspaceSkills(
+        connection: ConnectionProfile,
+        tab: String = "installed",
+        search: String = "",
+        limit: Int = 30
+    ) async throws -> WorkspaceSkillCatalogResponse {
+        let path = apiPath(
+            "/api/skills",
+            queryItems: [
+                URLQueryItem(name: "tab", value: tab),
+                URLQueryItem(name: "search", value: search),
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "sort", value: "name")
+            ]
+        )
+        return try await loadJSON(connection: connection, path: path, responseType: WorkspaceSkillCatalogResponse.self)
+    }
+
+    func searchWorkspaceSkillsHub(
+        connection: ConnectionProfile,
+        query: String,
+        limit: Int = 20
+    ) async throws -> WorkspaceSkillHubSearchResponse {
+        let path = apiPath(
+            "/api/skills/hub-search",
+            queryItems: [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "source", value: "all"),
+                URLQueryItem(name: "limit", value: String(limit))
+            ]
+        )
+        return try await loadJSON(connection: connection, path: path, responseType: WorkspaceSkillHubSearchResponse.self)
+    }
+
+    @discardableResult
+    func runWorkspaceSkillAction(
+        connection: ConnectionProfile,
+        action: String,
+        identifier: String,
+        enabled: Bool? = nil,
+        category: String? = nil
+    ) async throws -> WorkspaceSkillActionResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/skills",
+            body: WorkspaceSkillActionRequest(
+                action: action,
+                identifier: identifier,
+                name: identifier,
+                category: category?.nilIfBlank,
+                force: false,
+                enabled: enabled
+            ),
+            responseType: WorkspaceSkillActionResponse.self
+        )
+        if let ok = response.ok, ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace skills action failed.")
+        }
+        return response
+    }
+
     func loadProfiles(connection: ConnectionProfile) async throws -> CaelProfilesListResponse {
         try await loadJSON(connection: connection, path: "/api/profiles/list", responseType: CaelProfilesListResponse.self)
     }
@@ -1064,6 +1125,15 @@ private struct CaelWorkspaceAPIRequest: Encodable {
     let hermesHome: String
     let method: String
     let body: String?
+}
+
+private struct WorkspaceSkillActionRequest: Encodable {
+    let action: String
+    let identifier: String
+    let name: String
+    let category: String?
+    let force: Bool
+    let enabled: Bool?
 }
 
 private struct CaelProfileNameRequest: Encodable {

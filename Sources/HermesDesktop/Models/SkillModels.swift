@@ -12,6 +12,148 @@ struct SkillDetailResponse: Codable {
 
 typealias SkillWriteResponse = SkillDetailResponse
 
+struct WorkspaceSkillCatalogResponse: Codable {
+    let skills: [WorkspaceSkillItem]
+    let total: Int?
+    let page: Int?
+    let categories: [String]?
+    let error: String?
+}
+
+struct WorkspaceSkillHubSearchResponse: Codable {
+    let ok: Bool?
+    let results: [WorkspaceSkillHubItem]
+    let source: String?
+    let total: Int?
+    let warning: String?
+    let error: String?
+}
+
+struct WorkspaceSkillActionResponse: Codable {
+    let ok: Bool?
+    let error: String?
+    let command: String?
+    let message: String?
+}
+
+struct WorkspaceSkillSecurity: Codable, Hashable {
+    let level: String?
+    let flags: [String]?
+    let score: Int?
+}
+
+struct WorkspaceSkillItem: Codable, Identifiable, Hashable {
+    let id: String
+    let slug: String?
+    let name: String?
+    let description: String?
+    let author: String?
+    let triggers: [String]?
+    let tags: [String]?
+    let homepage: String?
+    let category: String?
+    let icon: String?
+    let content: String?
+    let fileCount: Int?
+    let sourcePath: String?
+    let installed: Bool?
+    let enabled: Bool?
+    let builtin: Bool?
+    let featuredGroup: String?
+    let security: WorkspaceSkillSecurity?
+    let origin: String?
+
+    var resolvedName: String {
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedName.isEmpty { return trimmedName }
+        let trimmedSlug = slug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedSlug.isEmpty { return trimmedSlug }
+        return id
+    }
+
+    var resolvedSlug: String {
+        let trimmedSlug = slug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedSlug.isEmpty ? id : trimmedSlug
+    }
+
+    var resolvedDescription: String? {
+        let trimmed = description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var resolvedCategory: String {
+        let trimmed = category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Uncategorized" : trimmed
+    }
+
+    var resolvedOrigin: String {
+        let trimmed = origin?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "workspace" : trimmed
+    }
+
+    var isInstalled: Bool { installed ?? false }
+    var isEnabled: Bool { enabled ?? false }
+    var isBuiltin: Bool { builtin ?? false }
+}
+
+struct WorkspaceSkillHubItem: Codable, Hashable {
+    let id: String?
+    let name: String?
+    let description: String?
+    let source: String?
+    let identifier: String?
+    let trustLevel: String?
+    let repo: String?
+    let path: String?
+    let tags: [String]?
+    let installed: Bool?
+    let author: String?
+    let homepage: String?
+    let category: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case description
+        case source
+        case identifier
+        case trustLevel = "trust_level"
+        case repo
+        case path
+        case tags
+        case installed
+        case author
+        case homepage
+        case category
+    }
+
+    var resolvedIdentifier: String {
+        let candidates = [identifier, id, name]
+        for candidate in candidates {
+            let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return "skill"
+    }
+
+    var resolvedName: String {
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedName.isEmpty ? resolvedIdentifier : trimmedName
+    }
+
+    var resolvedDescription: String? {
+        let trimmed = description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var resolvedSource: String {
+        let trimmed = source?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "hub" : trimmed
+    }
+
+    var isInstalled: Bool { installed ?? false }
+}
+
 struct SkillLocator: Codable, Hashable {
     let sourceID: String
     let relativePath: String
