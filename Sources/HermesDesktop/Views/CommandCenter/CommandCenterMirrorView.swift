@@ -175,6 +175,7 @@ struct CommandCenterMirrorView: View {
 
     private var mcpSection: some View {
         VStack(alignment: .leading, spacing: 16) {
+            NativeMCPPanel()
             brainSourcesPanel
             vaultRefsPanel
         }
@@ -578,6 +579,156 @@ private struct NativeKnowledgeFabricPanel: View {
     }
 }
 
+
+
+private struct NativeMCPPanel: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var search = ""
+    @State private var category = "All"
+    @State private var response: WorkspaceMCPListResponse?
+    @State private var testResults: [String: WorkspaceMCPTestResponse] = [:]
+    @State private var statusMessage: String?
+    @State private var isLoading = false
+    @State private var testingServer: String?
+
+    private var servers: [WorkspaceMCPServer] {
+        response?.servers ?? []
+    }
+
+    private var categories: [String] {
+        let values = response?.categories ?? ["All", "Connected", "Failed", "Disabled"]
+        return values.isEmpty ? ["All"] : values
+    }
+
+    var body: some View {
+        HermesSurfacePanel(
+            title: "MCP Servers",
+            subtitle: "Native MCP list and probe surface backed by the shared :3077 /api/mcp contract."
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 12) {
+                    TextField("Search MCP servers", text: $search)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            Task { await loadServers() }
+                        }
+                    Picker("Category", selection: $category) {
+                        ForEach(categories, id: \.self) { value in
+                            Text(value).tag(value)
+                        }
+                    }
+                    .frame(maxWidth: 180)
+                    Button("Refresh") {
+                        Task { await loadServers() }
+                    }
+                    .disabled(isLoading)
+                }
+
+                if isLoading {
+                    ProgressView("Loading MCP servers...")
+                        .controlSize(.small)
+                }
+
+                if let statusMessage {
+                    MirrorRow(title: "Status", detail: statusMessage, tint: statusMessage.lowercased().contains("error") ? .orange : .blue)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 12, alignment: .top)], spacing: 12) {
+                    ForEach(servers) { server in
+                        serverCard(server)
+                    }
+                }
+
+                if response != nil && servers.isEmpty {
+                    Text("No MCP servers matched the current filter.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: appState.activeConnectionID) {
+            await loadServers()
+        }
+    }
+
+    private func serverCard(_ server: WorkspaceMCPServer) -> some View {
+        MirrorListCard(title: server.name, emptyText: "No MCP server detail reported.") {
+            MirrorRow(
+                title: server.status,
+                detail: serverDetail(server),
+                badge: server.enabled ? "Enabled" : "Disabled",
+                tint: tint(server.status)
+            )
+            MirrorRow(title: "Tools", detail: "\(server.discoveredToolsCount) discovered", badge: server.transportType, tint: .blue)
+            if let result = testResults[server.name] {
+                MirrorRow(
+                    title: "Last test: \(result.status)",
+                    detail: testDetail(result),
+                    badge: "\(result.discoveredTools.count) tools",
+                    tint: result.ok ? .green : .orange
+                )
+            }
+            Button(testingServer == server.name ? "Testing..." : "Test") {
+                Task { await testServer(server.name) }
+            }
+            .disabled(testingServer != nil || !server.enabled)
+        }
+    }
+
+    private func loadServers() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            response = try await appState.caelWorkspaceAPIService.listMCPServers(
+                connection: connection,
+                search: search,
+                category: category
+            )
+            statusMessage = "Loaded \(response?.total ?? servers.count) MCP servers."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func testServer(_ name: String) async {
+        guard let connection = appState.activeConnection else { return }
+        testingServer = name
+        defer { testingServer = nil }
+        do {
+            let result = try await appState.caelWorkspaceAPIService.testMCPServer(connection: connection, name: name)
+            testResults[name] = result
+            statusMessage = "Tested \(name): \(result.status)."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func serverDetail(_ server: WorkspaceMCPServer) -> String {
+        let target = server.url ?? [server.command, server.args.joined(separator: " ")].compactMap { $0 }.joined(separator: " ")
+        if let lastError = server.lastError, !lastError.isEmpty {
+            return "\(target)\n\(lastError)"
+        }
+        return target.isEmpty ? "No target reported." : target
+    }
+
+    private func testDetail(_ result: WorkspaceMCPTestResponse) -> String {
+        if let error = result.error, !error.isEmpty { return error }
+        let tools = result.discoveredTools.prefix(6).map(\.name).joined(separator: ", ")
+        if !tools.isEmpty { return tools }
+        if let latency = result.latencyMs { return "\(Int(latency)) ms" }
+        return "No tools reported."
+    }
+
+    private func tint(_ status: String) -> Color {
+        switch status.lowercased() {
+        case "connected": return .green
+        case "failed": return .orange
+        default: return .secondary
+        }
+    }
+}
 
 private struct NativeMemoryKnowledgeFilesPanel: View {
     @EnvironmentObject private var appState: AppState

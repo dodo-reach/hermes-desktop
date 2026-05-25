@@ -919,6 +919,47 @@ struct WorkspaceSecondBrainWriteResponse: Decodable {
     let error: String?
 }
 
+
+struct WorkspaceMCPListResponse: Decodable {
+    let servers: [WorkspaceMCPServer]
+    let total: Int
+    let categories: [String]?
+    let ok: Bool?
+    let error: String?
+}
+
+struct WorkspaceMCPServer: Decodable, Identifiable {
+    var id: String { name }
+    let name: String
+    let enabled: Bool
+    let transportType: String
+    let url: String?
+    let command: String?
+    let args: [String]
+    let authType: String
+    let toolMode: String
+    let includeTools: [String]
+    let excludeTools: [String]
+    let discoveredToolsCount: Int
+    let status: String
+    let lastError: String?
+    let source: String
+}
+
+struct WorkspaceMCPTestResponse: Decodable {
+    let ok: Bool
+    let status: String
+    let latencyMs: Double?
+    let discoveredTools: [WorkspaceMCPTool]
+    let error: String?
+}
+
+struct WorkspaceMCPTool: Decodable, Identifiable {
+    var id: String { name }
+    let name: String
+    let description: String?
+}
+
 private extension String {
     var nilIfBlank: String? {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self

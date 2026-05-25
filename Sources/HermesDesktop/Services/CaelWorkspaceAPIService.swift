@@ -733,6 +733,32 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return components.string ?? path
     }
 
+
+    func listMCPServers(connection: ConnectionProfile, search: String = "", category: String = "All") async throws -> WorkspaceMCPListResponse {
+        var queryItems: [URLQueryItem] = []
+        if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            queryItems.append(URLQueryItem(name: "search", value: search))
+        }
+        if category != "All" {
+            queryItems.append(URLQueryItem(name: "category", value: category))
+        }
+        let path = queryItems.isEmpty ? "/api/mcp" : apiPath("/api/mcp", queryItems: queryItems)
+        return try await loadJSON(connection: connection, path: path, responseType: WorkspaceMCPListResponse.self)
+    }
+
+    func testMCPServer(connection: ConnectionProfile, name: String) async throws -> WorkspaceMCPTestResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/mcp/test",
+            body: WorkspaceMCPTestRequest(name: name),
+            responseType: WorkspaceMCPTestResponse.self
+        )
+        guard response.ok || !response.status.isEmpty else {
+            throw SSHTransportError.invalidResponse(response.error ?? "MCP test failed.")
+        }
+        return response
+    }
+
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
         var components = URLComponents()
         components.path = "/api/files"
@@ -993,6 +1019,11 @@ private struct KnowledgeFabricDocumentRequest: Encodable {
     let memoryScope: String
 }
 
+
+
+private struct WorkspaceMCPTestRequest: Encodable {
+    let name: String
+}
 
 private struct WorkspaceSecondBrainWriteRequest: Encodable {
     let source: String
