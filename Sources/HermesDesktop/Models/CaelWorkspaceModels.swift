@@ -7,6 +7,7 @@ struct CaelWorkspaceStatus: Codable {
     let posture: CaelWorkspacePosture
     let services: [CaelWorkspaceServiceCheck]
     let links: [CaelWorkspaceLink]
+    let contextSurfaces: [CaelWorkspaceContextSurface]?
     let contract: CaelCommandCenterContract
 }
 
@@ -25,6 +26,9 @@ struct CaelWorkspaceServiceCheck: Codable, Identifiable {
     let ok: Bool
     let detail: String
     let latencyMs: Double?
+    let lane: String?
+    let owner: String?
+    let description: String?
 }
 
 struct CaelWorkspaceLink: Codable, Identifiable {
@@ -32,6 +36,15 @@ struct CaelWorkspaceLink: Codable, Identifiable {
     let label: String
     let href: String
     let description: String
+}
+
+struct CaelWorkspaceContextSurface: Codable, Identifiable {
+    var id: String { surface }
+    let surface: String
+    let owner: String
+    let context: String
+    let access: String
+    let boundary: String
 }
 
 struct CaelCommandCenterContract: Codable {
@@ -394,6 +407,29 @@ struct CaelCommandCenterAutomationFailure: Codable, Identifiable {
     let lastSeen: String
     let count: Int
     let instance: String
+}
+
+struct CaelN8nGovernanceStatus: Codable {
+    let ok: Bool
+    let generatedAt: String
+    let boundary: String
+    let instances: [CaelCommandCenterAutomationInstance]
+    let promotionReceipts: [CaelCommandCenterPromotionReceipt]
+    let safeWorkflowCommands: [CaelN8nSafeWorkflowCommand]
+    let guardrails: [String]
+}
+
+struct CaelN8nSafeWorkflowCommand: Codable, Identifiable {
+    let id: String
+    let label: String
+    let description: String
+    let owningInstance: String
+    let riskLevel: String
+    let approvalRequired: Bool
+    let dryRunSupported: Bool
+    let sideEffects: String
+    let rollback: String
+    let status: String
 }
 
 struct CaelCommandCenterBrainSection: Codable {

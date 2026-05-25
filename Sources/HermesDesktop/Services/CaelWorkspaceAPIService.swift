@@ -20,48 +20,48 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
     }
 
     func loadCommandCenterSections(connection: ConnectionProfile) async -> CaelCommandCenterSectionsSnapshot {
-        let actionGates: CaelCommandCenterSectionEnvelope<CaelCommandCenterActionGatesSection>? = try? await loadJSON(
+        async let actionGates: CaelCommandCenterSectionEnvelope<CaelCommandCenterActionGatesSection>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/action-gates",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterActionGatesSection>.self
         )
-        let agentRuns: CaelCommandCenterSectionEnvelope<CaelCommandCenterAgentRunsSection>? = try? await loadJSON(
+        async let agentRuns: CaelCommandCenterSectionEnvelope<CaelCommandCenterAgentRunsSection>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/agent-runs",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterAgentRunsSection>.self
         )
-        let automations: CaelCommandCenterSectionEnvelope<CaelCommandCenterAutomationSection>? = try? await loadJSON(
+        async let automations: CaelCommandCenterSectionEnvelope<CaelCommandCenterAutomationSection>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/automations",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterAutomationSection>.self
         )
-        let brain: CaelCommandCenterSectionEnvelope<CaelCommandCenterBrainSection>? = try? await loadJSON(
+        async let brain: CaelCommandCenterSectionEnvelope<CaelCommandCenterBrainSection>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/brain",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterBrainSection>.self
         )
-        let homebaseRecords: CaelCommandCenterSectionEnvelope<CaelCommandCenterHomebaseRecords>? = try? await loadJSON(
+        async let homebaseRecords: CaelCommandCenterSectionEnvelope<CaelCommandCenterHomebaseRecords>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/homebase-records",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterHomebaseRecords>.self
         )
-        let memoryArtifacts: CaelCommandCenterSectionEnvelope<CaelCommandCenterMemoryArtifactsSection>? = try? await loadJSON(
+        async let memoryArtifacts: CaelCommandCenterSectionEnvelope<CaelCommandCenterMemoryArtifactsSection>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/memory-artifacts",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterMemoryArtifactsSection>.self
         )
-        let usageLimits: CaelCommandCenterSectionEnvelope<CaelCommandCenterUsage>? = try? await loadJSON(
+        async let usageLimits: CaelCommandCenterSectionEnvelope<CaelCommandCenterUsage>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/usage-limits",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterUsage>.self
         )
-        let vaultRefs: CaelCommandCenterSectionEnvelope<CaelCommandCenterVaultRefsSection>? = try? await loadJSON(
+        async let vaultRefs: CaelCommandCenterSectionEnvelope<CaelCommandCenterVaultRefsSection>? = try? await loadJSON(
             connection: connection,
             path: "/api/command-center/vault-refs",
             responseType: CaelCommandCenterSectionEnvelope<CaelCommandCenterVaultRefsSection>.self
         )
 
-        return CaelCommandCenterSectionsSnapshot(
+        return await CaelCommandCenterSectionsSnapshot(
             actionGates: actionGates,
             agentRuns: agentRuns,
             automations: automations,
@@ -71,6 +71,10 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
             usageLimits: usageLimits,
             vaultRefs: vaultRefs
         )
+    }
+
+    func loadN8nGovernance(connection: ConnectionProfile) async throws -> CaelN8nGovernanceStatus {
+        try await loadJSON(connection: connection, path: "/api/cael-n8n-governance", responseType: CaelN8nGovernanceStatus.self)
     }
 
     func loadIntegrations(connection: ConnectionProfile) async throws -> CaelIntegrationStatus {

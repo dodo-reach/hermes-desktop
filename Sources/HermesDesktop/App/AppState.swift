@@ -50,6 +50,8 @@ final class AppState: ObservableObject {
     @Published var caelWorkspaceStatus: CaelWorkspaceStatus?
     @Published var caelIntegrationStatus: CaelIntegrationStatus?
     @Published var caelProviderUsageLimits: CaelProviderUsageLimits?
+    @Published var caelN8nGovernance: CaelN8nGovernanceStatus?
+    @Published var caelN8nGovernanceError: String?
     @Published var caelCommandCenterSummary: CaelCommandCenterSummary?
     @Published var caelCommandCenterSections: CaelCommandCenterSectionsSnapshot?
     @Published var caelCommandCenterWarnings: [String] = []
@@ -1685,6 +1687,7 @@ final class AppState: ObservableObject {
         if !forceRefresh,
            caelWorkspaceStatus != nil,
            caelIntegrationStatus != nil,
+           (caelN8nGovernance != nil || caelN8nGovernanceError != nil),
            caelCommandCenterSummary != nil,
            caelCommandCenterSections != nil {
             return
@@ -1703,12 +1706,23 @@ final class AppState: ObservableObject {
         do {
             let loadedStatus = try await caelWorkspaceAPIService.loadStatus(connection: profile)
             let loadedIntegrations = try await caelWorkspaceAPIService.loadIntegrations(connection: profile)
+            let loadedGovernance: CaelN8nGovernanceStatus?
+            let loadedGovernanceError: String?
+            do {
+                loadedGovernance = try await caelWorkspaceAPIService.loadN8nGovernance(connection: profile)
+                loadedGovernanceError = nil
+            } catch {
+                loadedGovernance = nil
+                loadedGovernanceError = error.localizedDescription
+            }
             let loadedCommandCenter = try? await caelWorkspaceAPIService.loadCommandCenterSummary(connection: profile)
             let loadedSections = await caelWorkspaceAPIService.loadCommandCenterSections(connection: profile)
             guard isActiveCaelWorkspace(profile) else { return }
 
             caelWorkspaceStatus = loadedStatus
             caelIntegrationStatus = loadedIntegrations
+            caelN8nGovernance = loadedGovernance
+            caelN8nGovernanceError = loadedGovernanceError
             caelCommandCenterSummary = loadedCommandCenter?.data
             caelCommandCenterSections = loadedSections
             caelCommandCenterWarnings = loadedCommandCenter?.warnings ?? []
@@ -3873,6 +3887,8 @@ final class AppState: ObservableObject {
         caelWorkspaceStatus = nil
         caelIntegrationStatus = nil
         caelProviderUsageLimits = nil
+        caelN8nGovernance = nil
+        caelN8nGovernanceError = nil
         caelCommandCenterSummary = nil
         caelCommandCenterSections = nil
         caelCommandCenterWarnings = []

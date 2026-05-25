@@ -79,14 +79,18 @@ struct CaelWorkspaceWebView: View {
 
             if let status = appState.caelWorkspaceStatus {
                 statusOverview(status)
-                systemsPanel(status)
+                privateAccessMeshPanel(status)
+                fastLanesPanel(status)
+                contextBoundariesPanel(status)
             }
+
+            n8nGovernancePanel(appState.caelN8nGovernance, error: appState.caelN8nGovernanceError)
 
             if let integrations = appState.caelIntegrationStatus {
                 integrationsPanel(integrations)
             }
 
-            nativeFeatureMap
+            nativeFeatureMap(appState.caelWorkspaceStatus?.links ?? [])
         }
     }
 
@@ -123,15 +127,129 @@ struct CaelWorkspaceWebView: View {
         }
     }
 
-    private func systemsPanel(_ status: CaelWorkspaceStatus) -> some View {
+    private func privateAccessMeshPanel(_ status: CaelWorkspaceStatus) -> some View {
         HermesSurfacePanel(
-            title: "Systems",
-            subtitle: "Native status cards sourced from the workspace readiness API."
+            title: "Private Access Mesh",
+            subtitle: "Same readiness surface as the web command center: Tailscale personal mesh, local APIs, and the Twingate business lane stay separate."
         ) {
             LazyVGrid(columns: adaptiveColumns(minWidth: 280), spacing: 12) {
                 ForEach(status.services) { service in
-                    CaelSystemCard(service: service)
+                    CaelAccessMeshCard(service: service)
                 }
+            }
+        }
+    }
+
+    private func fastLanesPanel(_ status: CaelWorkspaceStatus) -> some View {
+        HermesSurfacePanel(
+            title: "Fast Lanes",
+            subtitle: "Web workspace routes mapped to native Desktop sections when the section already exists."
+        ) {
+            LazyVGrid(columns: adaptiveColumns(minWidth: 230), spacing: 12) {
+                ForEach(status.links) { link in
+                    CaelFastLaneCard(
+                        link: link,
+                        section: nativeSection(for: link.href),
+                        url: workspaceURL(path: link.href)
+                    )
+                }
+            }
+        }
+    }
+
+    private func contextBoundariesPanel(_ status: CaelWorkspaceStatus) -> some View {
+        HermesSurfacePanel(
+            title: "Context Ownership and Boundaries",
+            subtitle: "Rendered from /api/cael-status contextSurfaces so Desktop and Web carry the same operating boundaries."
+        ) {
+            let surfaces = status.contextSurfaces ?? []
+            if surfaces.isEmpty {
+                Text("No context boundary records were returned by the workspace API.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                LazyVGrid(columns: adaptiveColumns(minWidth: 280), spacing: 12) {
+                    ForEach(surfaces) { surface in
+                        CaelContextBoundaryCard(surface: surface)
+                    }
+                }
+            }
+        }
+    }
+
+    private func n8nGovernancePanel(_ governance: CaelN8nGovernanceStatus?, error: String?) -> some View {
+        HermesSurfacePanel(
+            title: "n8n Governance",
+            subtitle: "Health, failures, receipts, and safe actions for the personal BigMac n8n and business dev-server n8n estates."
+        ) {
+            if let governance {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(governance.boundary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    LazyVGrid(columns: adaptiveColumns(minWidth: 320), spacing: 12) {
+                        ForEach(governance.instances) { instance in
+                            CaelN8nInstanceCard(instance: instance)
+                        }
+                    }
+
+                    LazyVGrid(columns: adaptiveColumns(minWidth: 300), spacing: 12) {
+                        CaelCommandCenterListCard(
+                            title: "Promotion Receipts",
+                            emptyText: "No local receipt artifacts found.",
+                            isEmpty: governance.promotionReceipts.isEmpty
+                        ) {
+                            ForEach(governance.promotionReceipts.prefix(5)) { receipt in
+                                CaelCommandCenterRow(
+                                    title: receipt.title,
+                                    detail: receipt.path,
+                                    badge: receipt.instance,
+                                    tint: .cyan
+                                )
+                            }
+                        }
+
+                        CaelCommandCenterListCard(
+                            title: "Safe Workflow Actions",
+                            emptyText: "No workflow commands are registered.",
+                            isEmpty: governance.safeWorkflowCommands.isEmpty
+                        ) {
+                            ForEach(governance.safeWorkflowCommands.prefix(5)) { command in
+                                CaelCommandCenterRow(
+                                    title: command.label,
+                                    detail: command.description,
+                                    badge: command.approvalRequired ? "Approval gated" : command.riskLevel,
+                                    tint: command.approvalRequired ? .orange : .green
+                                )
+                            }
+                        }
+                    }
+
+                    HermesInsetSurface {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Guardrails")
+                                .font(.headline)
+                            ForEach(governance.guardrails, id: \.self) { guardrail in
+                                Text("• \(guardrail)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+            } else if let error {
+                ContentUnavailableView(
+                    "n8n governance unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(error)
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                HermesLoadingState(label: "Loading n8n governance…", minHeight: 180)
             }
         }
     }
@@ -425,19 +543,46 @@ struct CaelWorkspaceWebView: View {
         }
     }
 
-    private var nativeFeatureMap: some View {
+    private func nativeFeatureMap(_ links: [CaelWorkspaceLink]) -> some View {
         HermesSurfacePanel(
             title: "Native Feature Map",
-            subtitle: "These web workspace lanes are being promoted into the desktop shell instead of duplicated inside an embedded browser."
+            subtitle: "Feature lanes from the web app are mapped to Desktop sections; unsupported lanes remain visible through the Fast Lanes fallback."
         ) {
             LazyVGrid(columns: adaptiveColumns(minWidth: 240), spacing: 12) {
-                CaelNativeFeatureCard(title: "Chat", detail: "Native Cael Sessions composer and resume flow.", section: .sessions)
-                CaelNativeFeatureCard(title: "Terminal", detail: "Native remote terminal tabs over SSH.", section: .terminal)
-                CaelNativeFeatureCard(title: "Artifacts", detail: "Native file browser and editor.", section: .files)
-                CaelNativeFeatureCard(title: "Watchdogs", detail: "Native scheduled job manager.", section: .cronjobs)
-                CaelNativeFeatureCard(title: "Tasks", detail: "Native Kanban task board.", section: .kanban)
-                CaelNativeFeatureCard(title: "Skills", detail: "Native skills browser and installer.", section: .skills)
+                ForEach(links.filter { nativeSection(for: $0.href) != nil }) { link in
+                    if let section = nativeSection(for: link.href) {
+                        CaelNativeFeatureCard(title: link.label, detail: link.description, section: section)
+                    }
+                }
             }
+        }
+    }
+
+    private func workspaceURL(path: String) -> URL {
+        appState.activeConnection?.caelWorkspaceURL(path: path) ?? ConnectionProfile().caelWorkspaceURL(path: path)
+    }
+
+    private func nativeSection(for href: String) -> AppSection? {
+        switch href {
+        case "/cael-home", "/dashboard": .overview
+        case "/desktop": .overview
+        case "/usage": .usage
+        case "/mail": .mail
+        case "/contacts": .contacts
+        case "/calendar": .calendar
+        case "/integrations": .integrations
+        case "/chat": .sessions
+        case "/conductor": .missionControl
+        case "/operations": .operations
+        case "/memory": .memory
+        case "/terminal": .terminal
+        case "/tasks": .kanban
+        case "/artifacts": .files
+        case "/watchdogs": .cronjobs
+        case "/skills": .skills
+        case "/mcp": .mcp
+        case "/profiles": .profiles
+        default: nil
         }
     }
 
@@ -546,6 +691,230 @@ private struct CaelHomebaseMetricCard: View {
                 }
             }
         }
+    }
+}
+
+
+private struct CaelAccessMeshCard: View {
+    let service: CaelWorkspaceServiceCheck
+
+    var body: some View {
+        HermesInsetSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(service.label)
+                            .font(.headline)
+                        Text([service.lane, service.owner].compactMap { $0?.nilIfEmpty }.joined(separator: " / "))
+                            .font(.caption.weight(.semibold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                    CaelStatusBadge(label: service.ok ? "Online" : "Needs attention", tint: service.ok ? .green : .orange)
+                }
+
+                Text(service.description?.nilIfEmpty ?? service.target)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().opacity(0.4)
+
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                    GridRow {
+                        Text("Target")
+                            .foregroundStyle(.secondary)
+                        Text(service.target)
+                    }
+                    GridRow {
+                        Text("Health")
+                            .foregroundStyle(.secondary)
+                        Text(service.detail + latencySuffix)
+                    }
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private var latencySuffix: String {
+        guard let latencyMs = service.latencyMs else { return "" }
+        return " - \(Int(latencyMs))ms"
+    }
+}
+
+private struct CaelFastLaneCard: View {
+    @EnvironmentObject private var appState: AppState
+
+    let link: CaelWorkspaceLink
+    let section: AppSection?
+    let url: URL
+
+    var body: some View {
+        if let section {
+            Button {
+                appState.requestSectionSelection(section)
+            } label: {
+                cardContent(systemImage: section.systemImage, trailingImage: "chevron.right")
+            }
+            .buttonStyle(.plain)
+        } else {
+            Link(destination: url) {
+                cardContent(systemImage: "safari", trailingImage: "arrow.up.right")
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func cardContent(systemImage: String, trailingImage: String) -> some View {
+        HermesInsetSurface {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(link.label)
+                        .font(.headline)
+                    Text(link.description)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Image(systemName: trailingImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+private struct CaelContextBoundaryCard: View {
+    let surface: CaelWorkspaceContextSurface
+
+    var body: some View {
+        HermesInsetSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(surface.surface)
+                            .font(.headline)
+                        Text(surface.owner)
+                            .font(.caption.weight(.semibold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                Text(surface.context)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider().opacity(0.4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    labeledText("Access", surface.access)
+                    labeledText("Boundary", surface.boundary)
+                }
+            }
+        }
+    }
+
+    private func labeledText(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+private struct CaelN8nInstanceCard: View {
+    let instance: CaelCommandCenterAutomationInstance
+
+    var body: some View {
+        HermesInsetSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(instance.label)
+                            .font(.headline)
+                        Text(instance.scope)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    CaelStatusBadge(label: instance.health.ok ? "Online" : "Needs attention", tint: instance.health.ok ? .green : .orange)
+                }
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    CaelMiniFact(title: "Access", value: instance.access)
+                    CaelMiniFact(title: "Boundary", value: instance.boundary)
+                    CaelMiniFact(title: "Health", value: instance.health.detail + healthLatency)
+                    CaelMiniFact(title: "Checked", value: instance.health.checkedAt)
+                }
+
+                if instance.failures.isEmpty {
+                    Text("No recent failure families reported by the read-only query.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Recent failure families")
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(instance.failures.prefix(4)) { failure in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(failure.workflowName)
+                                        .font(.caption.weight(.semibold))
+                                    Text("Last seen \(failure.lastSeen)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                CaelStatusBadge(label: "\(failure.status) - \(failure.count)", tint: .orange)
+                            }
+                            .padding(10)
+                            .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var healthLatency: String {
+        guard let latency = instance.health.latencyMs else { return "" }
+        return " - \(Int(latency))ms"
+    }
+}
+
+private struct CaelMiniFact: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
