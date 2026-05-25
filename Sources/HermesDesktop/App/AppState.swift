@@ -903,6 +903,58 @@ final class AppState: ObservableObject {
         }
     }
 
+    func createWorkspaceDirectory(path: String) async {
+        guard let profile = activeConnection else { return }
+        let targetPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetPath.isEmpty else { return }
+
+        do {
+            _ = try await caelWorkspaceAPIService.makeWorkspaceDirectory(connection: profile, path: targetPath)
+            guard isActiveWorkspace(profile) else { return }
+            setStatusMessage(L10n.string("Folder created"))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to create folder"))
+        }
+    }
+
+    func renameWorkspacePath(from sourcePath: String, to destinationPath: String) async {
+        guard let profile = activeConnection else { return }
+        let source = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = destinationPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty, !destination.isEmpty, source != destination else { return }
+
+        do {
+            _ = try await caelWorkspaceAPIService.renameWorkspacePath(connection: profile, from: source, to: destination)
+            guard isActiveWorkspace(profile) else { return }
+            setStatusMessage(L10n.string("File renamed"))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to rename path"))
+        }
+    }
+
+    func deleteWorkspacePath(path: String) async {
+        guard let profile = activeConnection else { return }
+        let targetPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetPath.isEmpty else { return }
+
+        do {
+            try await caelWorkspaceAPIService.deleteWorkspacePath(connection: profile, path: targetPath)
+            guard isActiveWorkspace(profile) else { return }
+            setStatusMessage(L10n.string("Path deleted"))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to delete path"))
+        }
+    }
+
     func loadSessions(
         reset: Bool = false,
         query: String? = nil,

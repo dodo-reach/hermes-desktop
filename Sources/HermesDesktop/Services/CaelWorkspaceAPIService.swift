@@ -220,6 +220,61 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return FileSaveResult(path: response.path ?? filePath, contentHash: contentHash)
     }
 
+    @discardableResult
+    func makeWorkspaceDirectory(connection: ConnectionProfile, path directoryPath: String) async throws -> String {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/files",
+            body: CaelWorkspaceFileMutationRequest(
+                action: "mkdir",
+                path: directoryPath,
+                from: nil,
+                to: nil
+            ),
+            responseType: CaelWorkspaceFileMutationResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not create \(directoryPath).")
+        }
+        return response.path ?? directoryPath
+    }
+
+    @discardableResult
+    func renameWorkspacePath(connection: ConnectionProfile, from sourcePath: String, to destinationPath: String) async throws -> String {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/files",
+            body: CaelWorkspaceFileMutationRequest(
+                action: "rename",
+                path: nil,
+                from: sourcePath,
+                to: destinationPath
+            ),
+            responseType: CaelWorkspaceFileMutationResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not rename \(sourcePath).")
+        }
+        return response.path ?? destinationPath
+    }
+
+    func deleteWorkspacePath(connection: ConnectionProfile, path targetPath: String) async throws {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/files",
+            body: CaelWorkspaceFileMutationRequest(
+                action: "delete",
+                path: targetPath,
+                from: nil,
+                to: nil
+            ),
+            responseType: CaelWorkspaceFileMutationResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not delete \(targetPath).")
+        }
+    }
+
     private func filesAPIPath(action: String, path filePath: String, maxDepth: Int? = nil, maxEntries: Int? = nil) -> String {
         var components = URLComponents()
         components.path = "/api/files"
@@ -489,6 +544,19 @@ private struct CaelWorkspaceFileWriteResponse: Decodable {
     let ok: Bool
     let path: String?
     let contentHash: String?
+    let error: String?
+}
+
+private struct CaelWorkspaceFileMutationRequest: Encodable {
+    let action: String
+    let path: String?
+    let from: String?
+    let to: String?
+}
+
+private struct CaelWorkspaceFileMutationResponse: Decodable {
+    let ok: Bool
+    let path: String?
     let error: String?
 }
 

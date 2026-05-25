@@ -563,6 +563,9 @@ private struct WorkspaceFileBrowserSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pathText = ""
     @State private var didLoadInitialDirectory = false
+    @State private var pathActionDraft: WorkspaceFilePathActionDraft?
+    @State private var pendingDeleteEntry: RemoteDirectoryEntry?
+    @State private var showDeletePathAlert = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -621,6 +624,13 @@ private struct WorkspaceFileBrowserSheet: View {
                     }
                 }
 
+                Button {
+                    beginCreateFolder()
+                } label: {
+                    Label(L10n.string("New Folder"), systemImage: "folder.badge.plus")
+                }
+                .disabled(appState.workspaceFileBrowserListing == nil)
+
                 Spacer()
             }
             .controlSize(.small)
@@ -661,6 +671,33 @@ private struct WorkspaceFileBrowserSheet: View {
         }
         .padding(22)
         .frame(width: 760, height: 560)
+        .sheet(item: $pathActionDraft) { draft in
+            WorkspaceFilePathActionSheet(draft: draft) { submittedPath in
+                switch draft.kind {
+                case .newFolder:
+                    Task {
+                        await appState.createWorkspaceDirectory(path: submittedPath)
+                    }
+                case .rename(let sourcePath):
+                    Task {
+                        await appState.renameWorkspacePath(from: sourcePath, to: submittedPath)
+                    }
+                }
+            }
+        }
+        .alert(L10n.string("Delete this path?"), isPresented: $showDeletePathAlert, presenting: pendingDeleteEntry) { entry in
+            Button(L10n.string("Delete"), role: .destructive) {
+                Task {
+                    await appState.deleteWorkspacePath(path: entry.displayPath)
+                    pendingDeleteEntry = nil
+                }
+            }
+            Button(L10n.string("Cancel"), role: .cancel) {
+                pendingDeleteEntry = nil
+            }
+        } message: { entry in
+            Text(L10n.string("This removes %@ from the active workspace.", entry.name))
+        }
         .task {
             guard !didLoadInitialDirectory else { return }
             didLoadInitialDirectory = true
@@ -744,6 +781,27 @@ private struct WorkspaceFileBrowserSheet: View {
                 }
                 .controlSize(.small)
             }
+
+            Menu {
+                Button {
+                    beginRename(entry)
+                } label: {
+                    Label(L10n.string("Rename"), systemImage: "pencil")
+                }
+
+                Button(role: .destructive) {
+                    pendingDeleteEntry = entry
+                    showDeletePathAlert = true
+                } label: {
+                    Label(L10n.string("Delete"), systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .imageScale(.medium)
+                    .frame(width: 24, height: 24)
+            }
+            .menuStyle(.borderlessButton)
+            .controlSize(.small)
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -753,6 +811,27 @@ private struct WorkspaceFileBrowserSheet: View {
                 addBookmark(entry)
             }
         }
+    }
+
+    private func beginCreateFolder() {
+        let parentPath = appState.workspaceFileBrowserListing?.displayPath ?? pathText
+        pathActionDraft = WorkspaceFilePathActionDraft(
+            kind: .newFolder,
+            title: L10n.string("Create Folder"),
+            prompt: L10n.string("Enter the full workspace path for the new folder."),
+            initialPath: appendingPathComponent("New Folder", to: parentPath),
+            submitTitle: L10n.string("Create")
+        )
+    }
+
+    private func beginRename(_ entry: RemoteDirectoryEntry) {
+        pathActionDraft = WorkspaceFilePathActionDraft(
+            kind: .rename(sourcePath: entry.displayPath),
+            title: L10n.string("Rename Path"),
+            prompt: L10n.string("Enter the new full workspace path."),
+            initialPath: entry.displayPath,
+            submitTitle: L10n.string("Rename")
+        )
     }
 
     private func browse(_ path: String) {
@@ -828,5 +907,77 @@ private struct WorkspaceFileBrowserSheet: View {
         }
 
         return parts.joined(separator: " / ")
+    }
+
+    private func appendingPathComponent(_ component: String, to parent: String) -> String {
+        let trimmedParent = parent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedParent.isEmpty else { return component }
+        return trimmedParent.hasSuffix("/") ? "\(trimmedParent)\(component)" : "\(trimmedParent)/\(component)"
+    }
+}
+
+private enum WorkspaceFilePathActionKind {
+    case newFolder
+    case rename(sourcePath: String)
+}
+
+private struct WorkspaceFilePathActionDraft: Identifiable {
+    let id = UUID()
+    let kind: WorkspaceFilePathActionKind
+    let title: String
+    let prompt: String
+    let initialPath: String
+    let submitTitle: String
+}
+
+private struct WorkspaceFilePathActionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let draft: WorkspaceFilePathActionDraft
+    let onSubmit: (String) -> Void
+    @State private var pathText: String
+
+    init(draft: WorkspaceFilePathActionDraft, onSubmit: @escaping (String) -> Void) {
+        self.draft = draft
+        self.onSubmit = onSubmit
+        _pathText = State(initialValue: draft.initialPath)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(draft.title)
+                .font(.title3.weight(.semibold))
+
+            Text(draft.prompt)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            TextField(L10n.string("Workspace path"), text: $pathText)
+                .font(.system(.body, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(submit)
+
+            HStack {
+                Spacer()
+                Button(L10n.string("Cancel")) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(draft.submitTitle) {
+                    submit()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(pathText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+    }
+
+    private func submit() {
+        let trimmed = pathText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onSubmit(trimmed)
+        dismiss()
     }
 }
