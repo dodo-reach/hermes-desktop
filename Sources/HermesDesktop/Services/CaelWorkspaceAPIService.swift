@@ -1120,6 +1120,68 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return response
     }
 
+    @discardableResult
+    func spawnConductorMission(
+        connection: ConnectionProfile,
+        goal: String,
+        orchestratorModel: String? = nil,
+        workerModel: String? = nil,
+        projectsDir: String? = nil,
+        maxParallel: Int = 1,
+        supervised: Bool = false
+    ) async throws -> WorkspaceConductorSpawnResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/conductor-spawn",
+            body: WorkspaceConductorSpawnRequest(
+                goal: goal,
+                orchestratorModel: orchestratorModel?.nilIfBlank,
+                workerModel: workerModel?.nilIfBlank,
+                projectsDir: projectsDir?.nilIfBlank,
+                maxParallel: maxParallel,
+                supervised: supervised
+            ),
+            responseType: WorkspaceConductorSpawnResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Conductor mission launch failed.")
+        }
+        return response
+    }
+
+    func loadConductorMission(connection: ConnectionProfile, missionID: String, lines: Int = 400) async throws -> WorkspaceConductorMissionResponse {
+        let response = try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/conductor-spawn", queryItems: [
+                URLQueryItem(name: "missionId", value: missionID),
+                URLQueryItem(name: "lines", value: String(lines))
+            ]),
+            responseType: WorkspaceConductorMissionResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Conductor mission status unavailable.")
+        }
+        return response
+    }
+
+    @discardableResult
+    func stopConductorMission(
+        connection: ConnectionProfile,
+        missionIDs: [String],
+        sessionKeys: [String] = []
+    ) async throws -> WorkspaceConductorStopResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/conductor-stop",
+            body: WorkspaceConductorStopRequest(sessionKeys: sessionKeys, missionIds: missionIDs),
+            responseType: WorkspaceConductorStopResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Conductor stop failed.")
+        }
+        return response
+    }
+
 
     func listMCPServers(connection: ConnectionProfile, search: String = "", category: String = "All") async throws -> WorkspaceMCPListResponse {
         var queryItems: [URLQueryItem] = []
@@ -1638,6 +1700,20 @@ private struct WorkspaceSwarmDispatchRequest: Encodable {
     let prompt: String
     let timeoutSeconds: Int
     let allowAsync: Bool
+}
+
+private struct WorkspaceConductorSpawnRequest: Encodable {
+    let goal: String
+    let orchestratorModel: String?
+    let workerModel: String?
+    let projectsDir: String?
+    let maxParallel: Int
+    let supervised: Bool
+}
+
+private struct WorkspaceConductorStopRequest: Encodable {
+    let sessionKeys: [String]
+    let missionIds: [String]
 }
 
 private struct WorkspaceSecondBrainWriteRequest: Encodable {

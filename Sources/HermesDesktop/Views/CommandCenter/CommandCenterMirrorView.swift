@@ -138,6 +138,7 @@ struct CommandCenterMirrorView: View {
     private var swarmSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             NativeSwarmPanel()
+            NativeConductorPanel()
             agentRunsPanel
             actionGatesPanel
         }
@@ -1387,6 +1388,224 @@ private struct NativeSwarmPanel: View {
         if normalized.count <= maxLength { return normalized.isEmpty ? "No preview available." : normalized }
         let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
         return String(normalized[..<index]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+}
+
+private struct NativeConductorPanel: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var goal = ""
+    @State private var missionID = ""
+    @State private var orchestratorModel = ""
+    @State private var workerModel = ""
+    @State private var projectsDir = "~/conductor-projects"
+    @State private var maxParallel = 1.0
+    @State private var supervised = false
+    @State private var launchResponse: WorkspaceConductorSpawnResponse?
+    @State private var missionResponse: WorkspaceConductorMissionResponse?
+    @State private var statusMessage: String?
+    @State private var isLaunching = false
+    @State private var isLoadingMission = false
+    @State private var isStopping = false
+
+    var body: some View {
+        HermesSurfacePanel(
+            title: "Conductor Mission Control",
+            subtitle: "Launch and inspect mission-level orchestration through /api/conductor-spawn and /api/conductor-stop. Real work stays server-side."
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                launchControls
+                missionControls
+                missionStatus
+            }
+        }
+    }
+
+    private var launchControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Launch mission")
+                .font(.headline)
+            TextEditor(text: $goal)
+                .font(.body)
+                .frame(minHeight: 96)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+                }
+
+            HStack(spacing: 12) {
+                TextField("Orchestrator model", text: $orchestratorModel)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Worker model", text: $workerModel)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Projects dir", text: $projectsDir)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Max parallel: \(Int(maxParallel))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(value: $maxParallel, in: 1...5, step: 1)
+                        .frame(maxWidth: 220)
+                }
+                Toggle("Supervised", isOn: $supervised)
+                    .toggleStyle(.checkbox)
+                Spacer()
+                Button(isLaunching ? "Launching..." : "Launch Mission") {
+                    Task { await launchMission() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isLaunching || goal.nilIfBlank == nil)
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var missionControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                TextField("Mission ID", text: $missionID)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        Task { await loadMission() }
+                    }
+                Button(isLoadingMission ? "Checking..." : "Check Status") {
+                    Task { await loadMission() }
+                }
+                .disabled(isLoadingMission || missionID.nilIfBlank == nil)
+                Button(isStopping ? "Stopping..." : "Stop Mission", role: .destructive) {
+                    Task { await stopMission() }
+                }
+                .disabled(isStopping || missionID.nilIfBlank == nil)
+            }
+
+            if let statusMessage {
+                MirrorRow(title: "Status", detail: statusMessage, tint: statusMessage.lowercased().contains("error") ? .orange : .blue)
+            }
+
+            if let launchResponse {
+                MirrorRow(
+                    title: launchResponse.jobName ?? launchResponse.missionId ?? "Conductor mission",
+                    detail: launchDetail(launchResponse),
+                    badge: launchResponse.mode ?? "conductor",
+                    tint: launchResponse.ok ? .green : .orange
+                )
+            }
+        }
+    }
+
+    private var missionStatus: some View {
+        MirrorListCard(title: "Mission Status", emptyText: "No mission status loaded.") {
+            if let record = missionResponse?.mission {
+                MirrorRow(
+                    title: record.name ?? record.id ?? "Mission",
+                    detail: [
+                        record.error?.nilIfBlank,
+                        record.updatedAt?.nilIfBlank,
+                        record.modeNote?.nilIfBlank
+                    ].compactMap { $0 }.joined(separator: "\n"),
+                    badge: record.status ?? "unknown",
+                    tint: tint(forStatus: record.status ?? "")
+                )
+
+                let assignments = record.assignments ?? []
+                ForEach(assignments.prefix(6)) { assignment in
+                    MirrorRow(
+                        title: assignment.workerId,
+                        detail: assignment.task,
+                        badge: assignment.state ?? "assigned",
+                        tint: tint(forStatus: assignment.state ?? "")
+                    )
+                }
+
+                if let lines = record.lines, !lines.isEmpty {
+                    Text(lines.suffix(10).joined(separator: "\n"))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(12)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            } else {
+                Text("Launch a mission or paste a mission id to inspect its current server-side status.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func launchMission() async {
+        guard let connection = appState.activeConnection, let goalText = goal.nilIfBlank else { return }
+        isLaunching = true
+        statusMessage = nil
+        defer { isLaunching = false }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.spawnConductorMission(
+                connection: connection,
+                goal: goalText,
+                orchestratorModel: orchestratorModel,
+                workerModel: workerModel,
+                projectsDir: projectsDir,
+                maxParallel: Int(maxParallel),
+                supervised: supervised
+            )
+            launchResponse = response
+            missionID = response.missionId ?? response.jobId ?? missionID
+            statusMessage = response.missionId.map { "Mission launched: \($0)" } ?? "Conductor accepted the mission."
+            goal = ""
+            await loadMission()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadMission() async {
+        guard let connection = appState.activeConnection, let mission = missionID.nilIfBlank else { return }
+        isLoadingMission = true
+        statusMessage = nil
+        defer { isLoadingMission = false }
+        do {
+            missionResponse = try await appState.caelWorkspaceAPIService.loadConductorMission(connection: connection, missionID: mission)
+            let record = missionResponse?.mission
+            statusMessage = record?.status.map { "Mission status: \($0)" } ?? "Mission status loaded."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func stopMission() async {
+        guard let connection = appState.activeConnection, let mission = missionID.nilIfBlank else { return }
+        isStopping = true
+        statusMessage = nil
+        defer { isStopping = false }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.stopConductorMission(connection: connection, missionIDs: [mission])
+            statusMessage = "Stopped \(response.stoppedMissions ?? 0) dashboard missions; cancelled \(response.cancelledNativeMissions ?? 0) native missions."
+            await loadMission()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func launchDetail(_ response: WorkspaceConductorSpawnResponse) -> String {
+        [
+            response.modeNote?.nilIfBlank,
+            response.sessionKey?.nilIfBlank.map { "session: \($0)" },
+            response.assignments.map { "\($0.count) assignments" },
+            (response.warnings?.joined(separator: "\n"))?.nilIfBlank
+        ].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    private func tint(forStatus status: String) -> Color {
+        switch status.lowercased() {
+        case "complete", "completed", "running", "executing": return .green
+        case "blocked", "failed", "cancelled", "error": return .orange
+        default: return .blue
+        }
     }
 }
 

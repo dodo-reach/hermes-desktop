@@ -1360,6 +1360,88 @@ struct WorkspaceSwarmDispatchResult: Decodable, Identifiable {
     let checkpointStatus: String?
 }
 
+struct WorkspaceConductorSpawnResponse: Decodable {
+    let ok: Bool
+    let mode: String?
+    let modeOfficialOotb: Bool?
+    let modeNote: String?
+    let missionId: String?
+    let sessionKey: String?
+    let sessionKeyPrefix: String?
+    let jobId: String?
+    let jobName: String?
+    let runId: String?
+    let warnings: [String]?
+    let assignments: [WorkspaceConductorAssignment]?
+    let error: String?
+}
+
+struct WorkspaceConductorMissionResponse: Decodable {
+    let ok: Bool
+    let mode: String?
+    let mission: WorkspaceConductorMissionRecord?
+    let error: String?
+}
+
+struct WorkspaceConductorMissionRecord: Decodable {
+    let id: String?
+    let name: String?
+    let status: String?
+    let error: String?
+    let sessionId: String?
+    let lines: [String]?
+    let exitCode: Int?
+    let nativeSwarm: Bool?
+    let modeOfficialOotb: Bool?
+    let modeNote: String?
+    let assignments: [WorkspaceConductorAssignment]?
+    let updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case status
+        case error
+        case sessionId = "session_id"
+        case lines
+        case exitCode = "exit_code"
+        case nativeSwarm
+        case modeOfficialOotb
+        case modeNote
+        case assignments
+        case updatedAt
+    }
+}
+
+struct WorkspaceConductorAssignment: Decodable, Identifiable {
+    var id: String { assignmentId ?? "\(workerId)-\(task)" }
+    let assignmentId: String?
+    let workerId: String
+    let task: String
+    let state: String?
+    let rationale: String?
+    let reviewRequired: Bool?
+    let direct: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId
+        case workerId
+        case task
+        case state
+        case rationale
+        case reviewRequired
+        case direct
+    }
+}
+
+struct WorkspaceConductorStopResponse: Decodable {
+    let ok: Bool
+    let deleted: Int?
+    let stoppedMissions: Int?
+    let cancelledNativeMissions: Int?
+    let error: String?
+}
+
 private extension String {
     var nilIfBlank: String? {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self
