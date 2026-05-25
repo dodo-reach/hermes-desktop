@@ -1031,6 +1031,18 @@ struct WorkspaceTerminalSessionSummary: Decodable, Identifiable, Hashable {
     let idleTtlMs: Int?
 }
 
+struct WorkspaceTerminalSessionRenameRequest: Encodable {
+    let action: String
+    let sessionId: String
+    let label: String
+}
+
+struct WorkspaceTerminalSessionActionResponse: Decodable {
+    let ok: Bool?
+    let session: WorkspaceTerminalSessionSummary?
+    let error: String?
+}
+
 struct WorkspaceSessionCreateResponse: Decodable {
     let ok: Bool?
     let sessionKey: String?

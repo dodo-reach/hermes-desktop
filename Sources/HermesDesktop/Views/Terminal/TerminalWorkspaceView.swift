@@ -12,6 +12,9 @@ struct TerminalWorkspaceView: View {
     @State private var availableTerminalSessions: [WorkspaceTerminalSessionSummary] = []
     @State private var isLoadingTerminalSessions = false
     @State private var terminalSessionsError: String?
+    @State private var terminalSessionRenameTarget: WorkspaceTerminalSessionSummary?
+    @State private var terminalSessionRenameValue = ""
+    @State private var isRenamingTerminalSession = false
     private let tabStripHeight: CGFloat = 44
 
     var body: some View {
@@ -138,6 +141,10 @@ struct TerminalWorkspaceView: View {
 
             terminalSessionPicker
 
+            if let terminalSessionRenameTarget {
+                terminalSessionRenamePanel(terminalSessionRenameTarget)
+            }
+
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
@@ -236,9 +243,58 @@ struct TerminalWorkspaceView: View {
                 attachWorkspacePTY(sessionID: session.id)
             }
             .buttonStyle(.borderedProminent)
+
+            Button {
+                terminalSessionRenameTarget = session
+                terminalSessionRenameValue = terminalSessionTitle(session)
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(.bordered)
+            .help(L10n.string("Rename this shared Workspace PTY label."))
         }
         .padding(10)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func terminalSessionRenamePanel(_ session: WorkspaceTerminalSessionSummary) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.string("Rename Shared PTY"))
+                        .font(.headline)
+                    Text(shortTerminalSessionID(session.id))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    terminalSessionRenameTarget = nil
+                    terminalSessionRenameValue = ""
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            HStack(spacing: 8) {
+                TextField(L10n.string("Terminal label"), text: $terminalSessionRenameValue)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await renameWorkspacePTY(session) } }
+
+                Button(L10n.string("Save")) {
+                    Task { await renameWorkspacePTY(session) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isRenamingTerminalSession || terminalSessionRenameValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 1)
+        }
     }
 
     private var terminalAppearance: TerminalThemeAppearance {
@@ -298,6 +354,27 @@ struct TerminalWorkspaceView: View {
             isShowingAttachSheet = false
             attachSessionID = ""
         }
+    }
+
+    private func renameWorkspacePTY(_ session: WorkspaceTerminalSessionSummary) async {
+        guard let connection = context.activeConnection else { return }
+        let label = terminalSessionRenameValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { return }
+        isRenamingTerminalSession = true
+        terminalSessionsError = nil
+        do {
+            _ = try await appState.caelWorkspaceAPIService.renameWorkspaceTerminalSession(
+                connection: connection,
+                sessionID: session.id,
+                label: label
+            )
+            terminalSessionRenameTarget = nil
+            terminalSessionRenameValue = ""
+            await loadAvailableTerminalSessions()
+        } catch {
+            terminalSessionsError = error.localizedDescription
+        }
+        isRenamingTerminalSession = false
     }
 
     private func shortTerminalSessionID(_ sessionID: String) -> String {

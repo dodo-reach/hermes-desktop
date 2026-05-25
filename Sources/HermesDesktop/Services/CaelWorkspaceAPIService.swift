@@ -112,6 +112,28 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         try await loadJSON(connection: connection, path: "/api/terminal-sessions", responseType: WorkspaceTerminalSessionsResponse.self)
     }
 
+    @discardableResult
+    func renameWorkspaceTerminalSession(
+        connection: ConnectionProfile,
+        sessionID: String,
+        label: String
+    ) async throws -> WorkspaceTerminalSessionActionResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/terminal-sessions",
+            body: WorkspaceTerminalSessionRenameRequest(
+                action: "rename",
+                sessionId: sessionID,
+                label: label
+            ),
+            responseType: WorkspaceTerminalSessionActionResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace terminal rename failed.")
+        }
+        return response
+    }
+
     func loadWorkspaceSkills(
         connection: ConnectionProfile,
         tab: String = "installed",
