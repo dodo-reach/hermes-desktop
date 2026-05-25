@@ -82,8 +82,10 @@ final class TerminalWorkspaceStore: ObservableObject {
     }
 
     @discardableResult
-    func addWorkspaceTerminalTab(for connection: ConnectionProfile) -> TerminalTabModel {
-        addTab(for: connection, backend: .workspacePTY)
+    func addWorkspaceTerminalTab(for connection: ConnectionProfile, sessionId: String? = nil) -> TerminalTabModel {
+        let trimmedSessionId = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedSessionId = trimmedSessionId?.isEmpty == false ? trimmedSessionId : nil
+        return addTab(for: connection, backend: .workspacePTY(sessionId: resolvedSessionId))
     }
 
     func closeTab(_ tab: TerminalTabModel) {

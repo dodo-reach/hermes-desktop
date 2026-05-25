@@ -11,6 +11,7 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
     private var streamTask: Task<Void, Never>?
     private var sessionId: String?
     private var baseURL: URL?
+    private var shouldCloseServerSessionOnTerminate = true
     private var onProcessStart: (() -> Void)?
     private var onTitleChange: ((String) -> Void)?
     private var onDirectoryChange: ((String?) -> Void)?
@@ -123,6 +124,8 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
 
         startedLaunchToken = request.launchToken
         baseURL = url
+        sessionId = request.attachedSessionId
+        shouldCloseServerSessionOnTerminate = request.attachedSessionId == nil
         streamTask?.cancel()
         streamTask = Task { [weak self] in
             await self?.runStream(baseURL: url, launchToken: request.launchToken)
@@ -184,7 +187,9 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
         case "session":
             if let payload = decode(WorkspaceTerminalSessionPayload.self, from: data) {
                 sessionId = payload.sessionId
-                onTitleChange?("Shared PTY · \(payload.sessionId.prefix(8))")
+                shouldCloseServerSessionOnTerminate = payload.reattach != true && shouldCloseServerSessionOnTerminate
+                let prefix = payload.reattach == true ? "Attached PTY" : "Shared PTY"
+                onTitleChange?("\(prefix) · \(payload.sessionId.prefix(8))")
             }
         case "data":
             if let text = decode(String.self, from: data) {
@@ -211,7 +216,7 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
     }
 
     private func resize(cols: Int, rows: Int) async {
-        guard let sessionId, let baseURL else { return }
+        guard shouldCloseServerSessionOnTerminate, let sessionId, let baseURL else { return }
         try? await post(baseURL: baseURL, path: "/api/terminal-resize", body: [
             "sessionId": sessionId,
             "cols": max(20, cols),
@@ -229,7 +234,7 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
     }
 
     private func closeServerSessionIfNeeded() {
-        guard let sessionId, let baseURL else { return }
+        guard shouldCloseServerSessionOnTerminate, let sessionId, let baseURL else { return }
         let closeSessionId = sessionId
         Task {
             try? await post(baseURL: baseURL, path: "/api/terminal-close", body: ["sessionId": closeSessionId])
@@ -280,10 +285,12 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
 struct WorkspaceTerminalLaunchRequest {
     let baseURL: String
     let launchToken: UUID
+    let attachedSessionId: String?
 }
 
 private struct WorkspaceTerminalSessionPayload: Decodable {
     let sessionId: String
+    let reattach: Bool?
 }
 
 private struct WorkspaceTerminalDataPayload: Decodable {

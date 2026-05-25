@@ -4,7 +4,12 @@ import Foundation
 final class TerminalSession: ObservableObject, @unchecked Sendable {
     enum Backend: Equatable {
         case nativeSSH
-        case workspacePTY
+        case workspacePTY(sessionId: String? = nil)
+
+        var attachedWorkspaceSessionId: String? {
+            guard case let .workspacePTY(sessionId) = self else { return nil }
+            return sessionId
+        }
     }
 
     let connection: ConnectionProfile
@@ -41,7 +46,7 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
             for: connection,
             startupCommandLine: startupCommandLine
         )
-        self.terminalTitle = backend == .workspacePTY
+        self.terminalTitle = backend.isWorkspacePTY
             ? "Shared PTY · \(connection.resolvedHermesProfileName)"
             : "\(connection.label) · \(connection.resolvedHermesProfileName)"
         viewHost.setEventHandlers(
@@ -128,7 +133,8 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
                 in: container,
                 request: WorkspaceTerminalLaunchRequest(
                     baseURL: connection.resolvedCaelWorkspaceBaseURL,
-                    launchToken: launchToken
+                    launchToken: launchToken,
+                    attachedSessionId: backend.attachedWorkspaceSessionId
                 ),
                 appearance: appearance,
                 isActive: isActive
@@ -156,12 +162,20 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
         switch backend {
         case .nativeSSH:
             return "Native SSH"
-        case .workspacePTY:
-            return "Shared PTY"
+        case .workspacePTY(let sessionId):
+            return sessionId == nil ? "Shared PTY" : "Attached PTY"
         }
     }
 
     var isWorkspacePTY: Bool {
-        backend == .workspacePTY
+        backend.isWorkspacePTY
+    }
+}
+
+
+private extension TerminalSession.Backend {
+    var isWorkspacePTY: Bool {
+        if case .workspacePTY = self { return true }
+        return false
     }
 }

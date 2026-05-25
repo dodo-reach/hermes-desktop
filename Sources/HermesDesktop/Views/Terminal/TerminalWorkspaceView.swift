@@ -6,6 +6,8 @@ struct TerminalWorkspaceView: View {
     let ensureTerminalSession: () -> Void
     let updateTerminalTheme: (TerminalThemePreference) -> Void
     @State private var isShowingAppearanceEditor = false
+    @State private var isShowingAttachSheet = false
+    @State private var attachSessionID = ""
     private let tabStripHeight: CGFloat = 44
 
     var body: some View {
@@ -50,6 +52,15 @@ struct TerminalWorkspaceView: View {
                     }
                     .buttonStyle(.bordered)
                     .help(L10n.string("Open a Workspace-backed terminal session that can share the web/mobile terminal contract."))
+
+                    Button {
+                        attachSessionID = ""
+                        isShowingAttachSheet = true
+                    } label: {
+                        Label(L10n.string("Attach PTY"), systemImage: "link")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(L10n.string("Attach to an existing Workspace terminal session ID from web or mobile."))
                 }
 
                 Spacer(minLength: 8)
@@ -93,6 +104,41 @@ struct TerminalWorkspaceView: View {
                 ensureTerminalSession()
             }
         }
+        .sheet(isPresented: $isShowingAttachSheet) {
+            attachWorkspacePTYSheet
+        }
+    }
+
+    private var attachWorkspacePTYSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Attach Shared PTY"))
+                    .font(.title3.weight(.semibold))
+                Text(L10n.string("Paste a Workspace terminal session ID from the web or mobile terminal. If the session has expired, the server will return a new Shared PTY session."))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            TextField(L10n.string("Session ID"), text: $attachSessionID)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+                .onSubmit { attachWorkspacePTY() }
+
+            HStack {
+                Spacer()
+                Button(L10n.string("Cancel")) {
+                    isShowingAttachSheet = false
+                }
+                Button(L10n.string("Attach")) {
+                    attachWorkspacePTY()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(attachSessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || context.activeConnection == nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
     }
 
     private var terminalAppearance: TerminalThemeAppearance {
@@ -121,6 +167,17 @@ struct TerminalWorkspaceView: View {
     private func requestSharedTab(for connection: ConnectionProfile) {
         DispatchQueue.main.async {
             workspace.addWorkspaceTerminalTab(for: connection.updated())
+        }
+    }
+
+    private func attachWorkspacePTY() {
+        guard let connection = context.activeConnection else { return }
+        let sessionID = attachSessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionID.isEmpty else { return }
+        DispatchQueue.main.async {
+            workspace.addWorkspaceTerminalTab(for: connection.updated(), sessionId: sessionID)
+            isShowingAttachSheet = false
+            attachSessionID = ""
         }
     }
 
