@@ -66,6 +66,7 @@ struct CaelProviderLimitsWebPanel: View {
         } else if let limits = appState.caelProviderUsageLimits {
             VStack(alignment: .leading, spacing: 14) {
                 CaelModelRosterStrip(providers: sortedProviders(limits.providers))
+                CaelModelConfigControl()
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
                     ForEach(sortedProviders(limits.providers)) { provider in
@@ -120,6 +121,122 @@ private struct CaelModelRosterStrip: View {
             return "Default: \(provider.label) / \(model)"
         }
         return "\(provider.label) / \(model)"
+    }
+}
+
+
+private struct CaelModelConfigControl: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var config: WorkspaceHermesConfigResponse?
+    @State private var providerID = ""
+    @State private var modelID = ""
+    @State private var notice: String?
+    @State private var isLoading = false
+    @State private var isSaving = false
+
+    var body: some View {
+        HermesInsetSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Label("Active Cael model config", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Button(isLoading ? "Loading..." : "Reload") {
+                        Task { await loadConfig() }
+                    }
+                    .disabled(isLoading || isSaving)
+                }
+
+                Text(currentConfigLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    TextField("provider", text: $providerID)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("model", text: $modelID)
+                        .textFieldStyle(.roundedBorder)
+                    Button(isSaving ? "Applying..." : "Apply") {
+                        Task { await applyModelConfig() }
+                    }
+                    .disabled(isSaving || providerID.nilIfBlank == nil || modelID.nilIfBlank == nil)
+                }
+
+                if let notice {
+                    Text(notice)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let providers = config?.providers?.filter({ $0.configured == true || $0.isDefault == true }), !providers.isEmpty {
+                    FlowLayout(spacing: 6) {
+                        ForEach(providers) { provider in
+                            Button(providerChipLabel(provider)) {
+                                providerID = provider.id
+                                modelID = provider.isDefault == true
+                                    ? (config?.activeModel ?? provider.models?.first?.id ?? modelID)
+                                    : (provider.models?.first?.id ?? modelID)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background((provider.isDefault == true ? Color.accentColor : Color.secondary).opacity(0.12), in: Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .task(id: appState.activeConnectionID) {
+            await loadConfig()
+        }
+    }
+
+    private var currentConfigLabel: String {
+        let provider = config?.activeProvider?.nilIfBlank ?? "unknown provider"
+        let model = config?.activeModel?.nilIfBlank ?? "unknown model"
+        return "Shared /api/hermes-config active model: \(provider) / \(model). Changes are applied server-side and then the usage meters refresh from /api/usage/limits."
+    }
+
+    private func providerChipLabel(_ provider: WorkspaceHermesProviderState) -> String {
+        let name = provider.name.nilIfBlank ?? provider.id
+        if provider.isDefault == true { return "Default: \(name)" }
+        return name
+    }
+
+    private func loadConfig() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let next = try await appState.caelWorkspaceAPIService.loadHermesConfig(connection: connection)
+            config = next
+            providerID = next.activeProvider?.nilIfBlank ?? providerID
+            modelID = next.activeModel?.nilIfBlank ?? modelID
+            notice = next.ok == false ? (next.error?.nilIfBlank ?? "Hermes config is unavailable.") : nil
+        } catch {
+            notice = "Unable to load Hermes config: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyModelConfig() async {
+        guard let connection = appState.activeConnection,
+              let provider = providerID.nilIfBlank,
+              let model = modelID.nilIfBlank else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let result = try await appState.caelWorkspaceAPIService.setDefaultHermesModel(
+                connection: connection,
+                providerID: provider,
+                modelID: model
+            )
+            notice = result.message?.nilIfBlank ?? "Default model updated."
+            await loadConfig()
+            await appState.loadCaelProviderUsage(forceRefresh: true)
+        } catch {
+            notice = "Unable to update default model: \(error.localizedDescription)"
+        }
     }
 }
 
@@ -309,5 +426,13 @@ private struct FlowLayout: Layout {
             position.x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

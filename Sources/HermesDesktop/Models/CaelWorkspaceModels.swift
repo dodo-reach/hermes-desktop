@@ -264,6 +264,36 @@ struct CaelProviderUsageCard: Codable, Identifiable {
     let dailyUsage: [CaelDailyUsage]
 }
 
+
+struct WorkspaceHermesConfigResponse: Codable {
+    let ok: Bool?
+    let activeProvider: String?
+    let activeModel: String?
+    let providers: [WorkspaceHermesProviderState]?
+    let error: String?
+}
+
+struct WorkspaceHermesProviderState: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let configured: Bool?
+    let authenticated: Bool?
+    let available: Bool?
+    let isDefault: Bool?
+    let models: [WorkspaceHermesModelState]?
+}
+
+struct WorkspaceHermesModelState: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String?
+}
+
+struct WorkspaceHermesConfigPatchResponse: Codable {
+    let ok: Bool?
+    let message: String?
+    let error: String?
+}
+
 struct CaelUsageWindow: Codable, Identifiable {
     let id: String
     let label: String

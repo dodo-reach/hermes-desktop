@@ -81,6 +81,28 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         try await loadJSON(connection: connection, path: "/api/integrations/status", responseType: CaelIntegrationStatus.self)
     }
 
+    func loadHermesConfig(connection: ConnectionProfile) async throws -> WorkspaceHermesConfigResponse {
+        try await loadJSON(connection: connection, path: "/api/hermes-config", responseType: WorkspaceHermesConfigResponse.self)
+    }
+
+    @discardableResult
+    func setDefaultHermesModel(connection: ConnectionProfile, providerID: String, modelID: String) async throws -> WorkspaceHermesConfigPatchResponse {
+        let response = try await patchJSON(
+            connection: connection,
+            path: "/api/hermes-config",
+            body: WorkspaceHermesSetDefaultModelRequest(
+                action: "set-default-model",
+                providerID: providerID,
+                modelID: modelID
+            ),
+            responseType: WorkspaceHermesConfigPatchResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Hermes model config update failed.")
+        }
+        return response
+    }
+
     func loadProviderUsage(connection: ConnectionProfile, force: Bool = false) async throws -> CaelProviderUsageLimits {
         let path = force ? "/api/usage/limits?force=1" : "/api/usage/limits"
         return try await loadJSON(connection: connection, path: path, responseType: CaelProviderUsageLimits.self)
@@ -1420,6 +1442,19 @@ private struct WorkspaceSkillActionRequest: Encodable {
 }
 
 private struct EmptyWorkspaceAPIRequest: Encodable {}
+
+private struct WorkspaceHermesSetDefaultModelRequest: Encodable {
+    let action: String
+    let providerID: String
+    let modelID: String
+
+    enum CodingKeys: String, CodingKey {
+        case action
+        case providerID = "providerId"
+        case modelID = "modelId"
+    }
+}
+
 
 private struct CaelProfileNameRequest: Encodable {
     let name: String
