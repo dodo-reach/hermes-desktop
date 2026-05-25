@@ -738,6 +738,40 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         )
     }
 
+    func recordKnowledgeFabricSessionState(
+        connection: ConnectionProfile,
+        summary: String,
+        memoryScope: String,
+        agentSource: String?,
+        sessionId: String?,
+        project: String?
+    ) async throws -> KnowledgeFabricSessionStateResponse {
+        let normalizedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSummary.isEmpty else {
+            throw SSHTransportError.invalidResponse("Knowledge Fabric session-state summary is required.")
+        }
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/knowledge/fabric/session-state",
+            body: KnowledgeFabricSessionStateRequest(
+                summary: normalizedSummary,
+                memoryScope: memoryScope,
+                agentSource: agentSource?.nilIfBlank,
+                sessionId: sessionId?.nilIfBlank,
+                project: project?.nilIfBlank,
+                metadata: [
+                    "client": "Cael Desktop",
+                    "surface": "native-knowledge-fabric-panel"
+                ]
+            ),
+            responseType: KnowledgeFabricSessionStateResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Knowledge Fabric session-state write failed.")
+        }
+        return response
+    }
+
 
     func listMemoryFiles(connection: ConnectionProfile) async throws -> WorkspaceMemoryListResponse {
         try await loadJSON(connection: connection, path: "/api/memory/list", responseType: WorkspaceMemoryListResponse.self)
@@ -1274,6 +1308,15 @@ private struct KnowledgeFabricSearchRequest: Encodable {
 private struct KnowledgeFabricDocumentRequest: Encodable {
     let docId: String
     let memoryScope: String
+}
+
+private struct KnowledgeFabricSessionStateRequest: Encodable {
+    let summary: String
+    let memoryScope: String
+    let agentSource: String?
+    let sessionId: String?
+    let project: String?
+    let metadata: [String: String]
 }
 
 

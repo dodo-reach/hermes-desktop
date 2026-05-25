@@ -987,6 +987,14 @@ struct WorkspaceSessionRunLifecycleEvent: Decodable, Equatable, Identifiable {
 }
 
 
+struct KnowledgeFabricSessionStateResponse: Decodable {
+    let ok: Bool?
+    let tool: String?
+    let endpoint: String?
+    let data: String?
+    let error: String?
+}
+
 struct WorkspaceMCPListResponse: Decodable {
     let servers: [WorkspaceMCPServer]
     let total: Int

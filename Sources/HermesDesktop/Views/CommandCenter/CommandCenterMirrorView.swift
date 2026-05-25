@@ -351,10 +351,17 @@ private struct NativeKnowledgeFabricPanel: View {
     @State private var health: KnowledgeFabricHealthResponse?
     @State private var searchResponse: KnowledgeFabricSearchResponse?
     @State private var documentResponse: KnowledgeFabricSearchResponse?
+    @State private var sessionStateResponse: KnowledgeFabricSessionStateResponse?
+    @State private var sessionSummary = ""
+    @State private var sessionScope = "business"
+    @State private var sessionAgentSource = "Cael Desktop"
+    @State private var sessionID = ""
+    @State private var sessionProject = "Hermes/Cael"
     @State private var errorMessage: String?
     @State private var isLoadingHealth = false
     @State private var isSearching = false
     @State private var isLookingUpDocument = false
+    @State private var isRecordingSessionState = false
 
     var body: some View {
         HermesSurfacePanel(
@@ -377,6 +384,17 @@ private struct NativeKnowledgeFabricPanel: View {
 
                 if let documentResponse {
                     resultSection(title: "Document Lookup", response: documentResponse)
+                }
+
+                sessionStateControls
+
+                if let sessionStateResponse {
+                    MirrorRow(
+                        title: sessionStateResponse.ok == false ? "Session state failed" : "Session state recorded",
+                        detail: sessionStateResponse.data ?? sessionStateResponse.error ?? "Knowledge Fabric accepted the session-state receipt.",
+                        badge: sessionStateResponse.ok == false ? "Error" : "Memory",
+                        tint: sessionStateResponse.ok == false ? .orange : .green
+                    )
                 }
             }
         }
@@ -468,6 +486,39 @@ private struct NativeKnowledgeFabricPanel: View {
             if isLookingUpDocument {
                 ProgressView("Loading document...")
                     .controlSize(.small)
+            }
+        }
+    }
+
+    private var sessionStateControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Record session state")
+                .font(.headline)
+            TextEditor(text: $sessionSummary)
+                .font(.body)
+                .frame(minHeight: 88)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+                }
+            HStack(spacing: 12) {
+                Picker("Scope", selection: $sessionScope) {
+                    Text("Business").tag("business")
+                    Text("Personal").tag("personal")
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 240)
+                TextField("Agent source", text: $sessionAgentSource)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Session id", text: $sessionID)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Project", text: $sessionProject)
+                    .textFieldStyle(.roundedBorder)
+                Button(isRecordingSessionState ? "Recording..." : "Record") {
+                    Task { await recordSessionState() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isRecordingSessionState || sessionSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -564,6 +615,26 @@ private struct NativeKnowledgeFabricPanel: View {
                 docID: documentID,
                 scope: scope
             )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func recordSessionState() async {
+        guard let connection = appState.activeConnection else { return }
+        isRecordingSessionState = true
+        errorMessage = nil
+        defer { isRecordingSessionState = false }
+        do {
+            sessionStateResponse = try await appState.caelWorkspaceAPIService.recordKnowledgeFabricSessionState(
+                connection: connection,
+                summary: sessionSummary,
+                memoryScope: sessionScope,
+                agentSource: sessionAgentSource,
+                sessionId: sessionID,
+                project: sessionProject
+            )
+            sessionSummary = ""
         } catch {
             errorMessage = error.localizedDescription
         }
