@@ -1409,9 +1409,12 @@ private struct NativeMemoryKnowledgeFilesPanel: View {
     @State private var secondBrainFolder = ""
     @State private var secondBrainEntries: [WorkspaceSecondBrainEntry] = []
     @State private var secondBrainHash = ""
+    @State private var secondBrainDispatchOperation = "ingest"
+    @State private var secondBrainDispatchResponse: WorkspaceSecondBrainDispatchResponse?
     @State private var statusMessage: String?
     @State private var isLoading = false
     @State private var isSaving = false
+    @State private var isDispatchingSecondBrainWorkflow = false
 
     private var activeSecondBrainSource: WorkspaceSecondBrainSource? {
         secondBrainSources.first { $0.id == secondBrainSourceID }
@@ -1538,6 +1541,8 @@ private struct NativeMemoryKnowledgeFilesPanel: View {
                     badge: activeSecondBrainSource.writable ? "Writable" : "Read-only",
                     tint: activeSecondBrainSource.writable ? .green : .secondary
                 )
+
+                secondBrainDispatchControls(activeSecondBrainSource)
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
@@ -1568,6 +1573,48 @@ private struct NativeMemoryKnowledgeFilesPanel: View {
         .onChange(of: secondBrainSourceID) { _, _ in
             secondBrainFolder = ""
             Task { await listSecondBrainEntries() }
+        }
+    }
+
+    private func secondBrainDispatchControls(_ source: WorkspaceSecondBrainSource) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                Picker("Workflow", selection: $secondBrainDispatchOperation) {
+                    Text("Ingest").tag("ingest")
+                    Text("Update").tag("update")
+                    Text("Reclass").tag("reclass")
+                    Text("Reingest").tag("reingest")
+                    Text("Rank").tag("rank")
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 420)
+
+                Button {
+                    Task { await dispatchSecondBrainWorkflow() }
+                } label: {
+                    Label(isDispatchingSecondBrainWorkflow ? "Dispatching" : "Dispatch Workflow", systemImage: "paperplane")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isDispatchingSecondBrainWorkflow || source.status != "available")
+
+                if isDispatchingSecondBrainWorkflow {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            Text(selectedPath.isEmpty ? "Dispatches a source-level workflow through the server-side second-brain registry." : "Dispatch target: \(selectedPath)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let response = secondBrainDispatchResponse {
+                MirrorRow(
+                    title: response.status ?? "dispatch",
+                    detail: secondBrainDispatchDetail(response),
+                    badge: response.n8n?.configured == true ? "n8n" : "Dry run",
+                    tint: response.ok ? .green : .orange
+                )
+            }
         }
     }
 
@@ -1751,6 +1798,28 @@ private struct NativeMemoryKnowledgeFilesPanel: View {
         }
     }
 
+    private func dispatchSecondBrainWorkflow() async {
+        guard let connection = appState.activeConnection, !secondBrainSourceID.isEmpty else { return }
+        isDispatchingSecondBrainWorkflow = true
+        defer { isDispatchingSecondBrainWorkflow = false }
+        do {
+            let trimmedPath = selectedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hash = trimmedPath.isEmpty ? nil : secondBrainHash.nilIfBlank
+            let response = try await appState.caelWorkspaceAPIService.dispatchSecondBrainWorkflow(
+                connection: connection,
+                source: secondBrainSourceID,
+                path: trimmedPath.nilIfBlank,
+                operation: secondBrainDispatchOperation,
+                hash: hash
+            )
+            secondBrainDispatchResponse = response
+            statusMessage = "Second-brain \(response.status ?? "dispatch") accepted for \(secondBrainDispatchOperation)."
+        } catch {
+            secondBrainDispatchResponse = nil
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
     private func saveSecondBrain() async {
         guard let connection = appState.activeConnection, !secondBrainSourceID.isEmpty, !selectedPath.isEmpty else { return }
         isSaving = true
@@ -1768,6 +1837,12 @@ private struct NativeMemoryKnowledgeFilesPanel: View {
         } catch {
             statusMessage = "Error: \(error.localizedDescription)"
         }
+    }
+
+    private func secondBrainDispatchDetail(_ response: WorkspaceSecondBrainDispatchResponse) -> String {
+        let endpoint = response.n8n?.endpointLabel ?? "not configured"
+        let idempotencyKey = response.idempotencyKey ?? "no idempotency key returned"
+        return "Operation: \(response.operation ?? secondBrainDispatchOperation). Endpoint: \(endpoint). Idempotency: \(idempotencyKey)."
     }
 
     private func parentPath(_ value: String) -> String {

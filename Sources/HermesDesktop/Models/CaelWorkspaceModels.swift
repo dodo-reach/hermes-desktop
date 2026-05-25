@@ -968,6 +968,20 @@ struct WorkspaceSecondBrainWriteResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceSecondBrainDispatchResponse: Decodable {
+    let ok: Bool
+    let status: String?
+    let operation: String?
+    let idempotencyKey: String?
+    let n8n: WorkspaceSecondBrainDispatchTarget?
+    let error: String?
+}
+
+struct WorkspaceSecondBrainDispatchTarget: Decodable {
+    let configured: Bool
+    let endpointLabel: String
+}
+
 
 struct WorkspaceTerminalSessionsResponse: Decodable {
     let ok: Bool?

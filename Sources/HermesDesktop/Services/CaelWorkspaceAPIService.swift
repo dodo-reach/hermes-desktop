@@ -917,6 +917,31 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return response
     }
 
+    @discardableResult
+    func dispatchSecondBrainWorkflow(
+        connection: ConnectionProfile,
+        source: String,
+        path filePath: String?,
+        operation: String,
+        hash: String?
+    ) async throws -> WorkspaceSecondBrainDispatchResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/second-brain/dispatch",
+            body: WorkspaceSecondBrainDispatchRequest(
+                source: source,
+                path: filePath,
+                operation: operation,
+                hash: hash
+            ),
+            responseType: WorkspaceSecondBrainDispatchResponse.self
+        )
+        guard response.ok else {
+            throw SSHTransportError.invalidResponse(response.error ?? "Second Brain dispatch failed.")
+        }
+        return response
+    }
+
     private func searchKnowledgeFabricScope(
         connection: ConnectionProfile,
         query: String,
@@ -1416,6 +1441,13 @@ private struct WorkspaceSecondBrainWriteRequest: Encodable {
     let path: String
     let content: String
     let expectedHash: String
+}
+
+private struct WorkspaceSecondBrainDispatchRequest: Encodable {
+    let source: String
+    let path: String?
+    let operation: String
+    let hash: String?
 }
 
 private struct CaelWorkspaceFilesListResponse: Decodable {
