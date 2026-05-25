@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct TerminalWorkspaceView: View {
+    @EnvironmentObject private var appState: AppState
     @ObservedObject var workspace: TerminalWorkspaceStore
     let context: TerminalWorkspaceContext
     let ensureTerminalSession: () -> Void
@@ -8,6 +9,9 @@ struct TerminalWorkspaceView: View {
     @State private var isShowingAppearanceEditor = false
     @State private var isShowingAttachSheet = false
     @State private var attachSessionID = ""
+    @State private var availableTerminalSessions: [WorkspaceTerminalSessionSummary] = []
+    @State private var isLoadingTerminalSessions = false
+    @State private var terminalSessionsError: String?
     private let tabStripHeight: CGFloat = 44
 
     var body: some View {
@@ -111,19 +115,39 @@ struct TerminalWorkspaceView: View {
 
     private var attachWorkspacePTYSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(L10n.string("Attach Shared PTY"))
-                    .font(.title3.weight(.semibold))
-                Text(L10n.string("Paste a Workspace terminal session ID from the web or mobile terminal. If the session has expired, the server will return a new Shared PTY session."))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.string("Attach Shared PTY"))
+                        .font(.title3.weight(.semibold))
+                    Text(L10n.string("Attach to a live Workspace terminal session from web or mobile, or paste a session ID manually."))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Button {
+                    Task { await loadAvailableTerminalSessions() }
+                } label: {
+                    Label(L10n.string("Refresh"), systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoadingTerminalSessions || context.activeConnection == nil)
             }
 
-            TextField(L10n.string("Session ID"), text: $attachSessionID)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
-                .onSubmit { attachWorkspacePTY() }
+            terminalSessionPicker
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.string("Manual session ID"))
+                    .font(.headline)
+                TextField(L10n.string("Session ID"), text: $attachSessionID)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit { attachWorkspacePTY() }
+            }
 
             HStack {
                 Spacer()
@@ -138,7 +162,83 @@ struct TerminalWorkspaceView: View {
             }
         }
         .padding(20)
-        .frame(width: 520)
+        .frame(width: 620, height: 520)
+        .task {
+            await loadAvailableTerminalSessions()
+        }
+    }
+
+    private var terminalSessionPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.string("Live Workspace sessions"))
+                .font(.headline)
+
+            if isLoadingTerminalSessions {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(L10n.string("Loading sessions..."))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 140, alignment: .center)
+            } else if let terminalSessionsError {
+                ContentUnavailableView(
+                    L10n.string("Could not load sessions"),
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(terminalSessionsError)
+                )
+                .frame(maxWidth: .infinity, minHeight: 140)
+            } else if availableTerminalSessions.isEmpty {
+                ContentUnavailableView(
+                    L10n.string("No live Workspace PTYs"),
+                    systemImage: "terminal",
+                    description: Text(L10n.string("Open a Shared PTY tab in desktop or web, then refresh this list."))
+                )
+                .frame(maxWidth: .infinity, minHeight: 140)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(availableTerminalSessions) { session in
+                            terminalSessionRow(session)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: 210)
+            }
+        }
+    }
+
+    private func terminalSessionRow(_ session: WorkspaceTerminalSessionSummary) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "terminal")
+                .foregroundStyle(.tint)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(shortTerminalSessionID(session.id))
+                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                    .lineLimit(1)
+
+                Text(terminalSessionSubtitle(session))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            Text(terminalSessionCreatedLabel(session))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button(L10n.string("Attach")) {
+                attachWorkspacePTY(sessionID: session.id)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var terminalAppearance: TerminalThemeAppearance {
@@ -170,15 +270,51 @@ struct TerminalWorkspaceView: View {
         }
     }
 
-    private func attachWorkspacePTY() {
+    private func loadAvailableTerminalSessions() async {
         guard let connection = context.activeConnection else { return }
+        isLoadingTerminalSessions = true
+        terminalSessionsError = nil
+        do {
+            let response = try await appState.caelWorkspaceAPIService.loadWorkspaceTerminalSessions(connection: connection)
+            availableTerminalSessions = response.sessions
+            terminalSessionsError = response.ok == false ? response.error : nil
+        } catch {
+            availableTerminalSessions = []
+            terminalSessionsError = error.localizedDescription
+        }
+        isLoadingTerminalSessions = false
+    }
+
+    private func attachWorkspacePTY() {
         let sessionID = attachSessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        attachWorkspacePTY(sessionID: sessionID)
+    }
+
+    private func attachWorkspacePTY(sessionID: String) {
+        guard let connection = context.activeConnection else { return }
         guard !sessionID.isEmpty else { return }
         DispatchQueue.main.async {
             workspace.addWorkspaceTerminalTab(for: connection.updated(), sessionId: sessionID)
             isShowingAttachSheet = false
             attachSessionID = ""
         }
+    }
+
+    private func shortTerminalSessionID(_ sessionID: String) -> String {
+        if sessionID.count <= 12 { return sessionID }
+        return String(sessionID.prefix(8)) + "..." + String(sessionID.suffix(4))
+    }
+
+    private func terminalSessionSubtitle(_ session: WorkspaceTerminalSessionSummary) -> String {
+        let command = session.command.joined(separator: " ")
+        let cwd = session.cwd ?? "unknown cwd"
+        let size = "\(session.cols ?? 0)x\(session.rows ?? 0)"
+        return "\(command.isEmpty ? "shell" : command) - \(cwd) - \(size)"
+    }
+
+    private func terminalSessionCreatedLabel(_ session: WorkspaceTerminalSessionSummary) -> String {
+        let date = Date(timeIntervalSince1970: session.createdAt / 1000)
+        return date.formatted(date: .omitted, time: .shortened)
     }
 
     private func requestTabSelection(_ tabID: UUID) {

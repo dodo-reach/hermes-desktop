@@ -216,7 +216,7 @@ final class WorkspaceTerminalViewHost: NSObject, TerminalViewDelegate {
     }
 
     private func resize(cols: Int, rows: Int) async {
-        guard shouldCloseServerSessionOnTerminate, let sessionId, let baseURL else { return }
+        guard let sessionId, let baseURL else { return }
         try? await post(baseURL: baseURL, path: "/api/terminal-resize", body: [
             "sessionId": sessionId,
             "cols": max(20, cols),

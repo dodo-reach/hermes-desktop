@@ -969,6 +969,22 @@ struct WorkspaceSecondBrainWriteResponse: Decodable {
 }
 
 
+struct WorkspaceTerminalSessionsResponse: Decodable {
+    let ok: Bool?
+    let sessions: [WorkspaceTerminalSessionSummary]
+    let error: String?
+}
+
+struct WorkspaceTerminalSessionSummary: Decodable, Identifiable, Hashable {
+    let id: String
+    let createdAt: Double
+    let cwd: String?
+    let command: [String]
+    let cols: Int?
+    let rows: Int?
+    let idleTtlMs: Int?
+}
+
 struct WorkspaceSessionCreateResponse: Decodable {
     let ok: Bool?
     let sessionKey: String?

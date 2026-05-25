@@ -86,6 +86,10 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return try await loadJSON(connection: connection, path: path, responseType: CaelProviderUsageLimits.self)
     }
 
+    func loadWorkspaceTerminalSessions(connection: ConnectionProfile) async throws -> WorkspaceTerminalSessionsResponse {
+        try await loadJSON(connection: connection, path: "/api/terminal-sessions", responseType: WorkspaceTerminalSessionsResponse.self)
+    }
+
     func loadWorkspaceSkills(
         connection: ConnectionProfile,
         tab: String = "installed",
