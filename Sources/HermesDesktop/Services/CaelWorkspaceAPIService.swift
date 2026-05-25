@@ -1051,6 +1051,75 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return components.string ?? path
     }
 
+    func loadSwarmHealth(connection: ConnectionProfile) async throws -> WorkspaceSwarmHealthResponse {
+        try await loadJSON(connection: connection, path: "/api/swarm-health", responseType: WorkspaceSwarmHealthResponse.self)
+    }
+
+    func loadSwarmRuntime(connection: ConnectionProfile) async throws -> WorkspaceSwarmRuntimeResponse {
+        try await loadJSON(connection: connection, path: "/api/swarm-runtime", responseType: WorkspaceSwarmRuntimeResponse.self)
+    }
+
+    func loadSwarmMissions(connection: ConnectionProfile, limit: Int = 8) async throws -> WorkspaceSwarmMissionsResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/swarm-missions", queryItems: [URLQueryItem(name: "limit", value: String(limit))]),
+            responseType: WorkspaceSwarmMissionsResponse.self
+        )
+    }
+
+    @discardableResult
+    func startSwarmWorkerTmux(connection: ConnectionProfile, workerID: String) async throws -> WorkspaceSwarmWorkerMutationResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/swarm-tmux-start",
+            body: WorkspaceSwarmWorkerRequest(workerId: workerID),
+            responseType: WorkspaceSwarmWorkerMutationResponse.self
+        )
+        if let error = response.error?.nilIfBlank {
+            throw SSHTransportError.invalidResponse(error)
+        }
+        return response
+    }
+
+    @discardableResult
+    func stopSwarmWorkerTmux(connection: ConnectionProfile, workerID: String) async throws -> WorkspaceSwarmWorkerMutationResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/swarm-tmux-stop",
+            body: WorkspaceSwarmWorkerRequest(workerId: workerID),
+            responseType: WorkspaceSwarmWorkerMutationResponse.self
+        )
+        if let error = response.error?.nilIfBlank {
+            throw SSHTransportError.invalidResponse(error)
+        }
+        return response
+    }
+
+    @discardableResult
+    func dispatchSwarmPrompt(
+        connection: ConnectionProfile,
+        workerID: String,
+        prompt: String,
+        timeoutSeconds: Int = 60,
+        allowAsync: Bool = false
+    ) async throws -> WorkspaceSwarmDispatchResponse {
+        let response = try await postJSON(
+            connection: connection,
+            path: "/api/swarm-dispatch",
+            body: WorkspaceSwarmDispatchRequest(
+                workerIds: [workerID],
+                prompt: prompt,
+                timeoutSeconds: timeoutSeconds,
+                allowAsync: allowAsync
+            ),
+            responseType: WorkspaceSwarmDispatchResponse.self
+        )
+        if let error = response.error?.nilIfBlank {
+            throw SSHTransportError.invalidResponse(error)
+        }
+        return response
+    }
+
 
     func listMCPServers(connection: ConnectionProfile, search: String = "", category: String = "All") async throws -> WorkspaceMCPListResponse {
         var queryItems: [URLQueryItem] = []
@@ -1558,6 +1627,17 @@ private struct WorkspaceMCPConfigureRequest: Encodable {
     let toolMode: String?
     let includeTools: [String]?
     let excludeTools: [String]?
+}
+
+private struct WorkspaceSwarmWorkerRequest: Encodable {
+    let workerId: String
+}
+
+private struct WorkspaceSwarmDispatchRequest: Encodable {
+    let workerIds: [String]
+    let prompt: String
+    let timeoutSeconds: Int
+    let allowAsync: Bool
 }
 
 private struct WorkspaceSecondBrainWriteRequest: Encodable {

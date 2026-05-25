@@ -1217,6 +1217,149 @@ struct WorkspaceMCPTool: Decodable, Identifiable {
     let description: String?
 }
 
+struct WorkspaceSwarmHealthResponse: Decodable {
+    let workspaceModel: String?
+    let apiUrl: String?
+    let checkedAt: Double?
+    let workers: [WorkspaceSwarmWorkerHealth]
+    let summary: WorkspaceSwarmHealthSummary
+}
+
+struct WorkspaceSwarmHealthSummary: Decodable {
+    let totalWorkers: Int
+    let wrappersConfigured: Int?
+    let totalAuthErrors24h: Int
+    let totalFallbacks24h: Int?
+    let workersUsingFallback: Int?
+    let workersPrimaryAuthFailed: Int?
+    let distinctModels: [String]
+    let distinctProviders: [String]
+    let degraded: Bool
+    let warnings: [String]
+}
+
+struct WorkspaceSwarmWorkerHealth: Decodable, Identifiable {
+    var id: String { workerId }
+    let workerId: String
+    let displayName: String
+    let humanLabel: String
+    let role: String
+    let specialty: String?
+    let mission: String?
+    let profileFound: Bool
+    let wrapperFound: Bool
+    let model: String
+    let provider: String
+    let recentAuthErrors: Int
+    let recentFallbacks: Int
+    let lastErrorMessage: String?
+    let modelAuthStatus: String
+    let fallbackActive: Bool
+}
+
+struct WorkspaceSwarmRuntimeResponse: Decodable {
+    let checkedAt: Double
+    let registryVersion: Int?
+    let workspaceRoot: String?
+    let tmuxAvailable: Bool
+    let mode: String?
+    let entries: [WorkspaceSwarmRuntimeEntry]
+}
+
+struct WorkspaceSwarmRuntimeEntry: Decodable, Identifiable {
+    var id: String { workerId }
+    let workerId: String
+    let displayName: String
+    let humanLabel: String
+    let role: String
+    let specialty: String?
+    let mission: String?
+    let source: String?
+    let pid: Int?
+    let startedAt: Double?
+    let lastOutputAt: Double?
+    let cwd: String?
+    let currentTask: String?
+    let activeTool: String?
+    let state: String
+    let phase: String
+    let checkpointStatus: String
+    let needsHuman: Bool
+    let blockedReason: String?
+    let lastCheckIn: String?
+    let lastSummary: String?
+    let nextAction: String?
+    let lastResult: String?
+    let assignedTaskCount: Int
+    let cronJobCount: Int
+    let tmuxSession: String?
+    let tmuxAttachable: Bool
+    let recentLogTail: String?
+    let logPath: String?
+    let terminalKind: String?
+    let profilePath: String
+    let wrapperPath: String?
+}
+
+struct WorkspaceSwarmMissionsResponse: Decodable {
+    let ok: Bool
+    let path: String?
+    let mission: WorkspaceSwarmMission?
+    let missions: [WorkspaceSwarmMission]
+    let reports: [CaelJSONValue]
+    let fetchedAt: Double?
+    let error: String?
+}
+
+struct WorkspaceSwarmMission: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let state: String
+    let createdAt: String?
+    let updatedAt: String?
+    let assignments: [WorkspaceSwarmAssignment]
+}
+
+struct WorkspaceSwarmAssignment: Decodable, Identifiable {
+    let id: String
+    let workerId: String
+    let task: String
+    let state: String
+    let rationale: String?
+    let reviewRequired: Bool?
+}
+
+struct WorkspaceSwarmWorkerMutationResponse: Decodable {
+    let workerId: String?
+    let sessionName: String?
+    let alreadyRunning: Bool?
+    let started: Bool?
+    let wasRunning: Bool?
+    let killed: Bool?
+    let runtimePatched: Bool?
+    let error: String?
+}
+
+struct WorkspaceSwarmDispatchResponse: Decodable {
+    let ok: Bool?
+    let missionId: String?
+    let missionTitle: String?
+    let results: [WorkspaceSwarmDispatchResult]?
+    let error: String?
+}
+
+struct WorkspaceSwarmDispatchResult: Decodable, Identifiable {
+    var id: String { workerId }
+    let workerId: String
+    let ok: Bool
+    let output: String
+    let error: String?
+    let durationMs: Double?
+    let exitCode: Int?
+    let delivery: String?
+    let checkpointStatus: String?
+}
+
 private extension String {
     var nilIfBlank: String? {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self

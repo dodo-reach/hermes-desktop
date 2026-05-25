@@ -82,8 +82,10 @@ struct CommandCenterMirrorView: View {
             switch section {
             case .mail, .contacts, .calendar:
                 workspaceDataSection
-            case .missionControl, .swarm:
+            case .missionControl:
                 runsAndGatesSection
+            case .swarm:
+                swarmSection
             case .operations:
                 operationsSection
             case .memory:
@@ -128,6 +130,14 @@ struct CommandCenterMirrorView: View {
 
     private var runsAndGatesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
+            agentRunsPanel
+            actionGatesPanel
+        }
+    }
+
+    private var swarmSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            NativeSwarmPanel()
             agentRunsPanel
             actionGatesPanel
         }
@@ -1057,6 +1067,326 @@ private struct OperationMiniStat: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Color.secondary.opacity(0.12), in: Capsule())
+    }
+}
+
+private struct NativeSwarmPanel: View {
+    @EnvironmentObject private var appState: AppState
+
+    @State private var health: WorkspaceSwarmHealthResponse?
+    @State private var runtime: WorkspaceSwarmRuntimeResponse?
+    @State private var missions: WorkspaceSwarmMissionsResponse?
+    @State private var selectedWorkerID: String?
+    @State private var dispatchPrompt = "Reply with exactly: SWARM_PING_OK"
+    @State private var statusMessage: String?
+    @State private var isLoading = false
+    @State private var mutatingWorkerID: String?
+    @State private var dispatchingWorkerID: String?
+
+    private var workers: [WorkspaceSwarmWorkerHealth] {
+        (health?.workers ?? []).sorted { left, right in
+            swarmSortKey(left.workerId) < swarmSortKey(right.workerId)
+        }
+    }
+
+    private var selectedWorker: WorkspaceSwarmWorkerHealth? {
+        guard let selectedWorkerID else { return workers.first }
+        return workers.first { $0.workerId == selectedWorkerID } ?? workers.first
+    }
+
+    var body: some View {
+        HermesSurfacePanel(
+            title: "Swarm Runtime",
+            subtitle: "Native worker health, live runtime, tmux lifecycle, and direct dispatch through the shared Workspace Swarm APIs."
+        ) {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+
+                if let statusMessage {
+                    MirrorRow(title: "Status", detail: statusMessage, tint: statusMessage.lowercased().contains("error") ? .orange : .blue)
+                }
+
+                workerGrid
+                dispatchPanel
+                missionsPanel
+            }
+        }
+        .task(id: appState.activeConnectionID) {
+            await loadAll()
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(health?.summary.degraded == true ? "Needs attention" : "Runtime ready")
+                    .font(.headline)
+                Text(summaryDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Button("Refresh") {
+                Task { await loadAll() }
+            }
+            .disabled(isLoading)
+        }
+    }
+
+    private var summaryDetail: String {
+        guard let health else { return "Load Swarm health from /api/swarm-health." }
+        let providers = health.summary.distinctProviders.prefix(3).joined(separator: ", ")
+        return [
+            "\(health.summary.totalWorkers) workers",
+            "\(health.summary.wrappersConfigured ?? 0) wrappers",
+            "\(runtime?.entries.filter(\.tmuxAttachable).count ?? 0) tmux attached",
+            providers.isEmpty ? nil : providers
+        ].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var workerGrid: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Workers")
+                    .font(.headline)
+                Spacer()
+                if let runtime {
+                    Text(runtime.tmuxAvailable ? "tmux available" : "tmux unavailable")
+                        .font(.caption)
+                        .foregroundStyle(runtime.tmuxAvailable ? Color.green : Color.orange)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], spacing: 12) {
+                ForEach(workers) { worker in
+                    workerCard(worker)
+                }
+            }
+
+            if health != nil && workers.isEmpty {
+                Text("No swarm workers reported by the active Workspace.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func workerCard(_ worker: WorkspaceSwarmWorkerHealth) -> some View {
+        let runtimeEntry = runtimeEntry(for: worker.workerId)
+        let isSelected = selectedWorker?.workerId == worker.workerId
+        return MirrorListCard(title: worker.humanLabel, emptyText: "No worker detail reported.") {
+            MirrorRow(
+                title: runtimeEntry?.state ?? worker.modelAuthStatus,
+                detail: workerDetail(worker, runtimeEntry: runtimeEntry),
+                badge: runtimeEntry?.tmuxAttachable == true ? "tmux" : (worker.wrapperFound ? "ready" : "setup"),
+                tint: workerTint(worker, runtimeEntry: runtimeEntry)
+            )
+            if let currentTask = runtimeEntry?.currentTask?.nilIfBlank {
+                MirrorRow(title: "Current task", detail: currentTask, tint: .blue)
+            }
+            if let tail = runtimeEntry?.recentLogTail?.nilIfBlank {
+                MirrorRow(title: "Recent log", detail: preview(tail, maxLength: 260), tint: .secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button(isSelected ? "Selected" : "Select") {
+                    selectedWorkerID = worker.workerId
+                }
+
+                Button(runtimeEntry?.tmuxAttachable == true ? "Attach Ready" : "Start tmux") {
+                    Task { await startWorker(worker.workerId) }
+                }
+                .disabled(mutatingWorkerID != nil || runtimeEntry?.tmuxAttachable == true)
+
+                Button("Stop", role: .destructive) {
+                    Task { await stopWorker(worker.workerId) }
+                }
+                .disabled(mutatingWorkerID != nil || runtimeEntry?.tmuxAttachable != true)
+            }
+            .font(.caption)
+        }
+    }
+
+    private var dispatchPanel: some View {
+        MirrorListCard(title: "Direct Dispatch", emptyText: "Select a worker before dispatching.") {
+            if let worker = selectedWorker {
+                MirrorRow(
+                    title: worker.workerId,
+                    detail: worker.mission ?? worker.specialty ?? worker.role,
+                    badge: dispatchingWorkerID == worker.workerId ? "Sending" : "Selected",
+                    tint: .cyan
+                )
+
+                TextEditor(text: $dispatchPrompt)
+                    .font(.body)
+                    .frame(minHeight: 88)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+                    }
+
+                HStack {
+                    Spacer()
+                    Button(dispatchingWorkerID == worker.workerId ? "Dispatching..." : "Dispatch to \(worker.workerId)") {
+                        Task { await dispatch(to: worker.workerId) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(dispatchingWorkerID != nil || dispatchPrompt.nilIfBlank == nil)
+                }
+            } else {
+                Text("No workers available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var missionsPanel: some View {
+        MirrorListCard(title: "Recent Missions", emptyText: "No swarm missions reported.") {
+            let missionList = missions?.missions ?? []
+            if missionList.isEmpty {
+                Text("Mission history is loaded from /api/swarm-missions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(missionList.prefix(6)) { mission in
+                    MirrorRow(
+                        title: mission.title,
+                        detail: "\(mission.assignments.count) assignments · \(mission.updatedAt ?? mission.createdAt ?? "unknown time")",
+                        badge: mission.state,
+                        tint: tint(forStatus: mission.state)
+                    )
+                }
+            }
+        }
+    }
+
+    private func loadAll() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        statusMessage = nil
+        defer { isLoading = false }
+        do {
+            async let healthResponse = appState.caelWorkspaceAPIService.loadSwarmHealth(connection: connection)
+            async let runtimeResponse = appState.caelWorkspaceAPIService.loadSwarmRuntime(connection: connection)
+            async let missionsResponse = appState.caelWorkspaceAPIService.loadSwarmMissions(connection: connection, limit: 8)
+            let (loadedHealth, loadedRuntime, loadedMissions) = try await (healthResponse, runtimeResponse, missionsResponse)
+            health = loadedHealth
+            runtime = loadedRuntime
+            missions = loadedMissions
+            if selectedWorkerID == nil {
+                selectedWorkerID = loadedHealth.workers.first?.workerId
+            }
+            statusMessage = "Loaded \(loadedHealth.summary.totalWorkers) workers and \(loadedMissions.missions.count) recent missions."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func startWorker(_ workerID: String) async {
+        guard let connection = appState.activeConnection else { return }
+        mutatingWorkerID = workerID
+        statusMessage = nil
+        defer { mutatingWorkerID = nil }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.startSwarmWorkerTmux(connection: connection, workerID: workerID)
+            statusMessage = response.alreadyRunning == true ? "\(workerID) already had a tmux session." : "Started \(response.sessionName ?? workerID)."
+            await loadAll()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func stopWorker(_ workerID: String) async {
+        guard let connection = appState.activeConnection else { return }
+        mutatingWorkerID = workerID
+        statusMessage = nil
+        defer { mutatingWorkerID = nil }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.stopSwarmWorkerTmux(connection: connection, workerID: workerID)
+            statusMessage = response.wasRunning == true ? "Stopped \(response.sessionName ?? workerID)." : "\(workerID) was not running."
+            await loadAll()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func dispatch(to workerID: String) async {
+        guard let connection = appState.activeConnection, let prompt = dispatchPrompt.nilIfBlank else { return }
+        dispatchingWorkerID = workerID
+        statusMessage = nil
+        defer { dispatchingWorkerID = nil }
+        do {
+            let response = try await appState.caelWorkspaceAPIService.dispatchSwarmPrompt(
+                connection: connection,
+                workerID: workerID,
+                prompt: prompt,
+                timeoutSeconds: 60,
+                allowAsync: false
+            )
+            if let result = response.results?.first {
+                statusMessage = result.ok
+                    ? "\(workerID) replied in \(String(format: "%.1f", (result.durationMs ?? 0) / 1000))s: \(preview(result.output, maxLength: 120))"
+                    : "\(workerID) failed: \(result.error ?? "unknown error")"
+            } else {
+                statusMessage = response.ok == false ? (response.error ?? "Dispatch failed.") : "Dispatch accepted."
+            }
+            await loadAll()
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func runtimeEntry(for workerID: String) -> WorkspaceSwarmRuntimeEntry? {
+        runtime?.entries.first { $0.workerId == workerID }
+    }
+
+    private func workerDetail(_ worker: WorkspaceSwarmWorkerHealth, runtimeEntry: WorkspaceSwarmRuntimeEntry?) -> String {
+        [
+            worker.specialty?.nilIfBlank ?? worker.role,
+            "\(worker.provider) / \(worker.model)",
+            runtimeEntry?.tmuxSession?.nilIfBlank.map { "tmux: \($0)" },
+            runtimeEntry?.lastOutputAt.map { "last output \(formatTimestamp($0))" },
+            worker.lastErrorMessage?.nilIfBlank
+        ].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    private func swarmSortKey(_ workerID: String) -> String {
+        let number = Int(workerID.replacingOccurrences(of: #"^\D+"#, with: "", options: .regularExpression)) ?? 9999
+        return String(format: "%04d-%@", number, workerID)
+    }
+
+    private func workerTint(_ worker: WorkspaceSwarmWorkerHealth, runtimeEntry: WorkspaceSwarmRuntimeEntry?) -> Color {
+        if worker.recentAuthErrors > 0 || worker.fallbackActive || runtimeEntry?.needsHuman == true { return .orange }
+        if runtimeEntry?.tmuxAttachable == true || runtimeEntry?.state.lowercased() == "running" { return .green }
+        if worker.wrapperFound { return .blue }
+        return .secondary
+    }
+
+    private func tint(forStatus status: String) -> Color {
+        switch status.lowercased() {
+        case "complete", "done", "running", "executing": return .green
+        case "blocked", "failed", "cancelled", "error": return .orange
+        default: return .blue
+        }
+    }
+
+    private func formatTimestamp(_ value: Double) -> String {
+        let seconds = value > 1_000_000_000_000 ? value / 1000 : value
+        return Date(timeIntervalSince1970: seconds).formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func preview(_ value: String, maxLength: Int) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\n\n", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.count <= maxLength { return normalized.isEmpty ? "No preview available." : normalized }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return String(normalized[..<index]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 }
 
