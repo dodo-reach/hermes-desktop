@@ -16,4 +16,25 @@ struct AppSectionTests {
         #expect(AppSection.skills.navigationShortcutKey == "9")
         #expect(AppSection.terminal.navigationShortcutKey == "0")
     }
+
+    @Test
+    func commandCenterMirrorSectionsDoNotClaimNumberShortcuts() {
+        let mirrorSections: [AppSection] = [
+            .mail,
+            .contacts,
+            .calendar,
+            .missionControl,
+            .operations,
+            .swarm,
+            .memory,
+            .integrations,
+            .mcp,
+            .profiles
+        ]
+
+        for section in mirrorSections {
+            #expect(section.isCommandCenterMirrorSection)
+            #expect(section.navigationShortcutKey == nil)
+        }
+    }
 }

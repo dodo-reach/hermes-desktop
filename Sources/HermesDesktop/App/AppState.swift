@@ -276,6 +276,9 @@ final class AppState: ObservableObject {
 
     var canRefreshCurrentSection: Bool {
         guard activeConnection != nil else { return false }
+        if selectedSection.isCommandCenterMirrorSection {
+            return !isLoadingCaelWorkspace && !isRefreshingCaelWorkspace
+        }
 
         switch selectedSection {
         case .overview:
@@ -292,7 +295,7 @@ final class AppState: ObservableObject {
             return !isLoadingUsage && !isRefreshingUsage && !isLoadingCaelProviderUsage && !isRefreshingCaelProviderUsage
         case .skills:
             return !isLoadingSkills && !isRefreshingSkills
-        case .connections, .files, .terminal:
+        case .connections, .files, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles, .terminal:
             return false
         }
     }
@@ -309,7 +312,7 @@ final class AppState: ObservableObject {
         switch selectedSection {
         case .sessions, .workflows, .cronjobs, .kanban, .skills:
             return true
-        case .connections, .overview, .files, .usage, .terminal:
+        case .connections, .overview, .files, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .usage, .memory, .integrations, .mcp, .profiles, .terminal:
             return false
         }
     }
@@ -378,6 +381,10 @@ final class AppState: ObservableObject {
 
     func refreshCurrentSectionFromCommand() async {
         guard canRefreshCurrentSection else { return }
+        if selectedSection.isCommandCenterMirrorSection {
+            await refreshCaelWorkspace()
+            return
+        }
 
         switch selectedSection {
         case .overview:
@@ -395,7 +402,7 @@ final class AppState: ObservableObject {
             await refreshCaelProviderUsage()
         case .skills:
             await refreshSkills()
-        case .connections, .files, .terminal:
+        case .connections, .files, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles, .terminal:
             break
         }
     }
@@ -2892,6 +2899,11 @@ final class AppState: ObservableObject {
     }
 
     private func handleSectionEntry(_ section: AppSection) {
+        if section.isCommandCenterMirrorSection {
+            Task { await loadCaelWorkspace() }
+            return
+        }
+
         switch section {
         case .overview:
             Task { await loadCaelWorkspace() }
@@ -2918,7 +2930,7 @@ final class AppState: ObservableObject {
             Task { await loadSkills(reset: true) }
         case .terminal:
             ensureTerminalSession()
-        case .connections:
+        case .connections, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
             break
         }
     }
@@ -3008,6 +3020,11 @@ final class AppState: ObservableObject {
     }
 
     private func reloadSectionAfterScopeChange(_ section: AppSection) async {
+        if section.isCommandCenterMirrorSection {
+            await loadCaelWorkspace()
+            return
+        }
+
         switch section {
         case .connections, .overview:
             break
@@ -3029,6 +3046,8 @@ final class AppState: ObservableObject {
             await loadSkills(reset: true)
         case .terminal:
             ensureTerminalSession()
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
+            break
         }
     }
 

@@ -218,7 +218,7 @@ struct RootView: View {
             return $filesSplitLayout
         case .skills:
             return $skillsSplitLayout
-        case .connections, .overview, .usage, .terminal:
+        case .connections, .overview, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .usage, .memory, .integrations, .mcp, .profiles, .terminal:
             return nil
         }
     }
@@ -241,7 +241,28 @@ struct RootView: View {
         if appState.activeConnection == nil {
             return [.connections]
         }
-        return [.connections, .overview, .sessions, .workflows, .cronjobs, .kanban, .files, .usage, .skills, .terminal]
+        return [
+            .connections,
+            .overview,
+            .sessions,
+            .mail,
+            .contacts,
+            .calendar,
+            .workflows,
+            .cronjobs,
+            .kanban,
+            .files,
+            .terminal,
+            .missionControl,
+            .operations,
+            .swarm,
+            .usage,
+            .memory,
+            .skills,
+            .integrations,
+            .mcp,
+            .profiles
+        ]
     }
 
     private var sectionSelection: Binding<AppSection?> {
@@ -291,6 +312,8 @@ struct RootView: View {
             FilesView(splitLayout: $filesSplitLayout)
         case .sessions:
             EmptyView()
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
+            CommandCenterMirrorView(section: appState.selectedSection)
         case .workflows:
             WorkflowsView(splitLayout: $workflowsSplitLayout)
         case .cronjobs:

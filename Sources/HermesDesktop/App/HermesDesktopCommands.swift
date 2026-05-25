@@ -66,11 +66,18 @@ struct HermesDesktopCommands: Commands {
 
         CommandMenu(L10n.string("Navigate")) {
             ForEach(AppSection.allCases) { section in
-                Button(L10n.string("Show %@", section.title)) {
-                    appState.requestSectionSelection(section)
+                if let shortcut = section.navigationShortcutKey {
+                    Button(L10n.string("Show %@", section.title)) {
+                        appState.requestSectionSelection(section)
+                    }
+                    .keyboardShortcut(shortcut, modifiers: [.command])
+                    .disabled(!appState.isSectionAvailable(section))
+                } else {
+                    Button(L10n.string("Show %@", section.title)) {
+                        appState.requestSectionSelection(section)
+                    }
+                    .disabled(!appState.isSectionAvailable(section))
                 }
-                .keyboardShortcut(section.navigationShortcutKey, modifiers: [.command])
-                .disabled(!appState.isSectionAvailable(section))
             }
         }
     }
