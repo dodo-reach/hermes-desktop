@@ -19,7 +19,7 @@ final class AppState: ObservableObject {
     @Published var isRefreshingOverview = false
     @Published var activeConnectionID: UUID?
     @Published var selectedSessionID: String?
-    @Published var selectedSessionDetailMode: SessionDetailMode = .transcript
+    @Published var selectedSessionDetailMode: SessionDetailMode = .chat
     @Published private(set) var sessionTUITerminal: SessionTUITerminal?
     @Published var sessions: [SessionSummary] = []
     @Published var sessionMessages: [SessionMessage] = []
@@ -4587,7 +4587,7 @@ final class AppState: ObservableObject {
             pendingSessionTurn = nil
             hasAcceptedNativeTurnInFlight = false
             sessionCompactionNotice = nil
-            selectedSessionDetailMode = .transcript
+            selectedSessionDetailMode = .chat
             stopSessionTUI()
             clearNativeTurnUIState()
             nativeChatBootstrapStatus = nil
@@ -4696,7 +4696,7 @@ final class AppState: ObservableObject {
         pendingSessionTurn = nil
         hasAcceptedNativeTurnInFlight = false
         sessionCompactionNotice = nil
-        selectedSessionDetailMode = .transcript
+        selectedSessionDetailMode = .chat
         stopSessionTUI()
         clearNativeTurnUIState()
         nativeChatBootstrapStatus = nil
