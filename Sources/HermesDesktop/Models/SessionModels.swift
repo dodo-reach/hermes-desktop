@@ -158,9 +158,60 @@ struct SessionMessage: Codable, Identifiable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         role = try container.decodeIfPresent(SessionMessageRole.self, forKey: .role) ?? .event
-        content = try container.decodeIfPresent(String.self, forKey: .content)
+        content = Self.decodeContent(from: container)
         timestamp = try container.decodeIfPresent(SessionTimestamp.self, forKey: .timestamp)
         metadata = try container.decodeIfPresent([String: JSONValue].self, forKey: .metadata)
+    }
+
+    private static func decodeContent(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) -> String? {
+        if let value = try? container.decodeIfPresent(String.self, forKey: .content) {
+            return value
+        }
+        guard let value = try? container.decodeIfPresent(JSONValue.self, forKey: .content) else {
+            return nil
+        }
+        return contentText(from: value)
+    }
+
+    private static func contentText(from value: JSONValue) -> String? {
+        switch value {
+        case .string(let text):
+            return text
+        case .array(let parts):
+            let text = parts.compactMap(contentPartText).joined(separator: "\n")
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        case .object(let object):
+            return object["text"]?.stringValue ??
+                object["thinking"]?.stringValue ??
+                object["partialJson"]?.stringValue ??
+                value.displayString
+        case .null:
+            return nil
+        default:
+            return value.stringValue
+        }
+    }
+
+    private static func contentPartText(_ value: JSONValue) -> String? {
+        guard case .object(let object) = value else {
+            return contentText(from: value)
+        }
+        if let text = object["text"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            return text
+        }
+        if let thinking = object["thinking"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !thinking.isEmpty {
+            return thinking
+        }
+        if let partial = object["partialJson"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !partial.isEmpty {
+            return partial
+        }
+        return nil
     }
 
     var displayMetadata: [String: JSONValue]? {
