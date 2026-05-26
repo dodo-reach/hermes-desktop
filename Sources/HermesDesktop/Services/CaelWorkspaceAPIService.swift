@@ -1129,6 +1129,66 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         )
     }
 
+    func loadSwarmReports(
+        connection: ConnectionProfile,
+        workerID: String? = nil,
+        missionID: String? = nil,
+        limit: Int = 20
+    ) async throws -> WorkspaceSwarmReportsResponse {
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if let workerID = workerID?.trimmingCharacters(in: .whitespacesAndNewlines), !workerID.isEmpty {
+            items.append(URLQueryItem(name: "workerId", value: workerID))
+        }
+        if let missionID = missionID?.trimmingCharacters(in: .whitespacesAndNewlines), !missionID.isEmpty {
+            items.append(URLQueryItem(name: "missionId", value: missionID))
+        }
+        return try await loadJSON(
+            connection: connection,
+            path: apiPath("/api/swarm-reports", queryItems: items),
+            responseType: WorkspaceSwarmReportsResponse.self
+        )
+    }
+
+    func loadSwarmMemory(
+        connection: ConnectionProfile,
+        workerID: String,
+        kind: String = "profile"
+    ) async throws -> WorkspaceSwarmMemoryResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath(
+                "/api/swarm-memory",
+                queryItems: [
+                    URLQueryItem(name: "workerId", value: workerID),
+                    URLQueryItem(name: "kind", value: kind)
+                ]
+            ),
+            responseType: WorkspaceSwarmMemoryResponse.self
+        )
+    }
+
+    func searchSwarmMemory(
+        connection: ConnectionProfile,
+        workerID: String,
+        query: String,
+        scope: String = "worker",
+        limit: Int = 10
+    ) async throws -> WorkspaceSwarmMemorySearchResponse {
+        try await loadJSON(
+            connection: connection,
+            path: apiPath(
+                "/api/swarm-memory/search",
+                queryItems: [
+                    URLQueryItem(name: "workerId", value: workerID),
+                    URLQueryItem(name: "q", value: query),
+                    URLQueryItem(name: "scope", value: scope),
+                    URLQueryItem(name: "limit", value: String(limit))
+                ]
+            ),
+            responseType: WorkspaceSwarmMemorySearchResponse.self
+        )
+    }
+
     @discardableResult
     func startSwarmWorkerTmux(connection: ConnectionProfile, workerID: String) async throws -> WorkspaceSwarmWorkerMutationResponse {
         let response = try await postJSON(

@@ -1420,6 +1420,32 @@ struct WorkspaceSwarmMissionsResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceSwarmReportsResponse: Decodable {
+    let ok: Bool
+    let fetchedAt: Double?
+    let missionId: String?
+    let workerId: String?
+    let reports: [WorkspaceSwarmReport]
+    let error: String?
+}
+
+struct WorkspaceSwarmReport: Decodable, Identifiable {
+    var id: String { "\(missionId):\(assignmentId):\(workerId):\(recordedAt ?? 0)" }
+    let missionId: String
+    let assignmentId: String
+    let workerId: String
+    let recordedAt: Double?
+    let stateLabel: String?
+    let checkpointStatus: String?
+    let runtimeState: String?
+    let filesChanged: String?
+    let commandsRun: String?
+    let result: String?
+    let blocker: String?
+    let nextAction: String?
+    let source: String?
+}
+
 struct WorkspaceSwarmMission: Decodable, Identifiable {
     let id: String
     let title: String
@@ -1436,6 +1462,36 @@ struct WorkspaceSwarmAssignment: Decodable, Identifiable {
     let state: String
     let rationale: String?
     let reviewRequired: Bool?
+}
+
+struct WorkspaceSwarmMemoryResponse: Decodable {
+    let ok: Bool?
+    let workerId: String?
+    let kind: String
+    let root: String?
+    let path: String?
+    let files: [WorkspaceSwarmMemoryFile]
+    let error: String?
+}
+
+struct WorkspaceSwarmMemoryFile: Decodable, Identifiable {
+    var id: String { path }
+    let name: String
+    let path: String
+    let content: String
+}
+
+struct WorkspaceSwarmMemorySearchResponse: Decodable {
+    let results: [WorkspaceSwarmMemorySearchResult]
+    let error: String?
+}
+
+struct WorkspaceSwarmMemorySearchResult: Decodable, Identifiable {
+    var id: String { "\(path):\(line)" }
+    let path: String
+    let line: Int
+    let score: Double
+    let snippet: String
 }
 
 struct WorkspaceSwarmWorkerMutationResponse: Decodable {

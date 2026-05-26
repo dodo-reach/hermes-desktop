@@ -1081,6 +1081,12 @@ private struct NativeSwarmPanel: View {
     @State private var dispatchPrompt = "Reply with exactly: SWARM_PING_OK"
     @State private var statusMessage: String?
     @State private var isLoading = false
+    @State private var profileMemory: WorkspaceSwarmMemoryResponse?
+    @State private var episodicMemory: WorkspaceSwarmMemoryResponse?
+    @State private var reportSnapshot: WorkspaceSwarmReportsResponse?
+    @State private var memorySearchResults: WorkspaceSwarmMemorySearchResponse?
+    @State private var memorySearchQuery = ""
+    @State private var isLoadingMemory = false
     @State private var mutatingWorkerID: String?
     @State private var dispatchingWorkerID: String?
 
@@ -1110,10 +1116,14 @@ private struct NativeSwarmPanel: View {
                 workerGrid
                 dispatchPanel
                 missionsPanel
+                memoryReportsPanel
             }
         }
         .task(id: appState.activeConnectionID) {
             await loadAll()
+        }
+        .onChange(of: selectedWorkerID) { _, workerID in
+            Task { await loadWorkerMemoryReports(workerID: workerID) }
         }
     }
 
@@ -1266,6 +1276,135 @@ private struct NativeSwarmPanel: View {
         }
     }
 
+    private var memoryReportsPanel: some View {
+        MirrorListCard(title: "Worker Memory + Reports", emptyText: "Select a worker to inspect memory and reports.") {
+            if let worker = selectedWorker {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    MirrorRow(
+                        title: worker.workerId,
+                        detail: "Reads profile memory, episodic memory, search results, and checkpoint reports through shared Swarm APIs.",
+                        badge: isLoadingMemory ? "Loading" : "Selected",
+                        tint: .purple
+                    )
+                    Spacer()
+                    Button("Refresh") {
+                        Task { await loadWorkerMemoryReports(workerID: worker.workerId) }
+                    }
+                    .disabled(isLoadingMemory)
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Search worker memory", text: $memorySearchQuery)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Search") {
+                        Task { await searchMemory(workerID: worker.workerId) }
+                    }
+                    .disabled(isLoadingMemory || memorySearchQuery.nilIfBlank == nil)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
+                    memoryCard(title: "Profile Memory", memory: profileMemory)
+                    memoryCard(title: "Episodic Memory", memory: episodicMemory)
+                    reportsCard
+                    searchResultsCard
+                }
+            } else {
+                Text("No workers available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func memoryCard(title: String, memory: WorkspaceSwarmMemoryResponse?) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            if let error = memory?.error?.nilIfBlank {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if let files = memory?.files, !files.isEmpty {
+                ForEach(files.prefix(3)) { file in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(file.name)
+                            .font(.caption.weight(.semibold))
+                        Text(preview(file.content, maxLength: 220))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if files.count > 3 {
+                    Text("+ \(files.count - 3) more memory files")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            } else {
+                Text(memory == nil ? "Not loaded yet." : "No memory files reported.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var reportsCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Checkpoint Reports")
+                .font(.subheadline.weight(.semibold))
+            let reports = reportSnapshot?.reports ?? []
+            if reports.isEmpty {
+                Text(reportSnapshot == nil ? "Not loaded yet." : "No checkpoint reports for this worker.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(reports.prefix(4)) { report in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(reportTitle(report))
+                            .font(.caption.weight(.semibold))
+                        Text(reportDetail(report))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var searchResultsCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Memory Search")
+                .font(.subheadline.weight(.semibold))
+            let results = memorySearchResults?.results ?? []
+            if results.isEmpty {
+                Text(memorySearchResults == nil ? "Run a search to inspect worker memory." : "No matching memory snippets.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(results.prefix(5)) { result in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(result.path):\(result.line)")
+                            .font(.caption.weight(.semibold))
+                        Text(preview(result.snippet, maxLength: 180))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private func loadAll() async {
         guard let connection = appState.activeConnection else { return }
         isLoading = true
@@ -1283,6 +1422,50 @@ private struct NativeSwarmPanel: View {
                 selectedWorkerID = loadedHealth.workers.first?.workerId
             }
             statusMessage = "Loaded \(loadedHealth.summary.totalWorkers) workers and \(loadedMissions.missions.count) recent missions."
+            await loadWorkerMemoryReports(workerID: selectedWorkerID)
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadWorkerMemoryReports(workerID: String?) async {
+        guard let connection = appState.activeConnection,
+              let workerID = workerID?.nilIfBlank else { return }
+        isLoadingMemory = true
+        defer { isLoadingMemory = false }
+        async let profile: WorkspaceSwarmMemoryResponse? = try? appState.caelWorkspaceAPIService.loadSwarmMemory(
+            connection: connection,
+            workerID: workerID,
+            kind: "profile"
+        )
+        async let episodic: WorkspaceSwarmMemoryResponse? = try? appState.caelWorkspaceAPIService.loadSwarmMemory(
+            connection: connection,
+            workerID: workerID,
+            kind: "episodic"
+        )
+        async let reports: WorkspaceSwarmReportsResponse? = try? appState.caelWorkspaceAPIService.loadSwarmReports(
+            connection: connection,
+            workerID: workerID,
+            limit: 8
+        )
+        profileMemory = await profile
+        episodicMemory = await episodic
+        reportSnapshot = await reports
+    }
+
+    private func searchMemory(workerID: String) async {
+        guard let connection = appState.activeConnection,
+              let query = memorySearchQuery.nilIfBlank else { return }
+        isLoadingMemory = true
+        defer { isLoadingMemory = false }
+        do {
+            memorySearchResults = try await appState.caelWorkspaceAPIService.searchSwarmMemory(
+                connection: connection,
+                workerID: workerID,
+                query: query,
+                scope: "worker",
+                limit: 10
+            )
         } catch {
             statusMessage = "Error: \(error.localizedDescription)"
         }
@@ -1374,6 +1557,22 @@ private struct NativeSwarmPanel: View {
         case "blocked", "failed", "cancelled", "error": return .orange
         default: return .blue
         }
+    }
+
+    private func reportTitle(_ report: WorkspaceSwarmReport) -> String {
+        let status = report.checkpointStatus?.nilIfBlank ?? report.stateLabel?.nilIfBlank ?? "checkpoint"
+        return "\(report.workerId) · \(status)"
+    }
+
+    private func reportDetail(_ report: WorkspaceSwarmReport) -> String {
+        [
+            report.recordedAt.map { formatTimestamp($0) },
+            report.result?.nilIfBlank.map { "Result: \(preview($0, maxLength: 140))" },
+            report.blocker?.nilIfBlank.map { "Blocker: \(preview($0, maxLength: 140))" },
+            report.nextAction?.nilIfBlank.map { "Next: \(preview($0, maxLength: 140))" },
+            report.commandsRun?.nilIfBlank.map { "Commands: \(preview($0, maxLength: 100))" },
+            report.filesChanged?.nilIfBlank.map { "Files: \(preview($0, maxLength: 100))" }
+        ].compactMap { $0 }.joined(separator: "\n")
     }
 
     private func formatTimestamp(_ value: Double) -> String {
