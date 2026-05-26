@@ -310,6 +310,29 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return response
     }
 
+    func loadWorkspaceSessions(
+        connection: ConnectionProfile,
+        offset: Int,
+        limit: Int
+    ) async throws -> SessionListPage {
+        let path = apiPath(
+            "/api/sessions",
+            queryItems: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+        )
+        let response = try await loadJSON(
+            connection: connection,
+            path: path,
+            responseType: WorkspaceSessionsResponse.self
+        )
+        if response.ok == false {
+            throw SSHTransportError.invalidResponse(response.error ?? "Workspace API could not load sessions.")
+        }
+        return response.sessionListPage(offset: offset)
+    }
+
     @discardableResult
     func sendWorkspaceSessionMessage(
         connection: ConnectionProfile,

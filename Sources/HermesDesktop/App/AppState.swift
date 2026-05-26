@@ -1101,6 +1101,60 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func loadSessionPage(
+        connection: ConnectionProfile,
+        offset: Int,
+        limit: Int,
+        query: String
+    ) async throws -> SessionListPage {
+        if query.isEmpty {
+            do {
+                return try await caelWorkspaceAPIService.loadWorkspaceSessions(
+                    connection: connection,
+                    offset: offset,
+                    limit: limit
+                )
+            } catch {
+                return try await sessionBrowserService.listSessions(
+                    connection: connection,
+                    offset: offset,
+                    limit: limit,
+                    query: query
+                )
+            }
+        }
+
+        return try await sessionBrowserService.listSessions(
+            connection: connection,
+            offset: offset,
+            limit: limit,
+            query: query
+        )
+    }
+
+    private func loadSessionMessages(
+        connection: ConnectionProfile,
+        sessionID: String
+    ) async throws -> [SessionMessage] {
+        do {
+            let response = try await caelWorkspaceAPIService.loadWorkspaceSessionHistory(
+                connection: connection,
+                sessionKey: sessionID
+            )
+            if !response.messages.isEmpty {
+                return response.messages
+            }
+        } catch {
+            // Keep the legacy transcript reader as a compatibility fallback while
+            // Sessions moves onto the shared Workspace API contract.
+        }
+
+        return try await sessionBrowserService.loadTranscript(
+            connection: connection,
+            sessionID: sessionID
+        )
+    }
+
     func loadSessions(
         reset: Bool = false,
         query: String? = nil,
@@ -1129,7 +1183,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let page = try await sessionBrowserService.listSessions(
+            let page = try await loadSessionPage(
                 connection: profile,
                 offset: reset ? 0 : sessionOffset,
                 limit: sessionPageSize,
@@ -1213,7 +1267,7 @@ final class AppState: ObservableObject {
         workspaceSessionActiveRun = nil
 
         do {
-            let messages = try await sessionBrowserService.loadTranscript(
+            let messages = try await loadSessionMessages(
                 connection: profile,
                 sessionID: sessionID
             )

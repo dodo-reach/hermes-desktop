@@ -1139,6 +1139,119 @@ struct WorkspaceSessionHistoryResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceSessionsResponse: Decodable {
+    let sessions: [WorkspaceSessionSummary]
+    let totalCount: Int?
+    let ok: Bool?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessions
+        case totalCount = "total_count"
+        case ok
+        case error
+    }
+
+    var sessionSummaries: [SessionSummary] {
+        sessions.compactMap(\.sessionSummary)
+    }
+
+    func sessionListPage(offset: Int) -> SessionListPage {
+        let items = sessionSummaries
+        return SessionListPage(
+            ok: ok ?? true,
+            items: items,
+            totalCount: totalCount ?? offset + items.count
+        )
+    }
+}
+
+struct WorkspaceSessionSummary: Decodable {
+    let key: String?
+    let id: String?
+    let friendlyId: String?
+    let title: String?
+    let label: String?
+    let derivedTitle: String?
+    let preview: String?
+    let model: String?
+    let startedAt: Double?
+    let createdAt: Double?
+    let updatedAt: Double?
+    let messageCount: Int?
+    let messageCountSnake: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case id
+        case friendlyId
+        case title
+        case label
+        case derivedTitle
+        case preview
+        case model
+        case startedAt
+        case createdAt
+        case updatedAt
+        case messageCount
+        case messageCountSnake = "message_count"
+    }
+
+    var sessionSummary: SessionSummary? {
+        guard let sessionID = firstNonBlank(id, key, friendlyId) else {
+            return nil
+        }
+
+        let cleanTitle = Self.cleanDisplayText(firstNonBlank(title, label, derivedTitle))
+        let cleanPreview = Self.cleanDisplayText(preview)
+        let fallbackTitle = Self.fallbackTitle(for: sessionID)
+
+        return SessionSummary(
+            id: sessionID,
+            title: cleanTitle ?? fallbackTitle,
+            model: model?.nilIfBlank,
+            startedAt: Self.timestamp(from: startedAt ?? createdAt),
+            lastActive: Self.timestamp(from: updatedAt ?? startedAt ?? createdAt),
+            messageCount: messageCount ?? messageCountSnake,
+            preview: cleanPreview
+        )
+    }
+
+    private func firstNonBlank(_ values: String?...) -> String? {
+        for value in values {
+            if let text = value?.nilIfBlank {
+                return text
+            }
+        }
+        return nil
+    }
+
+    private static func timestamp(from value: Double?) -> SessionTimestamp? {
+        guard let value else { return nil }
+        let seconds = value > 9_999_999_999 ? value / 1000.0 : value
+        return .unixSeconds(seconds)
+    }
+
+    private static func cleanDisplayText(_ value: String?) -> String? {
+        guard let value = value?.nilIfBlank else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = trimmed.lowercased()
+        if lowered.hasPrefix("<workspace_context") ||
+            lowered.hasPrefix("<environment_context") ||
+            lowered.hasPrefix("<image") ||
+            lowered.hasPrefix("codex_validation_chat_") ||
+            lowered.hasPrefix("codex_parity_validation_") {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func fallbackTitle(for sessionID: String) -> String {
+        let suffix = sessionID.count > 8 ? String(sessionID.suffix(8)) : sessionID
+        return "Session \(suffix)"
+    }
+}
+
 struct WorkspaceSessionActiveRunResponse: Decodable {
     let ok: Bool
     let run: WorkspaceSessionActiveRun?
