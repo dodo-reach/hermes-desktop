@@ -4,6 +4,7 @@ import SwiftUI
 private let sessionDetailBottomID = "session-detail-bottom"
 private let approvalNeededMessage = "Hermes requested command approval, but this chat turn cannot collect manual approvals. Retry this turn with Auto-approve enabled, or resume the session in Terminal to review the command yourself."
 private let autoApproveHelpText = "Approves command requests for this turn. Without it, approval-required commands may be blocked in chat."
+private let sessionImageAttachmentMaxBytes = 10 * 1024 * 1024
 
 private func sessionMessageScrollID(_ message: SessionMessageDisplay) -> String {
     "session-message-\(message.id)"
@@ -97,8 +98,8 @@ struct SessionDetailView: View {
     let onToggleSessionPin: (SessionSummary) -> Void
     let onModeChange: (SessionDetailMode) -> Void
     let onStartChat: () -> Void
-    let onStartSession: (String, Bool) async -> Bool
-    let onSendMessage: (String, Bool) async -> Bool
+    let onStartSession: (String, Bool, [WorkspaceChatAttachment]) async -> Bool
+    let onSendMessage: (String, Bool, [WorkspaceChatAttachment]) async -> Bool
     let onRespondToPrompt: (HermesPromptCard, HermesPromptResponse) async -> Void
     let onUpdateTerminalTheme: (TerminalThemePreference) -> Void
     let onTerminalExitRefresh: () async -> Void
@@ -1181,9 +1182,11 @@ private struct SessionComposerPanel: View {
     let isSending: Bool
     let showsAutoApprove: Bool
     let onResumeInTerminal: (() -> Void)?
-    let onSend: (String, Bool) async -> Bool
+    let onSend: (String, Bool, [WorkspaceChatAttachment]) async -> Bool
 
     @State private var draft = ""
+    @State private var attachments: [WorkspaceChatAttachment] = []
+    @State private var attachmentError: String?
     @State private var autoApproveCommands = false
     @State private var isExpanded = false
     @FocusState private var isEditorFocused: Bool
@@ -1202,7 +1205,7 @@ private struct SessionComposerPanel: View {
     }
 
     private var canSend: Bool {
-        !isSending && !trimmedDraft.isEmpty
+        !isSending && (!trimmedDraft.isEmpty || !attachments.isEmpty)
     }
 
     private var shouldUseExpandedEditor: Bool {
@@ -1258,6 +1261,8 @@ private struct SessionComposerPanel: View {
                     }
                 }
             }
+
+            attachmentStrip
 
             composerInput
         }
@@ -1360,7 +1365,9 @@ private struct SessionComposerPanel: View {
                 placeholder: placeholderText,
                 isFocused: $isEditorFocused,
                 isDisabled: isSending,
-                onCommandReturn: submit
+                onCommandReturn: submit,
+                onImagePaste: addImageAttachment,
+                onImagePasteError: showImageAttachmentError
             )
                 .padding(contentPadding)
                 .frame(height: height)
@@ -1369,6 +1376,62 @@ private struct SessionComposerPanel: View {
             if showsEditorBackground {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(HermesTheme.subtleStroke, lineWidth: 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var attachmentStrip: some View {
+        if !attachments.isEmpty || attachmentError != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                if !attachments.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(attachments) { attachment in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "photo")
+                                        .foregroundStyle(Color.accentColor)
+
+                                    Text(attachment.name)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .frame(maxWidth: 220, alignment: .leading)
+
+                                    Text(byteCountString(attachment.size))
+                                        .foregroundStyle(.secondary)
+
+                                    Button {
+                                        removeAttachment(attachment)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .imageScale(.small)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(L10n.string("Remove attachment"))
+                                    .accessibilityLabel(L10n.string("Remove attachment"))
+                                }
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background {
+                                    Capsule(style: .continuous)
+                                        .fill(HermesTheme.insetFill)
+                                }
+                                .overlay {
+                                    Capsule(style: .continuous)
+                                        .strokeBorder(HermesTheme.subtleStroke, lineWidth: 1)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let attachmentError {
+                    Label(attachmentError, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -1470,18 +1533,26 @@ private struct SessionComposerPanel: View {
     }
 
     private func submit() {
-        let prompt = trimmedDraft
-        guard !isSending, !prompt.isEmpty else { return }
+        let originalPrompt = trimmedDraft
+        let outgoingAttachments = attachments
+        guard !isSending, !originalPrompt.isEmpty || !outgoingAttachments.isEmpty else { return }
+
+        let prompt = originalPrompt.isEmpty
+            ? L10n.string(outgoingAttachments.count == 1 ? "Please review the attached image." : "Please review the attached images.")
+            : originalPrompt
         let shouldAutoApprove = autoApproveCommands
         autoApproveCommands = false
         isExpanded = false
         isEditorFocused = false
         draft = ""
+        attachments = []
+        attachmentError = nil
 
         Task {
-            let didSend = await onSend(prompt, shouldAutoApprove)
-            if !didSend && draft.isEmpty {
-                draft = prompt
+            let didSend = await onSend(prompt, shouldAutoApprove, outgoingAttachments)
+            if !didSend && draft.isEmpty && attachments.isEmpty {
+                draft = originalPrompt
+                attachments = outgoingAttachments
                 isExpanded = shouldExpandEditor(for: prompt)
             }
         }
@@ -1512,6 +1583,23 @@ private struct SessionComposerPanel: View {
         expandEditor()
     }
 
+    private func addImageAttachment(_ attachment: WorkspaceChatAttachment) {
+        guard !isSending else { return }
+        attachmentError = nil
+        attachments.append(attachment)
+        expandEditor()
+    }
+
+    private func showImageAttachmentError(_ message: String) {
+        guard !isSending else { return }
+        attachmentError = message
+        expandEditor()
+    }
+
+    private func removeAttachment(_ attachment: WorkspaceChatAttachment) {
+        attachments.removeAll { $0.id == attachment.id }
+    }
+
     private func preserveEditorFocusAfterLayoutChange() {
         guard isEditorFocused, !isSending else { return }
         DispatchQueue.main.async {
@@ -1537,6 +1625,61 @@ private struct SessionComposerPanel: View {
     }
 }
 
+private enum PastedImageAttachmentResult {
+    case success(WorkspaceChatAttachment)
+    case failure(String)
+}
+
+private func pastedImageAttachment(from pasteboard: NSPasteboard) -> PastedImageAttachmentResult? {
+    guard let imageData = pastedImagePNGData(from: pasteboard) else { return nil }
+
+    guard imageData.count <= sessionImageAttachmentMaxBytes else {
+        return .failure(L10n.string("Pasted image is too large. Limit images to \(byteCountString(sessionImageAttachmentMaxBytes))."))
+    }
+
+    return .success(WorkspaceChatAttachment.imagePNG(data: imageData))
+}
+
+private func pastedImagePNGData(from pasteboard: NSPasteboard) -> Data? {
+    if let pngData = pasteboard.data(forType: .png) {
+        return pngData
+    }
+
+    if let tiffData = pasteboard.data(forType: .tiff),
+       let image = NSImage(data: tiffData) {
+        return pngData(from: image)
+    }
+
+    if let image = NSImage(pasteboard: pasteboard) {
+        return pngData(from: image)
+    }
+
+    let imageFileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [
+        .urlReadingFileURLsOnly: true
+    ]) as? [URL] ?? []
+
+    for url in imageFileURLs {
+        guard let image = NSImage(contentsOf: url),
+              let data = pngData(from: image) else { continue }
+        return data
+    }
+
+    return nil
+}
+
+private func pngData(from image: NSImage) -> Data? {
+    guard let tiffData = image.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data: tiffData) else {
+        return nil
+    }
+
+    return bitmap.representation(using: .png, properties: [:])
+}
+
+private func byteCountString(_ bytes: Int) -> String {
+    ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+}
+
 private struct SessionPromptTextView: NSViewRepresentable {
     @Binding var text: String
 
@@ -1544,6 +1687,8 @@ private struct SessionPromptTextView: NSViewRepresentable {
     let isFocused: FocusState<Bool>.Binding
     let isDisabled: Bool
     let onCommandReturn: () -> Void
+    let onImagePaste: (WorkspaceChatAttachment) -> Void
+    let onImagePasteError: (String) -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -1556,6 +1701,8 @@ private struct SessionPromptTextView: NSViewRepresentable {
         let textView = PlaceholderCommandTextView()
         textView.placeholder = placeholder
         textView.commandReturnAction = onCommandReturn
+        textView.imagePasteAction = onImagePaste
+        textView.imagePasteErrorAction = onImagePasteError
         textView.delegate = context.coordinator
         textView.drawsBackground = false
         textView.isRichText = false
@@ -1596,6 +1743,8 @@ private struct SessionPromptTextView: NSViewRepresentable {
 
         textView.placeholder = placeholder
         textView.commandReturnAction = onCommandReturn
+        textView.imagePasteAction = onImagePaste
+        textView.imagePasteErrorAction = onImagePasteError
         configure(textView)
         updateFocus(for: textView)
         textView.needsDisplay = true
@@ -1656,6 +1805,8 @@ private final class PlaceholderCommandTextView: NSTextView {
     }
 
     var commandReturnAction: (() -> Void)?
+    var imagePasteAction: ((WorkspaceChatAttachment) -> Void)?
+    var imagePasteErrorAction: ((String) -> Void)?
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -1677,6 +1828,30 @@ private final class PlaceholderCommandTextView: NSTextView {
         }
 
         super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "v",
+           pastedImageAttachment(from: .general) != nil {
+            paste(nil)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        switch pastedImageAttachment(from: .general) {
+        case let .success(attachment):
+            imagePasteAction?(attachment)
+            return
+        case let .failure(message):
+            imagePasteErrorAction?(message)
+            return
+        case .none:
+            super.paste(sender)
+        }
     }
 }
 

@@ -1,5 +1,39 @@
 import Foundation
 
+struct WorkspaceChatAttachment: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let fileName: String
+    let type: String
+    let contentType: String
+    let mimeType: String
+    let mediaType: String
+    let content: String
+    let base64: String
+    let data: String
+    let dataUrl: String
+    let size: Int
+
+    static func imagePNG(data: Data, name: String? = nil) -> WorkspaceChatAttachment {
+        let attachmentName = name ?? "pasted-image-\(UUID().uuidString.prefix(8)).png"
+        let encoded = data.base64EncodedString()
+        return WorkspaceChatAttachment(
+            id: UUID().uuidString,
+            name: attachmentName,
+            fileName: attachmentName,
+            type: "image",
+            contentType: "image/png",
+            mimeType: "image/png",
+            mediaType: "image/png",
+            content: encoded,
+            base64: encoded,
+            data: encoded,
+            dataUrl: "data:image/png;base64,\(encoded)",
+            size: data.count
+        )
+    }
+}
+
 struct CaelWorkspaceStatus: Codable {
     let ok: Bool
     let generatedAt: String

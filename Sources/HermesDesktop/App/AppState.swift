@@ -1398,12 +1398,19 @@ final class AppState: ObservableObject {
         sessionScrollOffsets.removeValue(forKey: sessionID)
     }
 
-    func startNewSession(with prompt: String, autoApproveCommands: Bool) async -> Bool {
+    func startNewSession(
+        with prompt: String,
+        autoApproveCommands: Bool,
+        attachments: [WorkspaceChatAttachment] = []
+    ) async -> Bool {
         guard let profile = activeConnection else { return false }
         guard !isSendingSessionMessage else { return false }
 
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return false }
+        guard !trimmedPrompt.isEmpty || !attachments.isEmpty else { return false }
+        let messagePrompt = trimmedPrompt.isEmpty
+            ? L10n.string(attachments.count == 1 ? "Please review the attached image." : "Please review the attached images.")
+            : trimmedPrompt
 
         // Normal desktop composer sends use the same Workspace API as the web
         // app so both clients share the server-owned run ledger.
@@ -1411,18 +1418,18 @@ final class AppState: ObservableObject {
         isSendingSessionMessage = true
         pendingSessionTurn = PendingSessionTurn(
             sessionID: nil,
-            prompt: trimmedPrompt,
+            prompt: messagePrompt,
             autoApproveCommands: autoApproveCommands
         )
         sessionConversationError = nil
         sessionsError = nil
 
-        appendPendingUserLiveMessage(prompt: trimmedPrompt)
+        appendPendingUserLiveMessage(prompt: messagePrompt)
 
         do {
             let createdSession = try await caelWorkspaceAPIService.createWorkspaceChatSession(
                 connection: profile,
-                label: String(trimmedPrompt.prefix(80))
+                label: String(messagePrompt.prefix(80))
             )
             let serverSessionID = (createdSession.sessionKey ?? createdSession.friendlyId ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1432,8 +1439,9 @@ final class AppState: ObservableObject {
             let sendResponse = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
                 connection: profile,
                 sessionKey: serverSessionID,
-                message: trimmedPrompt,
-                autoApproveCommands: autoApproveCommands
+                message: messagePrompt,
+                autoApproveCommands: autoApproveCommands,
+                attachments: attachments
             )
             guard isActiveWorkspace(profile) else { return false }
 
@@ -1448,7 +1456,7 @@ final class AppState: ObservableObject {
             selectedSessionID = createdSessionID
             upsertAcceptedWorkspaceSessionSummary(
                 sessionID: createdSessionID,
-                prompt: trimmedPrompt,
+                prompt: messagePrompt,
                 messageCount: max(sessionMessages.count + liveSessionMessageDisplays.count, 1)
             )
             scheduleAcceptedWorkspaceSessionRefresh(sessionID: createdSessionID, connection: profile)
@@ -1628,7 +1636,11 @@ final class AppState: ObservableObject {
             .lowercased()
     }
 
-    func sendMessageToSelectedSession(_ prompt: String, autoApproveCommands: Bool) async -> Bool {
+    func sendMessageToSelectedSession(
+        _ prompt: String,
+        autoApproveCommands: Bool,
+        attachments: [WorkspaceChatAttachment] = []
+    ) async -> Bool {
         guard let profile = activeConnection,
               let selectedSessionID else {
             return false
@@ -1636,7 +1648,10 @@ final class AppState: ObservableObject {
         guard !isSendingSessionMessage else { return false }
 
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return false }
+        guard !trimmedPrompt.isEmpty || !attachments.isEmpty else { return false }
+        let messagePrompt = trimmedPrompt.isEmpty
+            ? L10n.string(attachments.count == 1 ? "Please review the attached image." : "Please review the attached images.")
+            : trimmedPrompt
 
         if let compactionNotice = knownSessionCompactionNotice(for: selectedSessionID) ??
             (sessionCompactionNotice?.sourceSessionID == selectedSessionID ? sessionCompactionNotice : nil) {
@@ -1653,19 +1668,20 @@ final class AppState: ObservableObject {
         isSendingSessionMessage = true
         pendingSessionTurn = PendingSessionTurn(
             sessionID: selectedSessionID,
-            prompt: trimmedPrompt,
+            prompt: messagePrompt,
             autoApproveCommands: autoApproveCommands
         )
         sessionConversationError = nil
         sessionsError = nil
-        appendPendingUserLiveMessage(prompt: trimmedPrompt)
+        appendPendingUserLiveMessage(prompt: messagePrompt)
 
         do {
             let sendResponse = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
                 connection: profile,
                 sessionKey: selectedSessionID,
-                message: trimmedPrompt,
-                autoApproveCommands: autoApproveCommands
+                message: messagePrompt,
+                autoApproveCommands: autoApproveCommands,
+                attachments: attachments
             )
             guard isActiveWorkspace(profile) else { return false }
 

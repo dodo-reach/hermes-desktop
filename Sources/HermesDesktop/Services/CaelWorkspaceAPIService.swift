@@ -338,7 +338,8 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         connection: ConnectionProfile,
         sessionKey: String,
         message: String,
-        autoApproveCommands: Bool
+        autoApproveCommands: Bool,
+        attachments: [WorkspaceChatAttachment] = []
     ) async throws -> WorkspaceSessionSendResponse {
         let response = try await postJSON(
             connection: connection,
@@ -348,7 +349,8 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
                 message: message,
                 serverSide: true,
                 autoApproveCommands: autoApproveCommands,
-                idempotencyKey: UUID().uuidString
+                idempotencyKey: UUID().uuidString,
+                attachments: attachments.isEmpty ? nil : attachments
             ),
             responseType: WorkspaceSessionSendResponse.self
         )
@@ -2094,6 +2096,7 @@ private struct WorkspaceSessionSendRequest: Encodable {
     let serverSide: Bool
     let autoApproveCommands: Bool
     let idempotencyKey: String
+    let attachments: [WorkspaceChatAttachment]?
 }
 
 private struct KnowledgeFabricSearchRequest: Encodable {

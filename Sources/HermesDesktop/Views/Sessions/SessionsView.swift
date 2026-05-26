@@ -74,11 +74,11 @@ struct SessionsView: View {
                 onStartChat: {
                     appState.startSelectedSessionChat()
                 },
-                onStartSession: { prompt, autoApproveCommands in
-                    await appState.startNewSession(with: prompt, autoApproveCommands: autoApproveCommands)
+                onStartSession: { prompt, autoApproveCommands, attachments in
+                    await appState.startNewSession(with: prompt, autoApproveCommands: autoApproveCommands, attachments: attachments)
                 },
-                onSendMessage: { prompt, autoApproveCommands in
-                    await appState.sendMessageToSelectedSession(prompt, autoApproveCommands: autoApproveCommands)
+                onSendMessage: { prompt, autoApproveCommands, attachments in
+                    await appState.sendMessageToSelectedSession(prompt, autoApproveCommands: autoApproveCommands, attachments: attachments)
                 },
                 onRespondToPrompt: { card, response in
                     await appState.respondToSessionPrompt(card, response: response)
