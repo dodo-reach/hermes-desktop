@@ -67,6 +67,7 @@ struct CaelProviderLimitsWebPanel: View {
             VStack(alignment: .leading, spacing: 14) {
                 CaelModelRosterStrip(providers: sortedProviders(limits.providers))
                 CaelModelConfigControl()
+                CaelModelRuntimeDrilldown()
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], spacing: 12) {
                     ForEach(sortedProviders(limits.providers)) { provider in
@@ -348,6 +349,191 @@ private struct CaelModelConfigControl: View {
         } catch {
             notice = "Unable to update default model: \(error.localizedDescription)"
         }
+    }
+}
+
+private struct CaelModelRuntimeDrilldown: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var modelInfo: WorkspaceModelInfoResponse?
+    @State private var contextUsage: WorkspaceContextUsageResponse?
+    @State private var notice: String?
+    @State private var isLoading = false
+
+    var body: some View {
+        HermesInsetSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Label("Runtime model + context", systemImage: "chart.bar.doc.horizontal")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Button(isLoading ? "Loading..." : "Refresh") {
+                        Task { await loadRuntimeDetails() }
+                    }
+                    .disabled(isLoading)
+                }
+
+                Text("Active model capabilities and current context usage.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if isLoading, modelInfo == nil, contextUsage == nil {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                if let notice {
+                    Text(notice)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10, alignment: .top)], spacing: 10) {
+                    metricCard(
+                        title: "Active runtime",
+                        value: activeRuntimeLabel,
+                        detail: modelInfoDetail
+                    )
+                    metricCard(
+                        title: "Context window",
+                        value: formatTokens(modelInfo?.effectiveContextLength ?? contextUsage?.maxTokens),
+                        detail: contextWindowDetail
+                    )
+                    metricCard(
+                        title: "Current context",
+                        value: contextPercentLabel,
+                        detail: contextUsageDetail
+                    )
+                }
+
+                if let contextUsage {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ProgressView(value: max(0, min(100, contextUsage.contextPercent)), total: 100)
+                            .tint(contextUsage.contextPercent > 85 ? .orange : .green)
+                        HStack {
+                            Text("Conversation \(formatTokens(contextUsage.conversationTokens))")
+                            Spacer()
+                            Text("Static \(formatTokens(contextUsage.staticTokens))")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    }
+                }
+
+                if let capabilities = capabilityRows, !capabilities.isEmpty {
+                    FlowLayout(spacing: 6) {
+                        ForEach(capabilities, id: \.self) { capability in
+                            Text(capability)
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.secondary.opacity(0.10), in: Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .task(id: taskKey) {
+            await loadRuntimeDetails()
+        }
+    }
+
+    private var taskKey: String {
+        "\(appState.activeConnectionID?.uuidString ?? "none"):\(appState.selectedSessionID ?? "global")"
+    }
+
+    private var activeRuntimeLabel: String {
+        let provider = modelInfo?.provider?.nilIfBlank ?? "unknown"
+        let model = modelInfo?.model?.nilIfBlank ?? contextUsage?.model.nilIfBlank ?? "unknown"
+        return "\(provider) / \(model)"
+    }
+
+    private var modelInfoDetail: String {
+        let mode = modelInfo?.mode?.nilIfBlank ?? "unknown mode"
+        let gatewayMode = modelInfo?.gatewayMode?.nilIfBlank ?? "unknown gateway"
+        let switching: String
+        switch modelInfo?.supportsRuntimeSwitching {
+        case true:
+            switching = "runtime switching available"
+        case false:
+            switching = "runtime switching unavailable"
+        case nil:
+            switching = "runtime switching unknown"
+        }
+        return "\(mode), \(gatewayMode), \(switching)"
+    }
+
+    private var contextWindowDetail: String {
+        let auto = formatTokens(modelInfo?.autoContextLength)
+        let configured = formatTokens(modelInfo?.configContextLength)
+        return "Auto \(auto); configured \(configured)"
+    }
+
+    private var contextPercentLabel: String {
+        guard let contextUsage else { return "unknown" }
+        return "\(Int(contextUsage.contextPercent.rounded()))%"
+    }
+
+    private var contextUsageDetail: String {
+        guard let contextUsage else { return "No context snapshot loaded." }
+        let session = appState.selectedSessionID?.nilIfBlank ?? "global"
+        return "\(formatTokens(contextUsage.usedTokens)) of \(formatTokens(contextUsage.maxTokens)) in \(session)"
+    }
+
+    private var capabilityRows: [String]? {
+        guard let capabilities = modelInfo?.capabilities else { return nil }
+        return capabilities
+            .sorted { $0.key < $1.key }
+            .prefix(8)
+            .map { key, value in
+                "\(key): \(value.stringValue ?? value.displayString)"
+            }
+    }
+
+    private func metricCard(title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func loadRuntimeDetails() async {
+        guard let connection = appState.activeConnection else { return }
+        isLoading = true
+        defer { isLoading = false }
+        async let nextModelInfo: WorkspaceModelInfoResponse? = try? appState.caelWorkspaceAPIService.loadWorkspaceModelInfo(connection: connection)
+        async let nextContextUsage: WorkspaceContextUsageResponse? = try? appState.caelWorkspaceAPIService.loadWorkspaceContextUsage(
+            connection: connection,
+            sessionID: appState.selectedSessionID
+        )
+        let loadedModelInfo = await nextModelInfo
+        let loadedContextUsage = await nextContextUsage
+        modelInfo = loadedModelInfo
+        contextUsage = loadedContextUsage
+        if loadedModelInfo == nil && loadedContextUsage == nil {
+            notice = "Unable to load runtime model or context usage."
+        } else if loadedModelInfo?.error?.nilIfBlank != nil {
+            notice = loadedModelInfo?.error
+        } else if loadedContextUsage?.ok == false {
+            notice = loadedContextUsage?.error?.nilIfBlank ?? "Context usage is unavailable."
+        } else {
+            notice = nil
+        }
+    }
+
+    private func formatTokens(_ value: Int?) -> String {
+        guard let value else { return "unknown" }
+        return value.formatted(.number.notation(.compactName))
     }
 }
 

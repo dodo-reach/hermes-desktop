@@ -304,6 +304,47 @@ struct WorkspaceModelCatalogEntry: Codable, Identifiable, Hashable {
     }
 }
 
+struct WorkspaceModelInfoResponse: Codable {
+    let ok: Bool?
+    let provider: String?
+    let model: String?
+    let autoContextLength: Int?
+    let configContextLength: Int?
+    let effectiveContextLength: Int?
+    let capabilities: [String: JSONValue]?
+    let supportsRuntimeSwitching: Bool?
+    let vanillaAgent: Bool?
+    let mode: String?
+    let gatewayMode: String?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case provider
+        case model
+        case autoContextLength = "auto_context_length"
+        case configContextLength = "config_context_length"
+        case effectiveContextLength = "effective_context_length"
+        case capabilities
+        case supportsRuntimeSwitching
+        case vanillaAgent
+        case mode
+        case gatewayMode
+        case error
+    }
+}
+
+struct WorkspaceContextUsageResponse: Codable {
+    let ok: Bool
+    let contextPercent: Double
+    let maxTokens: Int
+    let usedTokens: Int
+    let model: String
+    let staticTokens: Int
+    let conversationTokens: Int
+    let error: String?
+}
+
 struct WorkspaceHermesProviderState: Codable, Identifiable, Hashable {
     let id: String
     let name: String

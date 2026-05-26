@@ -89,6 +89,24 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         try await loadJSON(connection: connection, path: "/api/models", responseType: WorkspaceModelCatalogResponse.self)
     }
 
+    func loadWorkspaceModelInfo(connection: ConnectionProfile) async throws -> WorkspaceModelInfoResponse {
+        try await loadJSON(connection: connection, path: "/api/model/info", responseType: WorkspaceModelInfoResponse.self)
+    }
+
+    func loadWorkspaceContextUsage(
+        connection: ConnectionProfile,
+        sessionID: String? = nil
+    ) async throws -> WorkspaceContextUsageResponse {
+        let normalizedSessionID = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let path = apiPath(
+            "/api/context-usage",
+            queryItems: normalizedSessionID.isEmpty ? [] : [
+                URLQueryItem(name: "sessionId", value: normalizedSessionID)
+            ]
+        )
+        return try await loadJSON(connection: connection, path: path, responseType: WorkspaceContextUsageResponse.self)
+    }
+
     @discardableResult
     func setDefaultHermesModel(connection: ConnectionProfile, providerID: String, modelID: String) async throws -> WorkspaceHermesConfigPatchResponse {
         let response = try await patchJSON(
