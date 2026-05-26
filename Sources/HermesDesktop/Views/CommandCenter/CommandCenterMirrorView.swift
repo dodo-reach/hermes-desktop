@@ -1234,7 +1234,7 @@ private struct NativeSwarmPanel: View {
 
                 TextEditor(text: $dispatchPrompt)
                     .font(.body)
-                    .frame(minHeight: 88)
+                    .frame(height: 88)
                     .overlay {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
@@ -1626,7 +1626,7 @@ private struct NativeConductorPanel: View {
                 .font(.headline)
             TextEditor(text: $goal)
                 .font(.body)
-                .frame(minHeight: 96)
+                .frame(height: 96)
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
