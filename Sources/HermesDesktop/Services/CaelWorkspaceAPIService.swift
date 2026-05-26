@@ -85,6 +85,10 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         try await loadJSON(connection: connection, path: "/api/hermes-config", responseType: WorkspaceHermesConfigResponse.self)
     }
 
+    func loadWorkspaceModels(connection: ConnectionProfile) async throws -> WorkspaceModelCatalogResponse {
+        try await loadJSON(connection: connection, path: "/api/models", responseType: WorkspaceModelCatalogResponse.self)
+    }
+
     @discardableResult
     func setDefaultHermesModel(connection: ConnectionProfile, providerID: String, modelID: String) async throws -> WorkspaceHermesConfigPatchResponse {
         let response = try await patchJSON(

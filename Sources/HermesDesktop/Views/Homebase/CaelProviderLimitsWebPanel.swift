@@ -128,11 +128,13 @@ private struct CaelModelRosterStrip: View {
 private struct CaelModelConfigControl: View {
     @EnvironmentObject private var appState: AppState
     @State private var config: WorkspaceHermesConfigResponse?
+    @State private var catalog: WorkspaceModelCatalogResponse?
     @State private var providerID = ""
     @State private var modelID = ""
     @State private var notice: String?
     @State private var isLoading = false
     @State private var isSaving = false
+    @State private var useManualEntry = false
 
     var body: some View {
         HermesInsetSurface {
@@ -151,16 +153,48 @@ private struct CaelModelConfigControl: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                HStack(spacing: 8) {
-                    TextField("provider", text: $providerID)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("model", text: $modelID)
-                        .textFieldStyle(.roundedBorder)
-                    Button(isSaving ? "Applying..." : "Apply") {
-                        Task { await applyModelConfig() }
+                if useManualEntry || providerOptions.isEmpty {
+                    HStack(spacing: 8) {
+                        TextField("provider", text: $providerID)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("model", text: $modelID)
+                            .textFieldStyle(.roundedBorder)
+                        applyButton
                     }
-                    .disabled(isSaving || providerID.nilIfBlank == nil || modelID.nilIfBlank == nil)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Picker("Provider", selection: $providerID) {
+                                ForEach(providerOptions, id: \.self) { provider in
+                                    Text(providerDisplayName(provider)).tag(provider)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 220)
+                            .onChange(of: providerID) { _, _ in
+                                alignSelectedModelWithProvider()
+                            }
+
+                            Picker("Model", selection: $modelID) {
+                                ForEach(modelOptions, id: \.self) { model in
+                                    Text(modelDisplayName(model)).tag(model)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(minWidth: 260, maxWidth: .infinity)
+
+                            applyButton
+                        }
+
+                        Text(catalogLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+
+                Toggle("Manual provider/model override", isOn: $useManualEntry)
+                    .font(.caption)
+                    .toggleStyle(.checkbox)
 
                 if let notice {
                     Text(notice)
@@ -192,16 +226,76 @@ private struct CaelModelConfigControl: View {
         }
     }
 
+    private var applyButton: some View {
+        Button(isSaving ? "Applying..." : "Apply") {
+            Task { await applyModelConfig() }
+        }
+        .disabled(isSaving || providerID.nilIfBlank == nil || modelID.nilIfBlank == nil)
+    }
+
     private var currentConfigLabel: String {
         let provider = config?.activeProvider?.nilIfBlank ?? "unknown provider"
         let model = config?.activeModel?.nilIfBlank ?? "unknown model"
-        return "Shared /api/hermes-config active model: \(provider) / \(model). Changes are applied server-side and then the usage meters refresh from /api/usage/limits."
+        return "Shared active model: \(provider) / \(model). The picker is hydrated from /api/models and applies through /api/hermes-config."
+    }
+
+    private var catalogModels: [WorkspaceModelCatalogEntry] {
+        catalog?.catalogModels ?? []
+    }
+
+    private var providerOptions: [String] {
+        let catalogProviders = catalogModels.compactMap { $0.provider?.nilIfBlank }
+        let configProviders = config?.providers?.compactMap { provider -> String? in
+            if provider.isDefault == true || provider.configured == true || provider.models?.isEmpty == false {
+                return provider.id.nilIfBlank
+            }
+            return nil
+        } ?? []
+        let configuredProviders = catalog?.configuredProviders?.compactMap(\.nilIfBlank) ?? []
+        let activeProvider = (config?.activeProvider)?.nilIfBlank.map { [$0] } ?? []
+        return Array(Set(catalogProviders + configProviders + configuredProviders + activeProvider)).sorted()
+    }
+
+    private var modelOptions: [String] {
+        guard let provider = providerID.nilIfBlank else { return [] }
+        let catalogMatches = catalogModels
+            .filter { ($0.provider?.nilIfBlank ?? "unknown") == provider }
+            .compactMap { $0.id.nilIfBlank }
+        let configMatches = config?.providers?
+            .first(where: { $0.id == provider })?
+            .models?
+            .compactMap { $0.id.nilIfBlank } ?? []
+        let activeModel = config?.activeProvider == provider ? ((config?.activeModel)?.nilIfBlank.map { [$0] } ?? []) : []
+        return Array(Set(catalogMatches + configMatches + activeModel)).sorted()
+    }
+
+    private var catalogLabel: String {
+        let count = catalogModels.count
+        let source = catalog?.source?.nilIfBlank ?? "unknown source"
+        let providers = providerOptions.count
+        return "\(count) models across \(providers) providers from \(source). Raw credentials stay server-side."
     }
 
     private func providerChipLabel(_ provider: WorkspaceHermesProviderState) -> String {
         let name = provider.name.nilIfBlank ?? provider.id
         if provider.isDefault == true { return "Default: \(name)" }
         return name
+    }
+
+    private func providerDisplayName(_ provider: String) -> String {
+        let name = config?.providers?.first(where: { $0.id == provider })?.name.nilIfBlank ?? provider
+        if provider == config?.activeProvider { return "Default: \(name)" }
+        return name
+    }
+
+    private func modelDisplayName(_ model: String) -> String {
+        catalogModels.first(where: { $0.id == model })?.name?.nilIfBlank ?? model
+    }
+
+    private func alignSelectedModelWithProvider() {
+        if !modelOptions.contains(modelID), let first = modelOptions.first {
+            modelID = first
+        }
     }
 
     private func loadConfig() async {
@@ -216,6 +310,23 @@ private struct CaelModelConfigControl: View {
             notice = next.ok == false ? (next.error?.nilIfBlank ?? "Hermes config is unavailable.") : nil
         } catch {
             notice = "Unable to load Hermes config: \(error.localizedDescription)"
+        }
+        do {
+            let nextCatalog = try await appState.caelWorkspaceAPIService.loadWorkspaceModels(connection: connection)
+            catalog = nextCatalog
+            if providerID.nilIfBlank == nil {
+                providerID = providerOptions.first ?? ""
+            }
+            alignSelectedModelWithProvider()
+            if nextCatalog.ok == false {
+                notice = nextCatalog.error?.nilIfBlank ?? "Model catalog is unavailable."
+            }
+        } catch {
+            catalog = nil
+            useManualEntry = true
+            if notice == nil {
+                notice = "Unable to load model catalog: \(error.localizedDescription)"
+            }
         }
     }
 

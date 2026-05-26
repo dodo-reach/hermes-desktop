@@ -273,6 +273,37 @@ struct WorkspaceHermesConfigResponse: Codable {
     let error: String?
 }
 
+struct WorkspaceModelCatalogResponse: Codable {
+    let ok: Bool?
+    let object: String?
+    let data: [WorkspaceModelCatalogEntry]?
+    let models: [WorkspaceModelCatalogEntry]?
+    let configuredProviders: [String]?
+    let source: String?
+    let streamAcceptedTimeoutMs: Int?
+    let streamHandoffTimeoutMs: Int?
+    let error: String?
+
+    var catalogModels: [WorkspaceModelCatalogEntry] {
+        if let models { return models }
+        return data ?? []
+    }
+}
+
+struct WorkspaceModelCatalogEntry: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String?
+    let provider: String?
+    let ownedBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case provider
+        case ownedBy = "owned_by"
+    }
+}
+
 struct WorkspaceHermesProviderState: Codable, Identifiable, Hashable {
     let id: String
     let name: String
