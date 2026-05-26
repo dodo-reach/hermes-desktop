@@ -357,6 +357,24 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         return response
     }
 
+    func tailWorkspaceChatEvents(
+        connection: ConnectionProfile,
+        sessionKey: String,
+        timeoutSeconds: Int = 8,
+        maxEvents: Int = 80
+    ) async throws -> WorkspaceChatEventsResponse {
+        let path = apiPath(
+            "/api/chat-events",
+            queryItems: [URLQueryItem(name: "sessionKey", value: sessionKey)]
+        )
+        return try await requestChatEventTail(
+            connection: connection,
+            path: path,
+            timeoutSeconds: timeoutSeconds,
+            maxEvents: maxEvents
+        )
+    }
+
     @discardableResult
     func deleteProfile(connection: ConnectionProfile, name: String) async throws -> CaelProfileMutationResponse {
         try await postJSON(
@@ -1601,6 +1619,154 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         }
     }
 
+    private func requestChatEventTail(
+        connection: ConnectionProfile,
+        path: String,
+        timeoutSeconds: Int,
+        maxEvents: Int
+    ) async throws -> WorkspaceChatEventsResponse {
+        let payload = try JSONEncoder().encode(CaelWorkspaceChatEventsRequest(
+            baseURL: connection.resolvedCaelWorkspaceBaseURL,
+            path: path,
+            hermesHome: connection.remoteHermesHomePath,
+            timeoutSeconds: max(1, timeoutSeconds),
+            maxEvents: max(1, maxEvents)
+        ))
+        let requestLiteral = String(data: payload, encoding: .utf8) ?? "{}"
+        let script = """
+        import json
+        import pathlib
+        import secrets
+        import socket
+        import sys
+        import time
+        import urllib.error
+        import urllib.request
+
+        request = json.loads(\(String(reflecting: requestLiteral)))
+        hermes_home = pathlib.Path.home() / ".hermes"
+        store_path = hermes_home / "workspace-sessions.json"
+        now_ms = int(time.time() * 1000)
+        ttl_ms = 30 * 24 * 60 * 60 * 1000
+        expiry = now_ms + ttl_ms
+        token = secrets.token_hex(32)
+
+        try:
+            payload = json.loads(store_path.read_text()) if store_path.exists() else {"tokens": {}}
+            tokens = payload.get("tokens", {})
+            if not isinstance(tokens, dict):
+                tokens = {}
+        except Exception:
+            tokens = {}
+
+        tokens = {key: value for key, value in tokens.items() if isinstance(value, int) and value > now_ms}
+        tokens[token] = expiry
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        store_path.write_text(json.dumps({"tokens": tokens}))
+        try:
+            store_path.chmod(0o600)
+        except Exception:
+            pass
+
+        url = request["baseURL"].rstrip("/") + request["path"]
+        headers = {
+            "Accept": "text/event-stream, application/json",
+            "Cookie": "claude-auth=" + token,
+            "User-Agent": "CaelDesktop/1.0 native-api",
+        }
+        http_request = urllib.request.Request(url, headers=headers, method="GET")
+        max_events = int(request.get("maxEvents") or 80)
+        timeout_seconds = float(request.get("timeoutSeconds") or 8)
+        deadline = time.time() + timeout_seconds
+        events = []
+        event_name = None
+        data_lines = []
+
+        def flush_event():
+            global event_name, data_lines
+            if not event_name:
+                data_lines = []
+                return
+            payload_text = "\\n".join(data_lines).strip()
+            data_lines = []
+            name = event_name
+            event_name = None
+            if not payload_text:
+                return
+            try:
+                payload = json.loads(payload_text)
+            except Exception:
+                payload = {"raw": payload_text}
+            if name == "heartbeat":
+                return
+            events.append({"event": name, "data": payload if isinstance(payload, dict) else {"value": payload}})
+
+        try:
+            with urllib.request.urlopen(http_request, timeout=timeout_seconds) as response:
+                content_type = response.headers.get("content-type", "")
+                if "application/json" in content_type:
+                    body = response.read().decode("utf-8", "replace")
+                    data = json.loads(body) if body.strip() else {}
+                    data.setdefault("events", [])
+                    print(json.dumps(data))
+                    sys.exit(0)
+
+                while len(events) < max_events and time.time() < deadline:
+                    try:
+                        raw = response.readline()
+                    except socket.timeout:
+                        break
+                    if not raw:
+                        break
+                    line = raw.decode("utf-8", "replace").rstrip("\\r\\n")
+                    if line == "":
+                        flush_event()
+                        continue
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line.split(":", 1)[1].strip()
+                        continue
+                    if line.startswith("data:"):
+                        data_lines.append(line.split(":", 1)[1].strip())
+                flush_event()
+                print(json.dumps({"ok": True, "events": events}))
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", "replace")
+            try:
+                payload = json.loads(body)
+            except Exception:
+                payload = {"error": body}
+            print(json.dumps({
+                "ok": False,
+                "events": events,
+                "error": "HTTP %s: %s" % (error.code, payload.get("error") or body),
+            }))
+        except Exception as error:
+            print(json.dumps({"ok": False, "events": events, "error": str(error)}))
+        """
+
+        let result = try await sshTransport.execute(
+            on: connection,
+            remoteCommand: connection.remoteServiceCommand("python3 -"),
+            standardInput: Data(script.utf8),
+            allocateTTY: false
+        )
+        try sshTransport.validateSuccessfulExit(result, for: connection)
+
+        guard let data = result.stdout.data(using: .utf8) else {
+            throw SSHTransportError.invalidResponse("Workspace chat events output was not valid UTF-8.")
+        }
+
+        do {
+            return try Self.makeDecoder().decode(WorkspaceChatEventsResponse.self, from: data)
+        } catch {
+            throw SSHTransportError.invalidResponse(
+                "Workspace chat events returned JSON that Cael Desktop could not decode: \(error.localizedDescription)"
+            )
+        }
+    }
+
     private func requestJSON<Response: Decodable>(
         connection: ConnectionProfile,
         path: String,
@@ -1737,6 +1903,14 @@ private struct CaelWorkspaceMCPLogRequest: Encodable {
     let hermesHome: String
     let maxLines: Int
     let timeoutSeconds: Int
+}
+
+private struct CaelWorkspaceChatEventsRequest: Encodable {
+    let baseURL: String
+    let path: String
+    let hermesHome: String
+    let timeoutSeconds: Int
+    let maxEvents: Int
 }
 
 private struct WorkspaceSkillActionRequest: Encodable {

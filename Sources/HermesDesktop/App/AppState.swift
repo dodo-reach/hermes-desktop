@@ -151,6 +151,7 @@ final class AppState: ObservableObject {
     private var statusTask: Task<Void, Never>?
     private var sessionTranscriptPollingTask: Task<Void, Never>?
     private var acceptedWorkspaceSessionMonitorTask: Task<Void, Never>?
+    private var acceptedWorkspaceChatEventsTask: Task<Void, Never>?
     private var gatewayChatService: HermesGatewayChatService?
     private var gatewayEventsTask: Task<Void, Never>?
     private var nativeChatStatusWorkspaceScopeFingerprint: String?
@@ -3509,6 +3510,8 @@ final class AppState: ObservableObject {
     }
 
     private func clearSessionMessages() {
+        acceptedWorkspaceChatEventsTask?.cancel()
+        acceptedWorkspaceChatEventsTask = nil
         guard !sessionMessages.isEmpty ||
                 !sessionMessageDisplays.isEmpty ||
                 !liveSessionMessageDisplays.isEmpty ||
@@ -3781,6 +3784,19 @@ final class AppState: ObservableObject {
     private func scheduleAcceptedWorkspaceSessionRefresh(sessionID: String, connection: ConnectionProfile) {
         let workspaceScopeFingerprint = connection.workspaceScopeFingerprint
         acceptedWorkspaceSessionMonitorTask?.cancel()
+        acceptedWorkspaceChatEventsTask?.cancel()
+        acceptedWorkspaceChatEventsTask = Task { [weak self] in
+            var sawTerminalEvent = false
+            while !Task.isCancelled, !sawTerminalEvent {
+                sawTerminalEvent = await self?.tailAcceptedWorkspaceChatEvents(
+                    sessionID: sessionID,
+                    workspaceScopeFingerprint: workspaceScopeFingerprint,
+                    timeoutSeconds: 8
+                ) ?? false
+                if sawTerminalEvent { return }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
         acceptedWorkspaceSessionMonitorTask = Task { [weak self] in
             let startedAt = Date()
             var sawActiveRun = false
@@ -3889,6 +3905,83 @@ final class AppState: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    @discardableResult
+    private func tailAcceptedWorkspaceChatEvents(
+        sessionID: String,
+        workspaceScopeFingerprint: String,
+        timeoutSeconds: Int
+    ) async -> Bool {
+        guard let profile = activeConnection,
+              profile.workspaceScopeFingerprint == workspaceScopeFingerprint,
+              selectedSessionID == sessionID else { return true }
+
+        do {
+            let response = try await caelWorkspaceAPIService.tailWorkspaceChatEvents(
+                connection: profile,
+                sessionKey: sessionID,
+                timeoutSeconds: timeoutSeconds
+            )
+            guard isActiveWorkspace(profile), selectedSessionID == sessionID else { return true }
+            var terminalEvent = false
+            for event in response.events {
+                terminalEvent = applyWorkspaceChatEvent(event, sessionID: sessionID) || terminalEvent
+            }
+            return terminalEvent
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    private func applyWorkspaceChatEvent(_ event: WorkspaceChatEvent, sessionID: String) -> Bool {
+        if let eventSessionID = gatewayValue(in: event.data, keys: ["sessionKey"]),
+           eventSessionID != sessionID {
+            return false
+        }
+
+        switch event.event {
+        case "connected", "heartbeat", "started", "user_message":
+            return false
+        case "message":
+            startLiveAssistantMessage(with: workspaceAssistantMessagePayload(from: event.data))
+            return false
+        case "chunk":
+            if event.data["fullReplace"]?.boolValue == true {
+                replaceLiveAssistantText(from: event.data)
+            } else {
+                appendLiveAssistantDelta(from: event.data)
+            }
+            return false
+        case "thinking":
+            if let thinking = gatewayValue(in: event.data, keys: ["text", "delta", "content"]) {
+                appendLiveSystemMessage(thinking)
+            }
+            return false
+        case "tool", "artifact":
+            let state = gatewayValue(in: event.data, keys: ["phase", "state", "status"])?.lowercased() ?? ""
+            updateToolActivityCard(for: event.data, defaultRunning: state != "complete" && state != "completed")
+            return false
+        case "done":
+            completeLiveAssistantMessage(from: event.data)
+            return true
+        case "error":
+            let message = gatewayValue(in: event.data, keys: ["message", "error"]) ?? "Workspace chat event stream reported an error."
+            appendLiveSystemMessage(message)
+            sessionConversationError = message
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func workspaceAssistantMessagePayload(from payload: [String: JSONValue]) -> [String: JSONValue] {
+        guard let message = payload["message"]?.objectValue else { return payload }
+        return [
+            "id": message["id"] ?? .string(UUID().uuidString),
+            "text": .string("")
+        ]
     }
 
     private func hydrateWorkspaceSessionHistory(sessionID: String, connection: ConnectionProfile) async -> Bool {
@@ -4059,6 +4152,32 @@ final class AppState: ObservableObject {
             id: existing.id,
             role: existing.role,
             content: (existing.content ?? "") + delta,
+            timestampText: existing.timestampText,
+            metadataItems: existing.metadataItems,
+            toolSummary: existing.toolSummary,
+            isStreaming: true
+        )
+    }
+
+    private func replaceLiveAssistantText(from payload: [String: JSONValue]) {
+        let text = gatewayValue(in: payload, keys: ["text", "content"]) ?? ""
+        guard !text.isEmpty else { return }
+
+        if activeGatewayAssistantMessageID == nil {
+            startLiveAssistantMessage(with: payload)
+            return
+        }
+
+        guard let messageID = activeGatewayAssistantMessageID,
+              let index = liveSessionMessageDisplays.lastIndex(where: { $0.id == messageID }) else {
+            return
+        }
+
+        let existing = liveSessionMessageDisplays[index]
+        liveSessionMessageDisplays[index] = SessionMessageDisplay(
+            id: existing.id,
+            role: existing.role,
+            content: text,
             timestampText: existing.timestampText,
             metadataItems: existing.metadataItems,
             toolSummary: existing.toolSummary,

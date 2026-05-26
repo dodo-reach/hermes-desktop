@@ -1103,6 +1103,23 @@ struct WorkspaceSessionActiveRunResponse: Decodable {
     let error: String?
 }
 
+struct WorkspaceChatEventsResponse: Decodable {
+    let ok: Bool
+    let events: [WorkspaceChatEvent]
+    let error: String?
+}
+
+struct WorkspaceChatEvent: Decodable, Identifiable {
+    let event: String
+    let data: [String: JSONValue]
+
+    var id: String {
+        let runId = data["runId"]?.stringValue ?? "no-run"
+        let timestamp = data["timestamp"]?.stringValue ?? data["lastEventAt"]?.stringValue ?? ""
+        return "\(event)-\(runId)-\(timestamp)-\(data.hashValue)"
+    }
+}
+
 struct WorkspaceSessionActiveRun: Decodable, Equatable {
     let runId: String
     let sessionKey: String
