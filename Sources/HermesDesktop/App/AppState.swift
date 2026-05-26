@@ -1387,6 +1387,7 @@ final class AppState: ObservableObject {
             let createdSessionID = responseSessionID.isEmpty ? serverSessionID : responseSessionID
             isSendingSessionMessage = false
             pendingSessionTurn = nil
+            markAcceptedWorkspaceRun(sendResponse, sessionID: createdSessionID)
             sessionSearchQuery = ""
             selectedSessionDetailMode = .chat
             isNewSessionComposerActive = false
@@ -1606,7 +1607,7 @@ final class AppState: ObservableObject {
         appendPendingUserLiveMessage(prompt: trimmedPrompt)
 
         do {
-            _ = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
+            let sendResponse = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
                 connection: profile,
                 sessionKey: selectedSessionID,
                 message: trimmedPrompt,
@@ -1616,6 +1617,7 @@ final class AppState: ObservableObject {
 
             isSendingSessionMessage = false
             pendingSessionTurn = nil
+            markAcceptedWorkspaceRun(sendResponse, sessionID: selectedSessionID)
             scheduleAcceptedWorkspaceSessionRefresh(sessionID: selectedSessionID, connection: profile)
             return true
         } catch {
@@ -3890,6 +3892,28 @@ final class AppState: ObservableObject {
             sessions.insert(summary, at: 0)
             totalSessionsCount = max(totalSessionsCount, sessions.count)
         }
+    }
+
+    private func markAcceptedWorkspaceRun(_ response: WorkspaceSessionSendResponse, sessionID: String) {
+        guard let runID = response.runId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !runID.isEmpty else {
+            return
+        }
+        let now = Date().timeIntervalSince1970 * 1000
+        workspaceSessionActiveRun = WorkspaceSessionActiveRun(
+            runId: runID,
+            sessionKey: sessionID,
+            friendlyId: sessionID,
+            status: "accepted",
+            createdAt: now,
+            updatedAt: now,
+            lastEventAt: now,
+            assistantText: "",
+            thinkingText: "",
+            toolCalls: [],
+            lifecycleEvents: [],
+            errorMessage: nil
+        )
     }
 
     @discardableResult

@@ -1125,6 +1125,7 @@ struct WorkspaceSessionCreateResponse: Decodable {
 struct WorkspaceSessionSendResponse: Decodable {
     let ok: Bool
     let sessionKey: String?
+    let runId: String?
     let queued: Bool?
     let serverSide: Bool?
     let error: String?
