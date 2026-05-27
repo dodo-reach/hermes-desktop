@@ -1,7 +1,6 @@
 import Foundation
 
 enum SessionDetailMode: String, CaseIterable, Equatable, Sendable {
-    case transcript
     case chat
 }
 

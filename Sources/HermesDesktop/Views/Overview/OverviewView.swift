@@ -240,7 +240,7 @@ struct OverviewView: View {
     private func chatPanel(_ overview: RemoteDiscovery) -> some View {
         HermesSurfacePanel(
             title: "Chat",
-            subtitle: "Readiness for the embedded Hermes TUI and the transcript source read back from the host."
+            subtitle: "Readiness for native chat and the persisted session history read back from the host."
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 12) {
@@ -485,7 +485,7 @@ struct OverviewView: View {
             HermesInspectorField(
                 id: "session-source",
                 label: "Session source",
-                value: overview.sessionStore?.kind.displayName ?? "Transcript files"
+                value: overview.sessionStore?.kind.displayName ?? "Session history files"
             )
         ]
 
@@ -502,7 +502,7 @@ struct OverviewView: View {
         } else {
             fields.append(
                 HermesInspectorField(
-                    id: "transcript-folder",
+                    id: "session-history-folder",
                     label: "Storage path",
                     value: overview.paths.sessionsDir,
                     isMonospaced: true,
@@ -525,7 +525,7 @@ struct OverviewView: View {
 
     private var chatReadinessDetail: String {
         if isTUIChatReady {
-            return "Chat runs inside the real Hermes TUI; Sessions reads persisted transcripts from the host."
+            return "Chat is ready; Sessions reads persisted conversation history from the host."
         }
 
         return appState.nativeChatBootstrapStatus?.fallbackReason ??

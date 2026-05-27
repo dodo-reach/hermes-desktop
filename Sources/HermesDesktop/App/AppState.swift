@@ -1277,7 +1277,7 @@ final class AppState: ObservableObject {
             guard isActiveWorkspace(profile), selectedSessionID == sessionID else { return }
             clearSessionMessages()
             sessionsError = error.localizedDescription
-            setStatusMessage(L10n.string("Unable to load session transcript"))
+            setStatusMessage(L10n.string("Unable to load session history"))
         }
     }
 
@@ -1298,19 +1298,8 @@ final class AppState: ObservableObject {
     }
 
     func setSessionDetailMode(_ mode: SessionDetailMode) {
-        let previousMode = selectedSessionDetailMode
         selectedSessionDetailMode = mode
-
-        switch mode {
-        case .transcript:
-            if previousMode == .chat {
-                Task { [weak self] in
-                    await self?.refreshSessionsAfterChat()
-                }
-            }
-        case .chat:
-            stopSessionTUI()
-        }
+        stopSessionTUI()
     }
 
     func startSelectedSessionChat() {

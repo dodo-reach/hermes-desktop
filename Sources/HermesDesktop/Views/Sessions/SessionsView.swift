@@ -187,7 +187,7 @@ struct SessionsView: View {
         } else {
             HermesSurfacePanel(
                 title: panelTitle,
-                subtitle: "Select a session to inspect its transcript, metadata and last activity."
+                subtitle: "Select a session to continue the chat and inspect its metadata and last activity."
             ) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {

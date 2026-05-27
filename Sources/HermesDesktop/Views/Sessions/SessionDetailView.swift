@@ -122,11 +122,7 @@ struct SessionDetailView: View {
 
             Divider()
 
-            if mode == .transcript {
-                transcriptMode
-            } else {
-                chatMode
-            }
+            nativeChatMode
         }
         .alert(L10n.string("Delete this session?"), isPresented: $showDeleteConfirmation, presenting: session) { session in
             Button(L10n.string("Delete"), role: .destructive) {
@@ -170,24 +166,10 @@ struct SessionDetailView: View {
             }
         }
 
-            Picker("", selection: modeBinding) {
-                Text(L10n.string("Transcript")).tag(SessionDetailMode.transcript)
-                Text(L10n.string("Chat")).tag(SessionDetailMode.chat)
-            }
-            .pickerStyle(.segmented)
-            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .background(.bar)
-    }
-
-    private var modeBinding: Binding<SessionDetailMode> {
-        Binding {
-            mode
-        } set: { newValue in
-            onModeChange(newValue)
-        }
     }
 
     private var terminalThemeBinding: Binding<TerminalThemePreference> {
@@ -203,121 +185,6 @@ struct SessionDetailView: View {
             return L10n.string("Select an SSH host to start a live Hermes chat.")
         }
         return "\(connection.label) - \(connection.displayDestination) - \(connection.resolvedHermesProfileName)"
-    }
-
-    private var transcriptMode: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    transcriptScrollContent
-
-                    Color.clear
-                        .frame(height: 1)
-                        .id(sessionDetailBottomID)
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 22)
-            }
-            .background {
-                SessionScrollOffsetObserver(
-                    sessionID: session?.id,
-                    savedOffset: savedScrollOffset,
-                    restoreRequestID: scrollOffsetRestoreRequestID,
-                    onSaveOffset: onSaveScrollOffset,
-                    onMetricsChange: { metrics in
-                        scrollMetrics = metrics
-                    }
-                )
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if shouldShowJumpToLatestButton {
-                    Button {
-                        requestScrollToLatest(proxy, reason: .pendingTurnChanged)
-                    } label: {
-                        Label(L10n.string("Jump to Latest"), systemImage: "arrow.down.to.line")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .padding(18)
-                    .transition(.opacity)
-                    .help(L10n.string("Scroll to the latest message"))
-                }
-            }
-            .onChange(of: session?.id) { _, _ in
-                expandedMetadataMessageIDs.removeAll()
-                shouldAutoScrollNextMessageLoad = true
-                restoreSavedScrollOffsetOrScrollToLatest(proxy)
-            }
-            .onChange(of: latestMessageScrollKey) { _, _ in
-                guard session != nil, !messages.isEmpty else { return }
-                handleMessageScrollChange(proxy)
-            }
-            .task(id: session?.id) {
-                restoreSavedScrollOffsetOrScrollToLatest(proxy)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var transcriptScrollContent: some View {
-        if let errorMessage {
-            HermesSurfacePanel {
-                Text(errorMessage)
-                    .foregroundStyle(.red)
-            }
-        }
-
-        if let session {
-            if let sessionCompactionNotice,
-               sessionCompactionNotice.sourceSessionID == session.id {
-                SessionCompactionNoticeView(notice: sessionCompactionNotice)
-            }
-
-            transcriptContent(for: session)
-        } else {
-            HermesSurfacePanel {
-                ContentUnavailableView(
-                    L10n.string("Start or select a session"),
-                    systemImage: "bubble.left.and.bubble.right",
-                    description: Text(L10n.string("Use New Chat to start the real Hermes TUI, or choose an existing session to inspect its stored transcript."))
-                )
-                .frame(maxWidth: .infinity, minHeight: 320)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func transcriptContent(for session: SessionSummary) -> some View {
-        if messages.isEmpty {
-            HermesSurfacePanel {
-                ContentUnavailableView(
-                    L10n.string("No transcript entries"),
-                    systemImage: "text.bubble",
-                    description: Text(L10n.string("This session has no readable message rows yet."))
-                )
-                .frame(maxWidth: .infinity, minHeight: 280)
-            }
-        } else {
-            HermesSurfacePanel(
-                title: "Transcript",
-                subtitle: "Messages are shown in the order Hermes stored them for this session."
-            ) {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(messages) { message in
-                        MessageCard(
-                            message: message,
-                            isShowingMetadata: metadataExpansionBinding(for: message.id)
-                        )
-                        .id(sessionMessageScrollID(message))
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var chatMode: some View {
-        nativeChatMode
     }
 
     private var nativeChatMode: some View {
@@ -419,7 +286,7 @@ struct SessionDetailView: View {
         if allChatMessages.isEmpty && matchingPendingTurn == nil && liveToolActivityCards.isEmpty && promptCards.isEmpty && activeRunForSession(session) == nil {
             HermesSurfacePanel {
                 ContentUnavailableView(
-                    L10n.string("No transcript entries"),
+                    L10n.string("No messages yet"),
                     systemImage: "text.bubble",
                     description: Text(L10n.string("This session has no readable message rows yet."))
                 )
@@ -541,7 +408,7 @@ struct SessionDetailView: View {
         if let session {
             return L10n.string("Hermes TUI will resume %@ over the existing SSH-first terminal path.", shortSessionID(session.id))
         }
-        return L10n.string("Hermes TUI will create the next session on the host; refresh Sessions after it exits or when you return to Transcript.")
+        return L10n.string("Hermes TUI will create the next session on the host; the conversation will appear here when it is available.")
     }
 
     private var startChatButtonTitle: String {
@@ -574,7 +441,7 @@ struct SessionDetailView: View {
 
     private var shouldShowJumpToLatestButton: Bool {
         guard session != nil,
-              hasLatestTranscriptTarget,
+              hasLatestChatTarget,
               !scrollRequest.isPending else {
             return false
         }
@@ -582,7 +449,7 @@ struct SessionDetailView: View {
         return scrollMetrics.distanceToBottom > 96
     }
 
-    private var hasLatestTranscriptTarget: Bool {
+    private var hasLatestChatTarget: Bool {
         let hasMatchingPendingTurn = pendingTurn.map { $0.sessionID == nil || $0.sessionID == session?.id } ?? false
         return !allChatMessages.isEmpty || hasMatchingPendingTurn || !promptCards.isEmpty || !liveToolActivityCards.isEmpty
     }
@@ -2210,7 +2077,7 @@ private struct PendingBubble: View {
     let tint: Color
 
     var body: some View {
-        TranscriptMessageSurface(tint: tint) {
+        ChatMessageSurface(tint: tint) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
@@ -2231,7 +2098,7 @@ private struct PendingBubble: View {
     }
 }
 
-private struct TranscriptMessageSurface<Content: View>: View {
+private struct ChatMessageSurface<Content: View>: View {
     let tint: Color
     let content: Content
 
@@ -2305,7 +2172,7 @@ private struct ConversationMessageCard: View {
     }
 
     private var messageSurface: some View {
-        TranscriptMessageSurface(tint: roleTint) {
+        ChatMessageSurface(tint: roleTint) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 10) {
                     RoleAvatar(role: message.role, tint: roleTint)
