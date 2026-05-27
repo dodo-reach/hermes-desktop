@@ -4,6 +4,7 @@ import SwiftUI
 private let sessionDetailBottomID = "session-detail-bottom"
 private let approvalNeededMessage = "Hermes requested command approval, but this chat turn cannot collect manual approvals. Retry this turn with Auto-approve enabled, or resume the session in Terminal to review the command yourself."
 private let autoApproveHelpText = "Approves command requests for this turn. Without it, approval-required commands may be blocked in chat."
+private let sessionImageAttachmentMaxBytes = 10 * 1024 * 1024
 
 private func sessionMessageScrollID(_ message: SessionMessageDisplay) -> String {
     "session-message-\(message.id)"
@@ -75,9 +76,16 @@ struct SessionDetailView: View {
     let session: SessionSummary?
     let messages: [SessionMessageDisplay]
     let errorMessage: String?
+    let conversationError: String?
+    let isSendingMessage: Bool
     let isDeletingSession: Bool
     let isSessionPinned: Bool
     let sessionCompactionNotice: SessionCompactionNotice?
+    let activeRun: WorkspaceSessionActiveRun?
+    let pendingTurn: PendingSessionTurn?
+    let liveMessages: [SessionMessageDisplay]
+    let liveToolActivityCards: [HermesToolActivityCard]
+    let promptCards: [HermesPromptCard]
     let mode: SessionDetailMode
     let terminal: SessionTUITerminal?
     let terminalTheme: TerminalThemePreference
@@ -90,6 +98,9 @@ struct SessionDetailView: View {
     let onToggleSessionPin: (SessionSummary) -> Void
     let onModeChange: (SessionDetailMode) -> Void
     let onStartChat: () -> Void
+    let onStartSession: (String, Bool, [WorkspaceChatAttachment]) async -> Bool
+    let onSendMessage: (String, Bool, [WorkspaceChatAttachment]) async -> Bool
+    let onRespondToPrompt: (HermesPromptCard, HermesPromptResponse) async -> Void
     let onUpdateTerminalTheme: (TerminalThemePreference) -> Void
     let onTerminalExitRefresh: () async -> Void
 
@@ -102,7 +113,7 @@ struct SessionDetailView: View {
     @State private var shouldAutoScrollNextMessageLoad = true
 
     private var latestMessageScrollKey: String {
-        "\(messages.count):\(messages.last?.id ?? "none")"
+        "\(messages.count):\(messages.last?.id ?? "none"):live=\(liveMessages.count):\(liveMessages.last?.id ?? "none"):pending=\(pendingTurn?.id.uuidString ?? "none"):prompts=\(promptCards.count):tools=\(liveToolActivityCards.count)"
     }
 
     var body: some View {
@@ -111,11 +122,7 @@ struct SessionDetailView: View {
 
             Divider()
 
-            if mode == .transcript {
-                transcriptMode
-            } else {
-                chatMode
-            }
+            nativeChatMode
         }
         .alert(L10n.string("Delete this session?"), isPresented: $showDeleteConfirmation, presenting: session) { session in
             Button(L10n.string("Delete"), role: .destructive) {
@@ -159,24 +166,10 @@ struct SessionDetailView: View {
             }
         }
 
-            Picker("", selection: modeBinding) {
-                Text(L10n.string("Transcript")).tag(SessionDetailMode.transcript)
-                Text(L10n.string("Chat")).tag(SessionDetailMode.chat)
-            }
-            .pickerStyle(.segmented)
-            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .background(.bar)
-    }
-
-    private var modeBinding: Binding<SessionDetailMode> {
-        Binding {
-            mode
-        } set: { newValue in
-            onModeChange(newValue)
-        }
     }
 
     private var terminalThemeBinding: Binding<TerminalThemePreference> {
@@ -189,66 +182,72 @@ struct SessionDetailView: View {
 
     private var newChatSubtitle: String {
         guard let connection else {
-            return L10n.string("Select an SSH host to start a live Hermes TUI.")
+            return L10n.string("Select an SSH host to start a live Hermes chat.")
         }
         return "\(connection.label) - \(connection.displayDestination) - \(connection.resolvedHermesProfileName)"
     }
 
-    private var transcriptMode: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    transcriptScrollContent
+    private var nativeChatMode: some View {
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        nativeChatScrollContent
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id(sessionDetailBottomID)
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 22)
-            }
-            .background {
-                SessionScrollOffsetObserver(
-                    sessionID: session?.id,
-                    savedOffset: savedScrollOffset,
-                    restoreRequestID: scrollOffsetRestoreRequestID,
-                    onSaveOffset: onSaveScrollOffset,
-                    onMetricsChange: { metrics in
-                        scrollMetrics = metrics
+                        Color.clear
+                            .frame(height: 1)
+                            .id(sessionDetailBottomID)
                     }
-                )
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if shouldShowJumpToLatestButton {
-                    Button {
-                        requestScrollToLatest(proxy, reason: .pendingTurnChanged)
-                    } label: {
-                        Label(L10n.string("Jump to Latest"), systemImage: "arrow.down.to.line")
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 22)
+                }
+                .background {
+                    SessionScrollOffsetObserver(
+                        sessionID: session?.id,
+                        savedOffset: savedScrollOffset,
+                        restoreRequestID: scrollOffsetRestoreRequestID,
+                        onSaveOffset: onSaveScrollOffset,
+                        onMetricsChange: { metrics in
+                            scrollMetrics = metrics
+                        }
+                    )
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if shouldShowJumpToLatestButton {
+                        Button {
+                            requestScrollToLatest(proxy, reason: .pendingTurnChanged)
+                        } label: {
+                            Label(L10n.string("Jump to Latest"), systemImage: "arrow.down.to.line")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(18)
+                        .transition(.opacity)
+                        .help(L10n.string("Scroll to the latest message"))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .padding(18)
-                    .transition(.opacity)
-                    .help(L10n.string("Scroll to the latest message"))
+                }
+                .onChange(of: session?.id) { _, _ in
+                    expandedMetadataMessageIDs.removeAll()
+                    shouldAutoScrollNextMessageLoad = true
+                    restoreSavedScrollOffsetOrScrollToLatest(proxy)
+                }
+                .onChange(of: latestMessageScrollKey) { _, _ in
+                    handleMessageScrollChange(proxy)
+                }
+                .task(id: session?.id) {
+                    restoreSavedScrollOffsetOrScrollToLatest(proxy)
                 }
             }
-            .onChange(of: session?.id) { _, _ in
-                expandedMetadataMessageIDs.removeAll()
-                shouldAutoScrollNextMessageLoad = true
-                restoreSavedScrollOffsetOrScrollToLatest(proxy)
-            }
-            .onChange(of: latestMessageScrollKey) { _, _ in
-                guard session != nil, !messages.isEmpty else { return }
-                handleMessageScrollChange(proxy)
-            }
-            .task(id: session?.id) {
-                restoreSavedScrollOffsetOrScrollToLatest(proxy)
-            }
+
+            Divider()
+                .opacity(0.6)
+
+            composerDock
         }
     }
 
     @ViewBuilder
-    private var transcriptScrollContent: some View {
+    private var nativeChatScrollContent: some View {
         if let errorMessage {
             HermesSurfacePanel {
                 Text(errorMessage)
@@ -262,13 +261,18 @@ struct SessionDetailView: View {
                 SessionCompactionNoticeView(notice: sessionCompactionNotice)
             }
 
-            transcriptContent(for: session)
+            nativeConversationContent(for: session)
+        } else if let pendingTurn, pendingTurn.sessionID == nil {
+            HermesSurfacePanel(title: "Starting Session") {
+                PendingSessionTurnView(turn: pendingTurn, showPrompt: !allChatMessages.containsUserPrompt(pendingTurn.prompt))
+                    .id(pendingTurnScrollID(pendingTurn))
+            }
         } else {
             HermesSurfacePanel {
                 ContentUnavailableView(
                     L10n.string("Start or select a session"),
                     systemImage: "bubble.left.and.bubble.right",
-                    description: Text(L10n.string("Use New Chat to start the real Hermes TUI, or choose an existing session to inspect its stored transcript."))
+                    description: Text(L10n.string("Write below to begin a new Hermes conversation, or choose an existing session from the list."))
                 )
                 .frame(maxWidth: .infinity, minHeight: 320)
             }
@@ -276,76 +280,112 @@ struct SessionDetailView: View {
     }
 
     @ViewBuilder
-    private func transcriptContent(for session: SessionSummary) -> some View {
-        if messages.isEmpty {
+    private func nativeConversationContent(for session: SessionSummary) -> some View {
+        let matchingPendingTurn = pendingTurn?.sessionID == session.id ? pendingTurn : nil
+
+        if allChatMessages.isEmpty && matchingPendingTurn == nil && liveToolActivityCards.isEmpty && promptCards.isEmpty && activeRunForSession(session) == nil {
             HermesSurfacePanel {
                 ContentUnavailableView(
-                    L10n.string("No transcript entries"),
+                    L10n.string("No messages yet"),
                     systemImage: "text.bubble",
                     description: Text(L10n.string("This session has no readable message rows yet."))
                 )
                 .frame(maxWidth: .infinity, minHeight: 280)
             }
         } else {
-            HermesSurfacePanel(
-                title: "Transcript",
-                subtitle: "Messages are shown in the order Hermes stored them for this session."
-            ) {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(messages) { message in
-                        MessageCard(
-                            message: message,
-                            isShowingMetadata: metadataExpansionBinding(for: message.id)
-                        )
-                        .id(sessionMessageScrollID(message))
-                    }
+            LazyVStack(alignment: .leading, spacing: 14) {
+                if let run = activeRunForSession(session) {
+                    WorkspaceSessionActiveRunCard(run: run)
+                }
+
+                ForEach(allChatMessages) { message in
+                    MessageCard(
+                        message: message,
+                        isShowingMetadata: metadataExpansionBinding(for: message.id)
+                    )
+                    .id(sessionMessageScrollID(message))
+                }
+
+                ForEach(liveToolActivityCards) { card in
+                    SessionToolActivityCardView(card: card)
+                }
+
+                ForEach(promptCards) { card in
+                    SessionPromptCardView(
+                        card: card,
+                        isDisabled: isSendingMessage,
+                        onRespond: onRespondToPrompt
+                    )
+                }
+
+                if let matchingPendingTurn {
+                    PendingSessionTurnView(
+                        turn: matchingPendingTurn,
+                        showPrompt: !allChatMessages.containsUserPrompt(matchingPendingTurn.prompt)
+                    )
+                    .id(pendingTurnScrollID(matchingPendingTurn))
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    @ViewBuilder
-    private var chatMode: some View {
-        if let terminal, terminalMatchesCurrentSelection(terminal) {
-            VStack(spacing: 0) {
-                HStack(spacing: 10) {
-                    Image(systemName: terminal.terminalSession.isRunning ? "terminal.fill" : "terminal")
-                        .foregroundStyle(terminal.terminalSession.isRunning ? Color.green : Color.secondary)
-
-                    Text(L10n.string(terminal.targetLabel))
-                        .font(.subheadline.weight(.semibold))
-
-                    Spacer()
-
-                    TerminalAppearanceToolbarButton(
-                        appearance: terminalAppearance,
-                        isPresented: $isShowingChatAppearanceEditor,
-                        themePreference: terminalThemeBinding
-                    )
-
-                    if let exitCode = terminal.terminalSession.exitCode {
-                        HermesBadge(text: L10n.string("Exited %@", "\(exitCode)"), tint: exitCode == 0 ? .secondary : .orange)
-                    } else if terminal.terminalSession.isRunning {
-                        HermesBadge(text: L10n.string("Running"), tint: Color(red: 0.0, green: 0.58, blue: 0.22))
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.secondary.opacity(0.06))
-
-                SwiftTermTerminalView(
-                    session: terminal.terminalSession,
-                    appearance: terminalAppearance,
-                    isActive: isActive && mode == .chat
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .onChange(of: terminal.terminalSession.exitCode) { _, _ in
-                Task { await onTerminalExitRefresh() }
-            }
-        } else {
-            sessionChatPlaceholder
+    private var allChatMessages: [SessionMessageDisplay] {
+        var seen = Set<String>()
+        return (messages + liveMessages).filter { message in
+            let key = sessionMessageDeduplicationKey(for: message)
+            return seen.insert(key).inserted
         }
+    }
+
+    private func sessionMessageDeduplicationKey(
+        for message: SessionMessageDisplay
+    ) -> String {
+        let text = (message.content ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard !text.isEmpty else {
+            return "id:\(message.id)"
+        }
+        return "\(sessionMessageRoleKey(message.role)):\(text)"
+    }
+
+    private func sessionMessageRoleKey(_ role: SessionMessageRole) -> String {
+        switch role {
+        case .assistant:
+            return "assistant"
+        case .user:
+            return "user"
+        case .system:
+            return "system"
+        case .event:
+            return "event"
+        case .custom(let value):
+            return value
+        }
+    }
+
+    private func activeRunForSession(_ session: SessionSummary) -> WorkspaceSessionActiveRun? {
+        guard let activeRun, activeRun.sessionKey == session.id else { return nil }
+        return activeRun
+    }
+
+    private var composerDock: some View {
+        SessionComposerPanel(
+            title: session == nil ? "New Session" : "Continue Session",
+            placeholder: session == nil ? "Start a new Hermes session…" : "Write a reply to continue this session…",
+            errorMessage: conversationError,
+            isSending: isSendingMessage,
+            showsAutoApprove: true,
+            onResumeInTerminal: session.map { selectedSession in
+                { onResumeInTerminal(selectedSession) }
+            },
+            onSend: session == nil ? onStartSession : onSendMessage
+        )
+        .id(session?.id ?? "new-session")
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 
     @ViewBuilder
@@ -396,7 +436,7 @@ struct SessionDetailView: View {
         if let session {
             return L10n.string("Hermes TUI will resume %@ over the existing SSH-first terminal path.", shortSessionID(session.id))
         }
-        return L10n.string("Hermes TUI will create the next session on the host; refresh Sessions after it exits or when you return to Transcript.")
+        return L10n.string("Hermes TUI will create the next session on the host; the conversation will appear here when it is available.")
     }
 
     private var startChatButtonTitle: String {
@@ -429,7 +469,7 @@ struct SessionDetailView: View {
 
     private var shouldShowJumpToLatestButton: Bool {
         guard session != nil,
-              hasLatestTranscriptTarget,
+              hasLatestChatTarget,
               !scrollRequest.isPending else {
             return false
         }
@@ -437,8 +477,9 @@ struct SessionDetailView: View {
         return scrollMetrics.distanceToBottom > 96
     }
 
-    private var hasLatestTranscriptTarget: Bool {
-        !messages.isEmpty
+    private var hasLatestChatTarget: Bool {
+        let hasMatchingPendingTurn = pendingTurn.map { $0.sessionID == nil || $0.sessionID == session?.id } ?? false
+        return !allChatMessages.isEmpty || hasMatchingPendingTurn || !promptCards.isEmpty || !liveToolActivityCards.isEmpty
     }
 
     private var isNearLatest: Bool {
@@ -523,7 +564,12 @@ struct SessionDetailView: View {
     }
 
     private var latestScrollTarget: (id: String, anchor: UnitPoint) {
-        if let lastMessage = messages.last {
+        if let pendingTurn,
+           pendingTurn.sessionID == nil || pendingTurn.sessionID == session?.id {
+            return (pendingTurnScrollID(pendingTurn), .top)
+        }
+
+        if let lastMessage = allChatMessages.last {
             return (sessionMessageScrollID(lastMessage), .top)
         }
 
@@ -752,6 +798,171 @@ private final class SessionScrollOffsetProbeView: NSView {
     }
 }
 
+
+private struct WorkspaceSessionActiveRunCard: View {
+    let run: WorkspaceSessionActiveRun
+
+    private var statusText: String {
+        run.status.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private var statusTint: Color {
+        switch run.status.lowercased() {
+        case "error", "failed":
+            return .red
+        case "complete", "completed", "succeeded":
+            return .green
+        default:
+            return .cyan
+        }
+    }
+
+    private var detailText: String {
+        if let errorMessage = run.errorMessage, !errorMessage.isEmpty {
+            return errorMessage
+        }
+        if let thinkingText = run.thinkingText, !thinkingText.isEmpty {
+            return thinkingText
+        }
+        if let assistantText = run.assistantText, !assistantText.isEmpty {
+            return assistantText
+        }
+        return L10n.string("Server-owned chat turn is being tracked by the Workspace run ledger.")
+    }
+
+    private var recentLifecycleEvents: [WorkspaceSessionRunLifecycleEvent] {
+        Array(run.lifecycleEvents.suffix(6))
+    }
+
+    var body: some View {
+        HermesSurfacePanel {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Label(statusText, systemImage: run.status == "error" ? "exclamationmark.triangle.fill" : "waveform.path.ecg")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(statusTint)
+
+                    Text(run.runId)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    if let lastEventAt = run.lastEventAt {
+                        Text(runLedgerTimestamp(lastEventAt))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(detailText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+
+                if !recentLifecycleEvents.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.string("Run Events"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(recentLifecycleEvents) { event in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(nonBlank(event.emoji) ?? (event.isError ? "!" : "-"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(event.isError ? .red : .secondary)
+                                    .frame(width: 16, alignment: .center)
+
+                                Text(event.text)
+                                    .font(.caption)
+                                    .foregroundStyle(event.isError ? .red : .secondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if let timestamp = event.timestamp {
+                                    Text(runLedgerTimestamp(timestamp))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                if !run.toolCalls.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.string("Tools"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        ForEach(run.toolCalls.prefix(6)) { tool in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    HermesBadge(
+                                        text: tool.phase.replacingOccurrences(of: "_", with: " ").capitalized,
+                                        tint: toolPhaseTint(tool.phase),
+                                        systemImage: "wrench.and.screwdriver.fill",
+                                        isMonospaced: false
+                                    )
+
+                                    Text(tool.name)
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(1)
+
+                                    Spacer()
+                                }
+
+                                if let preview = nonBlank(tool.preview) {
+                                    Text(preview)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(4)
+                                        .textSelection(.enabled)
+                                }
+
+                                if let result = nonBlank(tool.result) {
+                                    Text(result)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(4)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func toolPhaseTint(_ phase: String) -> Color {
+        switch phase.lowercased() {
+        case "complete", "completed", "succeeded", "success":
+            return .green
+        case "error", "failed":
+            return .red
+        default:
+            return .blue
+        }
+    }
+
+    private func nonBlank(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private func runLedgerTimestamp(_ value: Double) -> String {
+        let seconds = value > 10_000_000_000 ? value / 1000 : value
+        let date = Date(timeIntervalSince1970: seconds)
+        return DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+    }
+}
+
 private struct SessionSummaryPanel: View {
     let session: SessionSummary
     let isDeleting: Bool
@@ -866,9 +1077,11 @@ private struct SessionComposerPanel: View {
     let isSending: Bool
     let showsAutoApprove: Bool
     let onResumeInTerminal: (() -> Void)?
-    let onSend: (String, Bool) async -> Bool
+    let onSend: (String, Bool, [WorkspaceChatAttachment]) async -> Bool
 
     @State private var draft = ""
+    @State private var attachments: [WorkspaceChatAttachment] = []
+    @State private var attachmentError: String?
     @State private var autoApproveCommands = false
     @State private var isExpanded = false
     @FocusState private var isEditorFocused: Bool
@@ -887,7 +1100,7 @@ private struct SessionComposerPanel: View {
     }
 
     private var canSend: Bool {
-        !isSending && !trimmedDraft.isEmpty
+        !isSending && (!trimmedDraft.isEmpty || !attachments.isEmpty)
     }
 
     private var shouldUseExpandedEditor: Bool {
@@ -943,6 +1156,8 @@ private struct SessionComposerPanel: View {
                     }
                 }
             }
+
+            attachmentStrip
 
             composerInput
         }
@@ -1045,7 +1260,9 @@ private struct SessionComposerPanel: View {
                 placeholder: placeholderText,
                 isFocused: $isEditorFocused,
                 isDisabled: isSending,
-                onCommandReturn: submit
+                onCommandReturn: submit,
+                onImagePaste: addImageAttachment,
+                onImagePasteError: showImageAttachmentError
             )
                 .padding(contentPadding)
                 .frame(height: height)
@@ -1054,6 +1271,62 @@ private struct SessionComposerPanel: View {
             if showsEditorBackground {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(HermesTheme.subtleStroke, lineWidth: 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var attachmentStrip: some View {
+        if !attachments.isEmpty || attachmentError != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                if !attachments.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(attachments) { attachment in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "photo")
+                                        .foregroundStyle(Color.accentColor)
+
+                                    Text(attachment.name)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .frame(maxWidth: 220, alignment: .leading)
+
+                                    Text(byteCountString(attachment.size))
+                                        .foregroundStyle(.secondary)
+
+                                    Button {
+                                        removeAttachment(attachment)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .imageScale(.small)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(L10n.string("Remove attachment"))
+                                    .accessibilityLabel(L10n.string("Remove attachment"))
+                                }
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background {
+                                    Capsule(style: .continuous)
+                                        .fill(HermesTheme.insetFill)
+                                }
+                                .overlay {
+                                    Capsule(style: .continuous)
+                                        .strokeBorder(HermesTheme.subtleStroke, lineWidth: 1)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let attachmentError {
+                    Label(attachmentError, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -1155,18 +1428,26 @@ private struct SessionComposerPanel: View {
     }
 
     private func submit() {
-        let prompt = trimmedDraft
-        guard !isSending, !prompt.isEmpty else { return }
+        let originalPrompt = trimmedDraft
+        let outgoingAttachments = attachments
+        guard !isSending, !originalPrompt.isEmpty || !outgoingAttachments.isEmpty else { return }
+
+        let prompt = originalPrompt.isEmpty
+            ? L10n.string(outgoingAttachments.count == 1 ? "Please review the attached image." : "Please review the attached images.")
+            : originalPrompt
         let shouldAutoApprove = autoApproveCommands
         autoApproveCommands = false
         isExpanded = false
         isEditorFocused = false
         draft = ""
+        attachments = []
+        attachmentError = nil
 
         Task {
-            let didSend = await onSend(prompt, shouldAutoApprove)
-            if !didSend && draft.isEmpty {
-                draft = prompt
+            let didSend = await onSend(prompt, shouldAutoApprove, outgoingAttachments)
+            if !didSend && draft.isEmpty && attachments.isEmpty {
+                draft = originalPrompt
+                attachments = outgoingAttachments
                 isExpanded = shouldExpandEditor(for: prompt)
             }
         }
@@ -1197,6 +1478,23 @@ private struct SessionComposerPanel: View {
         expandEditor()
     }
 
+    private func addImageAttachment(_ attachment: WorkspaceChatAttachment) {
+        guard !isSending else { return }
+        attachmentError = nil
+        attachments.append(attachment)
+        expandEditor()
+    }
+
+    private func showImageAttachmentError(_ message: String) {
+        guard !isSending else { return }
+        attachmentError = message
+        expandEditor()
+    }
+
+    private func removeAttachment(_ attachment: WorkspaceChatAttachment) {
+        attachments.removeAll { $0.id == attachment.id }
+    }
+
     private func preserveEditorFocusAfterLayoutChange() {
         guard isEditorFocused, !isSending else { return }
         DispatchQueue.main.async {
@@ -1222,6 +1520,61 @@ private struct SessionComposerPanel: View {
     }
 }
 
+private enum PastedImageAttachmentResult {
+    case success(WorkspaceChatAttachment)
+    case failure(String)
+}
+
+private func pastedImageAttachment(from pasteboard: NSPasteboard) -> PastedImageAttachmentResult? {
+    guard let imageData = pastedImagePNGData(from: pasteboard) else { return nil }
+
+    guard imageData.count <= sessionImageAttachmentMaxBytes else {
+        return .failure(L10n.string("Pasted image is too large. Limit images to \(byteCountString(sessionImageAttachmentMaxBytes))."))
+    }
+
+    return .success(WorkspaceChatAttachment.imagePNG(data: imageData))
+}
+
+private func pastedImagePNGData(from pasteboard: NSPasteboard) -> Data? {
+    if let pngData = pasteboard.data(forType: .png) {
+        return pngData
+    }
+
+    if let tiffData = pasteboard.data(forType: .tiff),
+       let image = NSImage(data: tiffData) {
+        return pngData(from: image)
+    }
+
+    if let image = NSImage(pasteboard: pasteboard) {
+        return pngData(from: image)
+    }
+
+    let imageFileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [
+        .urlReadingFileURLsOnly: true
+    ]) as? [URL] ?? []
+
+    for url in imageFileURLs {
+        guard let image = NSImage(contentsOf: url),
+              let data = pngData(from: image) else { continue }
+        return data
+    }
+
+    return nil
+}
+
+private func pngData(from image: NSImage) -> Data? {
+    guard let tiffData = image.tiffRepresentation,
+          let bitmap = NSBitmapImageRep(data: tiffData) else {
+        return nil
+    }
+
+    return bitmap.representation(using: .png, properties: [:])
+}
+
+private func byteCountString(_ bytes: Int) -> String {
+    ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+}
+
 private struct SessionPromptTextView: NSViewRepresentable {
     @Binding var text: String
 
@@ -1229,6 +1582,8 @@ private struct SessionPromptTextView: NSViewRepresentable {
     let isFocused: FocusState<Bool>.Binding
     let isDisabled: Bool
     let onCommandReturn: () -> Void
+    let onImagePaste: (WorkspaceChatAttachment) -> Void
+    let onImagePasteError: (String) -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -1241,6 +1596,8 @@ private struct SessionPromptTextView: NSViewRepresentable {
         let textView = PlaceholderCommandTextView()
         textView.placeholder = placeholder
         textView.commandReturnAction = onCommandReturn
+        textView.imagePasteAction = onImagePaste
+        textView.imagePasteErrorAction = onImagePasteError
         textView.delegate = context.coordinator
         textView.drawsBackground = false
         textView.isRichText = false
@@ -1281,6 +1638,8 @@ private struct SessionPromptTextView: NSViewRepresentable {
 
         textView.placeholder = placeholder
         textView.commandReturnAction = onCommandReturn
+        textView.imagePasteAction = onImagePaste
+        textView.imagePasteErrorAction = onImagePasteError
         configure(textView)
         updateFocus(for: textView)
         textView.needsDisplay = true
@@ -1341,6 +1700,8 @@ private final class PlaceholderCommandTextView: NSTextView {
     }
 
     var commandReturnAction: (() -> Void)?
+    var imagePasteAction: ((WorkspaceChatAttachment) -> Void)?
+    var imagePasteErrorAction: ((String) -> Void)?
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -1362,6 +1723,30 @@ private final class PlaceholderCommandTextView: NSTextView {
         }
 
         super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "v",
+           pastedImageAttachment(from: .general) != nil {
+            paste(nil)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        switch pastedImageAttachment(from: .general) {
+        case let .success(attachment):
+            imagePasteAction?(attachment)
+            return
+        case let .failure(message):
+            imagePasteErrorAction?(message)
+            return
+        case .none:
+            super.paste(sender)
+        }
     }
 }
 
@@ -1720,7 +2105,7 @@ private struct PendingBubble: View {
     let tint: Color
 
     var body: some View {
-        TranscriptMessageSurface(tint: tint) {
+        ChatMessageSurface(tint: tint) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
@@ -1741,7 +2126,7 @@ private struct PendingBubble: View {
     }
 }
 
-private struct TranscriptMessageSurface<Content: View>: View {
+private struct ChatMessageSurface<Content: View>: View {
     let tint: Color
     let content: Content
 
@@ -1796,9 +2181,30 @@ private struct ConversationMessageCard: View {
     @Binding var isShowingMetadata: Bool
 
     var body: some View {
-        TranscriptMessageSurface(tint: roleTint) {
+        HStack(alignment: .top, spacing: 0) {
+            if isUserMessage {
+                Spacer(minLength: 80)
+            }
+
+            messageSurface
+                .frame(
+                    maxWidth: isUserMessage ? 680 : .infinity,
+                    alignment: isUserMessage ? .trailing : .leading
+                )
+
+            if !isUserMessage {
+                Spacer(minLength: 40)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)
+    }
+
+    private var messageSurface: some View {
+        ChatMessageSurface(tint: roleTint) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 10) {
+                    RoleAvatar(role: message.role, tint: roleTint)
+
                     HermesBadge(
                         text: displayRole,
                         tint: roleTint,
@@ -1844,6 +2250,10 @@ private struct ConversationMessageCard: View {
         }
     }
 
+    private var isUserMessage: Bool {
+        message.role == .user
+    }
+
     private var displayRole: String {
         message.role.displayTitle
     }
@@ -1864,13 +2274,80 @@ private struct ConversationMessageCard: View {
     private var roleSystemImage: String? {
         switch message.role {
         case .assistant:
-            return "sparkles"
+            return nil
         case .user:
             return "person.fill"
         case .system:
             return "gearshape.fill"
         case .event, .custom:
             return nil
+        }
+    }
+}
+
+private enum HermesDesktopResourceBundle {
+    static let module: Bundle? = {
+        let bundleName = "HermesDesktop_HermesDesktop.bundle"
+        let candidates: [URL?] = [
+            Bundle.main.bundleURL.appendingPathComponent(bundleName),
+            Bundle.main.resourceURL?.appendingPathComponent(bundleName),
+        ]
+
+        for candidate in candidates {
+            guard let candidate, let bundle = Bundle(url: candidate) else { continue }
+            return bundle
+        }
+
+        return nil
+    }()
+}
+
+private struct RoleAvatar: View {
+    let role: SessionMessageRole
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(tint.opacity(0.16))
+
+            avatarContent
+        }
+        .frame(width: 28, height: 28)
+        .overlay {
+            Circle()
+                .strokeBorder(tint.opacity(0.45), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        switch role {
+        case .assistant:
+            if let bundle = HermesDesktopResourceBundle.module,
+               bundle.url(forResource: "CaelProfile", withExtension: "png") != nil {
+                Image("CaelProfile", bundle: bundle)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(Circle())
+            } else {
+                Image(systemName: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+        case .user:
+            Image(systemName: "person.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+        case .system:
+            Image(systemName: "gearshape.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+        case .event, .custom:
+            Image(systemName: "ellipsis")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
         }
     }
 }

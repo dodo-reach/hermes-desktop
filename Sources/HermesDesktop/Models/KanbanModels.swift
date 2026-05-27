@@ -66,6 +66,15 @@ struct KanbanOperationResponse: Codable, Sendable {
 
 struct KanbanProject: Codable, Identifiable, Hashable, Sendable {
     static let defaultSlug = "default"
+    static let workspaceTasksSlug = "workspace-tasks"
+    static let workspaceTasks = KanbanProject(
+        slug: workspaceTasksSlug,
+        name: "Workspace Tasks",
+        description: "Shared :3077 task board used by the web and mobile workspace.",
+        icon: "checklist",
+        color: "blue",
+        isCurrent: true
+    )
 
     let slug: String
     let name: String?
@@ -265,6 +274,7 @@ struct KanbanTask: Codable, Identifiable, Hashable, Sendable, TitleIdentifiable 
     let runCount: Int
     let latestEventAt: Int?
     let warnings: KanbanTaskWarnings?
+    let sessionID: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -297,6 +307,7 @@ struct KanbanTask: Codable, Identifiable, Hashable, Sendable, TitleIdentifiable 
         case runCount = "run_count"
         case latestEventAt = "latest_event_at"
         case warnings
+        case sessionID = "session_id"
     }
 
     init(
@@ -329,7 +340,8 @@ struct KanbanTask: Codable, Identifiable, Hashable, Sendable, TitleIdentifiable 
         eventCount: Int,
         runCount: Int,
         latestEventAt: Int?,
-        warnings: KanbanTaskWarnings? = nil
+        warnings: KanbanTaskWarnings? = nil,
+        sessionID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -361,6 +373,7 @@ struct KanbanTask: Codable, Identifiable, Hashable, Sendable, TitleIdentifiable 
         self.runCount = runCount
         self.latestEventAt = latestEventAt
         self.warnings = warnings
+        self.sessionID = sessionID
     }
 
     init(from decoder: Decoder) throws {
@@ -395,6 +408,7 @@ struct KanbanTask: Codable, Identifiable, Hashable, Sendable, TitleIdentifiable 
         runCount = try container.decodeIfPresent(Int.self, forKey: .runCount) ?? 0
         latestEventAt = try container.decodeIfPresent(Int.self, forKey: .latestEventAt)
         warnings = try container.decodeIfPresent(KanbanTaskWarnings.self, forKey: .warnings)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
     }
 
     var resolvedTitle: String {
@@ -513,6 +527,7 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
     case todo
     case ready
     case running
+    case review
     case blocked
     case done
     case archived
@@ -523,6 +538,7 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
         .todo,
         .ready,
         .running,
+        .review,
         .blocked,
         .done,
         .archived
@@ -548,6 +564,8 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
             self = .ready
         case "running":
             self = .running
+        case "review":
+            self = .review
         case "blocked":
             self = .blocked
         case "done":
@@ -569,6 +587,8 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
             "ready"
         case .running:
             "running"
+        case .review:
+            "review"
         case .blocked:
             "blocked"
         case .done:
@@ -590,6 +610,8 @@ enum KanbanTaskStatus: Hashable, Codable, Sendable {
             "Ready"
         case .running:
             "Running"
+        case .review:
+            "Review"
         case .blocked:
             "Blocked"
         case .done:

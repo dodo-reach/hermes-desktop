@@ -10,8 +10,10 @@ struct UsageView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HermesPageHeader(
                     title: "Usage",
-                    subtitle: "The main cards and charts show input/output tokens for the active Hermes profile. When more than one profile is discovered, the host-wide panel shows all-categories tokens across readable profiles."
+                    subtitle: "The main cards and charts show input/output tokens for the active Hermes profile. Provider Remaining Limits uses the shared Cael Workspace usage snapshot inspired by CodexBar."
                 )
+
+                CaelProviderLimitsWebPanel()
 
                 usageContent
             }

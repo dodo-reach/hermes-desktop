@@ -11,7 +11,9 @@ struct KanbanView: View {
     @State private var tenantFilter = KanbanFilterOption.all
     @State private var isCreatingTask = false
     @State private var isCreatingBoard = false
+    @State private var isEditingWorkspaceTask = false
     @State private var taskDraft = KanbanTaskDraft()
+    @State private var workspaceTaskDraft = KanbanTaskDraft()
     @State private var boardDraft = KanbanBoardDraft()
     @State private var boardPendingArchive: KanbanProject?
     @State private var showArchiveBoardConfirmation = false
@@ -82,7 +84,9 @@ struct KanbanView: View {
 
             HStack(spacing: 8) {
                 createTaskButton
-                dispatchButton
+                if !appState.isWorkspaceKanbanBoardSelected {
+                    dispatchButton
+                }
             }
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -96,6 +100,7 @@ struct KanbanView: View {
                     Button {
                         isCreatingBoard = false
                         isCreatingTask = false
+                        isEditingWorkspaceTask = false
                         Task { await appState.selectKanbanBoard(board.slug) }
                     } label: {
                         HStack {
@@ -116,6 +121,7 @@ struct KanbanView: View {
                 Button {
                     boardDraft = KanbanBoardDraft()
                     isCreatingTask = false
+                    isEditingWorkspaceTask = false
                     isCreatingBoard = true
                 } label: {
                     Label(L10n.string("New Board"), systemImage: "plus")
@@ -126,7 +132,8 @@ struct KanbanView: View {
 
             if appState.supportsKanbanBoardManagement,
                let selectedBoard = appState.selectedKanbanBoard,
-               !selectedBoard.isDefault {
+               !selectedBoard.isDefault,
+               selectedBoard.slug != KanbanProject.workspaceTasksSlug {
                 Divider()
 
                 Button(L10n.string("Archive Board"), role: .destructive) {
@@ -469,6 +476,57 @@ struct KanbanView: View {
                     }
                 }
             )
+        } else if isEditingWorkspaceTask {
+            KanbanTaskEditorView(
+                draft: $workspaceTaskDraft,
+                errorMessage: appState.kanbanError,
+                isSaving: appState.isOperatingOnKanbanTask,
+                assignees: assigneeOptions,
+                onCancel: {
+                    isEditingWorkspaceTask = false
+                },
+                onSave: {
+                    guard let taskID = appState.selectedKanbanTaskID else { return }
+                    if await appState.updateWorkspaceKanbanTask(taskID: taskID, draft: workspaceTaskDraft) {
+                        isEditingWorkspaceTask = false
+                    }
+                }
+            )
+        } else if appState.isWorkspaceKanbanBoardSelected {
+            WorkspaceTaskDetailView(
+                task: selectedTask,
+                errorMessage: appState.kanbanError,
+                operationInFlight: selectedTask.map { task in
+                    appState.isOperatingOnKanbanTask && appState.operatingKanbanTaskID == task.id
+                } ?? false,
+                onCreate: {
+                    taskDraft = KanbanTaskDraft()
+                    isCreatingBoard = false
+                    isEditingWorkspaceTask = false
+                    isCreatingTask = true
+                },
+                onEdit: { task in
+                    workspaceTaskDraft = draft(from: task)
+                    isCreatingBoard = false
+                    isCreatingTask = false
+                    isEditingWorkspaceTask = true
+                },
+                onMove: { taskID, status in
+                    await appState.moveWorkspaceKanbanTask(taskID: taskID, to: status)
+                },
+                onLaunch: { taskID in
+                    await appState.launchWorkspaceKanbanTaskSession(taskID: taskID)
+                },
+                onLinkSession: { taskID, sessionID in
+                    await appState.linkWorkspaceKanbanTaskSession(taskID: taskID, sessionID: sessionID)
+                },
+                onOpenSession: { sessionID in
+                    await appState.openWorkspaceTaskSession(sessionID: sessionID)
+                },
+                onDelete: { taskID in
+                    await appState.deleteWorkspaceKanbanTask(taskID: taskID)
+                }
+            )
         } else {
             KanbanTaskDetailView(
                 task: selectedTask,
@@ -619,6 +677,13 @@ struct KanbanView: View {
 
     private func boardSubtitle(_ board: KanbanBoard) -> String {
         let boardName = appState.selectedKanbanBoard?.resolvedName ?? selectedBoardTitle
+        if appState.isWorkspaceKanbanBoardSelected {
+            return L10n.string(
+                "Workspace task board %@ from %@. Shared with the :3077 web and mobile app.",
+                boardName,
+                board.databasePath
+            )
+        }
         return L10n.string(
             "Kanban board %@ at %@. SSH-native; active profile is the operator.",
             boardName,
@@ -639,7 +704,19 @@ struct KanbanView: View {
     private func startCreatingTask() {
         taskDraft = KanbanTaskDraft()
         isCreatingBoard = false
+        isEditingWorkspaceTask = false
         isCreatingTask = true
+    }
+
+    private func draft(from task: KanbanTask) -> KanbanTaskDraft {
+        var draft = KanbanTaskDraft()
+        draft.title = task.resolvedTitle
+        draft.body = task.body ?? ""
+        draft.assignee = task.assignee ?? ""
+        draft.priority = task.priority
+        draft.skillsText = task.skills.joined(separator: ", ")
+        draft.startsInTriage = task.status == .triage
+        return draft
     }
 }
 
@@ -649,6 +726,7 @@ private enum KanbanStatusFilter: Hashable, CaseIterable {
     case todo
     case ready
     case running
+    case review
     case blocked
     case done
     case archived
@@ -665,6 +743,8 @@ private enum KanbanStatusFilter: Hashable, CaseIterable {
             "Ready"
         case .running:
             "Running"
+        case .review:
+            "Review"
         case .blocked:
             "Blocked"
         case .done:
@@ -686,6 +766,8 @@ private enum KanbanStatusFilter: Hashable, CaseIterable {
             .ready
         case .running:
             .running
+        case .review:
+            .review
         case .blocked:
             .blocked
         case .done:
@@ -734,6 +816,8 @@ private enum KanbanColors {
             .green
         case .running:
             .orange
+        case .review:
+            .cyan
         case .blocked:
             .red
         case .done:
@@ -742,6 +826,260 @@ private enum KanbanColors {
             .secondary
         case .other:
             .secondary
+        }
+    }
+}
+
+private struct WorkspaceTaskDetailView: View {
+    let task: KanbanTask?
+    let errorMessage: String?
+    let operationInFlight: Bool
+    let onCreate: () -> Void
+    let onEdit: (KanbanTask) -> Void
+    let onMove: (String, KanbanTaskStatus) async -> Void
+    let onLaunch: (String) async -> Void
+    let onLinkSession: (String, String?) async -> Void
+    let onOpenSession: (String) async -> Void
+    let onDelete: (String) async -> Void
+
+    @State private var isLinkingSession = false
+    @State private var sessionLinkDraft = ""
+
+    var body: some View {
+        HermesSurfacePanel(title: "Workspace Task", subtitle: "Shared with web and mobile /tasks.") {
+            VStack(alignment: .leading, spacing: 16) {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                if let task {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(task.resolvedTitle)
+                                .font(.headline)
+                                .textSelection(.enabled)
+
+                            Spacer()
+
+                            HermesBadge(text: task.status.displayTitle, tint: KanbanColors.tint(for: task.status))
+                        }
+
+                        if let body = task.trimmedBody {
+                            Text(body)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            WorkspaceTaskFact(label: "ID", value: task.id)
+                            WorkspaceTaskFact(label: "Assignee", value: task.assignee ?? "Unassigned")
+                            WorkspaceTaskFact(label: "Priority", value: task.priorityLabel)
+                            if let sessionID = normalizedSessionID(task.sessionID) {
+                                WorkspaceTaskFact(label: "Session", value: sessionID)
+                            }
+                        }
+                    }
+
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            workspaceTaskActions(task)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            workspaceTaskActions(task)
+                        }
+                    }
+
+                    Text("Deletes use the canonical /api/hermes-tasks backend so web and desktop mutate the same task ledger.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ContentUnavailableView(
+                        L10n.string("Select a task"),
+                        systemImage: "checklist",
+                        description: Text(L10n.string("Choose a Workspace task from the board, or create a new one."))
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 260)
+
+                    Button {
+                        onCreate()
+                    } label: {
+                        Label(L10n.string("New Task"), systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .sheet(isPresented: $isLinkingSession) {
+            if let task {
+                WorkspaceTaskLinkSessionSheet(
+                    taskTitle: task.resolvedTitle,
+                    sessionID: $sessionLinkDraft,
+                    operationInFlight: operationInFlight,
+                    onCancel: {
+                        isLinkingSession = false
+                    },
+                    onSave: { sessionID in
+                        await onLinkSession(task.id, sessionID)
+                        isLinkingSession = false
+                    }
+                )
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func workspaceTaskActions(_ task: KanbanTask) -> some View {
+        Button {
+            onEdit(task)
+        } label: {
+            Label(L10n.string("Edit"), systemImage: "pencil")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+
+        Button {
+            Task { await onLaunch(task.id) }
+        } label: {
+            Label(L10n.string("Launch Session"), systemImage: "bubble.left.and.text.bubble.right")
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(operationInFlight)
+
+        if let sessionID = normalizedSessionID(task.sessionID) {
+            Button {
+                Task { await onOpenSession(sessionID) }
+            } label: {
+                Label(L10n.string("Open Session"), systemImage: "arrow.right.circle")
+            }
+            .buttonStyle(.bordered)
+            .disabled(operationInFlight)
+        }
+
+        Button {
+            sessionLinkDraft = normalizedSessionID(task.sessionID) ?? ""
+            isLinkingSession = true
+        } label: {
+            Label(L10n.string("Link Session"), systemImage: "link")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+
+        Menu {
+            ForEach([KanbanTaskStatus.triage, .ready, .running, .review, .blocked, .done], id: \.rawValue) { status in
+                Button(L10n.string(status.displayTitle)) {
+                    Task { await onMove(task.id, status) }
+                }
+            }
+
+            if normalizedSessionID(task.sessionID) != nil {
+                Divider()
+                Button(L10n.string("Clear Session Link")) {
+                    Task { await onLinkSession(task.id, nil) }
+                }
+            }
+        } label: {
+            Label(L10n.string("More"), systemImage: "ellipsis.circle")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+
+        Button(role: .destructive) {
+            Task { await onDelete(task.id) }
+        } label: {
+            Label(L10n.string("Delete"), systemImage: "trash")
+        }
+        .buttonStyle(.bordered)
+        .disabled(operationInFlight)
+    }
+
+    private func normalizedSessionID(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct WorkspaceTaskLinkSessionSheet: View {
+    let taskTitle: String
+    @Binding var sessionID: String
+    let operationInFlight: Bool
+    let onCancel: () -> Void
+    let onSave: (String?) async -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Link Session"))
+                    .font(.title3.weight(.semibold))
+                Text(taskTitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.string("Session ID"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField(L10n.string("session-id"), text: $sessionID)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+
+            Text(L10n.string("Launch creates a new Workspace session automatically. Link is for attaching an existing session to this task ledger."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button(L10n.string("Cancel")) {
+                    onCancel()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button(L10n.string("Clear Link")) {
+                    Task { await onSave(nil) }
+                }
+                .disabled(operationInFlight)
+
+                Button(L10n.string("Save Link")) {
+                    let trimmed = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task { await onSave(trimmed.isEmpty ? nil : trimmed) }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(operationInFlight)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+    }
+}
+
+private struct WorkspaceTaskFact: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(L10n.string(label))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 74, alignment: .leading)
+
+            Text(value)
+                .font(.caption)
+                .textSelection(.enabled)
         }
     }
 }

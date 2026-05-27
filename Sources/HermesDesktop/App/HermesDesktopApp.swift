@@ -7,10 +7,13 @@ struct HermesDesktopApp: App {
     @StateObject private var appState = AppState()
 
     var body: some Scene {
-        WindowGroup("Hermes Desktop") {
+        WindowGroup("Cael Desktop") {
             RootView()
                 .environmentObject(appState)
                 .frame(minWidth: 940, minHeight: 520)
+                .tint(HermesTheme.accent)
+                .preferredColorScheme(.dark)
+                .background(HermesTheme.background)
                 .background(HermesWindowTitleBarConfigurator())
         }
         .defaultSize(width: 1360, height: 860)

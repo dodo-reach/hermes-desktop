@@ -62,7 +62,7 @@ struct RootView: View {
                 }
 
                 ToolbarItem(placement: .principal) {
-                    HermesToolbarPrincipalTitle(title: "Hermes Desktop")
+                    HermesToolbarPrincipalTitle(title: "Cael Desktop")
                 }
 
                 ToolbarItemGroup(placement: .automatic) {
@@ -218,7 +218,7 @@ struct RootView: View {
             return $filesSplitLayout
         case .skills:
             return $skillsSplitLayout
-        case .connections, .overview, .usage, .terminal:
+        case .connections, .overview, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .usage, .memory, .integrations, .mcp, .profiles, .terminal:
             return nil
         }
     }
@@ -241,7 +241,28 @@ struct RootView: View {
         if appState.activeConnection == nil {
             return [.connections]
         }
-        return [.connections, .overview, .sessions, .workflows, .cronjobs, .kanban, .files, .usage, .skills, .terminal]
+        return [
+            .connections,
+            .overview,
+            .sessions,
+            .mail,
+            .contacts,
+            .calendar,
+            .workflows,
+            .cronjobs,
+            .kanban,
+            .files,
+            .terminal,
+            .missionControl,
+            .operations,
+            .swarm,
+            .usage,
+            .memory,
+            .skills,
+            .integrations,
+            .mcp,
+            .profiles
+        ]
     }
 
     private var sectionSelection: Binding<AppSection?> {
@@ -286,11 +307,15 @@ struct RootView: View {
         case .connections:
             ConnectionsView()
         case .overview:
-            OverviewView()
+            CaelWorkspaceWebView()
         case .files:
             FilesView(splitLayout: $filesSplitLayout)
         case .sessions:
             EmptyView()
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp:
+            CommandCenterMirrorView(section: appState.selectedSection)
+        case .profiles:
+            ProfilesView()
         case .workflows:
             WorkflowsView(splitLayout: $workflowsSplitLayout)
         case .cronjobs:
@@ -428,7 +453,7 @@ private struct WorkspaceSidebarCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(L10n.string("Hermes Profile"))
+            Text(L10n.string("Agent"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -441,15 +466,15 @@ private struct WorkspaceSidebarCard: View {
                             }
                         } label: {
                             if profile.name == connection.resolvedHermesProfileName {
-                                Label(profile.name, systemImage: "checkmark")
+                                Label(profile.displayTitle, systemImage: "checkmark")
                             } else {
-                                Text(profile.name)
+                                Text(profile.displayTitle)
                             }
                         }
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        Text(connection.resolvedHermesProfileName)
+                        Text(connection.agentDisplayName)
                             .font(.headline)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -467,7 +492,7 @@ private struct WorkspaceSidebarCard: View {
                 .buttonStyle(.plain)
                 .disabled(appState.isRefreshingOverview || appState.isBusy)
             } else {
-                Text(connection.resolvedHermesProfileName)
+                Text(connection.agentDisplayName)
                     .font(.headline)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -500,7 +525,8 @@ private struct WorkspaceSidebarCard: View {
                 name: connection.resolvedHermesProfileName,
                 path: connection.remoteHermesHomePath,
                 isDefault: connection.usesDefaultHermesProfile,
-                exists: true
+                exists: true,
+                displayName: connection.agentDisplayName
             )
         ]
     }

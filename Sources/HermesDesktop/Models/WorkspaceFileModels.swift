@@ -2,10 +2,33 @@ import Foundation
 
 enum WorkspaceFileLimits {
     static let maxEditableFileBytes: Int64 = 10 * 1_000_000
+    static let maxDesktopUploadBytes: Int = 10 * 1024 * 1024
 
     static func decimalMegabytes(for byteCount: Int64) -> String {
         String(format: "%.1f MB", Double(byteCount) / 1_000_000)
     }
+}
+
+struct WorkspaceFileUploadResult: Codable, Hashable, Sendable {
+    let ok: Bool
+    let path: String?
+    let size: Int?
+    let contentHash: String?
+    let error: String?
+}
+
+struct WorkspacePreviewFile: Codable, Hashable, Sendable {
+    let ok: Bool?
+    let path: String
+    let mime: String
+    let kind: String
+    let size: Int64
+    let contentHash: String?
+    let content: String?
+    let contentBase64: String?
+
+    var isText: Bool { kind == "text" }
+    var isImage: Bool { kind == "image" }
 }
 
 struct WorkspaceFileBookmark: Codable, Identifiable, Equatable, Hashable, Sendable {

@@ -1,6 +1,9 @@
 import Foundation
 
 struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
+    static let defaultCaelWorkspaceBaseURL = "http://100.97.216.111:3077"
+    static let defaultAgentDisplayName = "Cael"
+
     var id: UUID
     var label: String
     var sshAlias: String
@@ -9,6 +12,7 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
     var sshUser: String
     var hermesProfile: String?
     var customHermesHomePath: String?
+    var caelWorkspaceBaseURL: String?
     var createdAt: Date
     var updatedAt: Date
     var lastConnectedAt: Date?
@@ -22,6 +26,7 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
         sshUser: String = "",
         hermesProfile: String? = nil,
         customHermesHomePath: String? = nil,
+        caelWorkspaceBaseURL: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         lastConnectedAt: Date? = nil
@@ -34,6 +39,7 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
         self.sshUser = sshUser
         self.hermesProfile = hermesProfile
         self.customHermesHomePath = customHermesHomePath
+        self.caelWorkspaceBaseURL = caelWorkspaceBaseURL
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastConnectedAt = lastConnectedAt
@@ -69,6 +75,31 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
         return value.normalizedCustomHermesHomePath
     }
 
+    var trimmedCaelWorkspaceBaseURL: String? {
+        guard let caelWorkspaceBaseURL else { return nil }
+        let value = caelWorkspaceBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        return value.normalizedCaelWorkspaceBaseURL
+    }
+
+    var resolvedCaelWorkspaceBaseURL: String {
+        trimmedCaelWorkspaceBaseURL ?? Self.defaultCaelWorkspaceBaseURL
+    }
+
+    var commandCenterClientFingerprint: String {
+        [workspaceScopeFingerprint, resolvedCaelWorkspaceBaseURL].joined(separator: "|")
+    }
+
+    func caelWorkspaceURLString(path: String) -> String {
+        let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        return "\(resolvedCaelWorkspaceBaseURL)\(normalizedPath)"
+    }
+
+    func caelWorkspaceURL(path: String) -> URL {
+        let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        return URL(string: caelWorkspaceURLString(path: normalizedPath)) ?? URL(string: "\(Self.defaultCaelWorkspaceBaseURL)\(normalizedPath)")!
+    }
+
     var usesCustomHermesHome: Bool {
         trimmedCustomHermesHomePath != nil
     }
@@ -78,6 +109,13 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
             return trimmedCustomHermesHomePath.displayNameForCustomHermesHomePath
         }
         return trimmedHermesProfile ?? "default"
+    }
+
+    var agentDisplayName: String {
+        if usesCustomHermesHome {
+            return resolvedHermesProfileName
+        }
+        return trimmedHermesProfile?.profileDisplayName ?? Self.defaultAgentDisplayName
     }
 
     var usesDefaultHermesProfile: Bool {
@@ -283,6 +321,10 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
             }
         }
 
+        if let workspaceURLError = validateCaelWorkspaceBaseURL(caelWorkspaceBaseURL) {
+            return workspaceURLError
+        }
+
         if let trimmedCustomHermesHomePath {
             if trimmedCustomHermesHomePath.containsControlCharacter {
                 return "Custom Hermes home contains unsupported control characters."
@@ -303,6 +345,7 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
         copy.sshUser = sshUser.trimmingCharacters(in: .whitespacesAndNewlines)
         copy.hermesProfile = trimmedHermesProfile
         copy.customHermesHomePath = trimmedCustomHermesHomePath
+        copy.caelWorkspaceBaseURL = trimmedCaelWorkspaceBaseURL
         if let sshPort = sshPort, sshPort <= 0 {
             copy.sshPort = nil
         }
@@ -312,6 +355,14 @@ struct ConnectionProfile: Codable, Identifiable, Equatable, Hashable {
 }
 
 private extension String {
+    var normalizedCaelWorkspaceBaseURL: String {
+        var value = self
+        while value.count > 1, value.hasSuffix("/") {
+            value.removeLast()
+        }
+        return value
+    }
+
     var normalizedCustomHermesHomePath: String {
         if self == "/" || self == "~" {
             return self
@@ -351,6 +402,19 @@ private extension String {
         return trimmed.split(separator: "/").last.map(String.init) ?? trimmed
     }
 
+    var profileDisplayName: String {
+        let words = split { character in
+            character == "-" || character == "_"
+        }
+        guard !words.isEmpty else { return self }
+        return words
+            .map { word in
+                let lowercased = String(word).lowercased()
+                return lowercased.prefix(1).uppercased() + lowercased.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
     var escapedForDoubleQuotedShellArgument: String {
         replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -368,6 +432,35 @@ private extension String {
     var containsControlCharacter: Bool {
         unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
+}
+
+private func validateCaelWorkspaceBaseURL(_ rawValue: String?) -> String? {
+    guard let rawValue else { return nil }
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if trimmed.containsControlCharacter {
+        return "Workspace URL contains unsupported control characters."
+    }
+
+    let normalized = trimmed.normalizedCaelWorkspaceBaseURL
+    guard let components = URLComponents(string: normalized) else {
+        return "Workspace URL is not valid."
+    }
+
+    guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+        return "Workspace URL must start with http:// or https://."
+    }
+
+    guard let host = components.host, !host.isEmpty else {
+        return "Workspace URL must include a host."
+    }
+
+    if components.query != nil || components.fragment != nil {
+        return "Workspace URL cannot include query strings or fragments."
+    }
+
+    return nil
 }
 
 private func validateSSHArgument(_ value: String?, fieldName: String) -> String? {

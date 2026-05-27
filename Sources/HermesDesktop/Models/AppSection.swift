@@ -6,11 +6,21 @@ enum AppSection: String, CaseIterable, Identifiable {
     case overview
     case files
     case sessions
+    case mail
+    case contacts
+    case calendar
     case workflows
     case cronjobs
     case kanban
+    case missionControl
+    case operations
+    case swarm
     case usage
+    case memory
     case skills
+    case integrations
+    case mcp
+    case profiles
     case terminal
 
     var id: String { rawValue }
@@ -24,21 +34,41 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .connections:
             "Connections"
         case .overview:
-            "Overview"
+            "Homebase"
         case .files:
-            "Files"
+            "Artifacts"
         case .sessions:
-            "Sessions"
+            "Cael Sessions"
+        case .mail:
+            "Mail"
+        case .contacts:
+            "Contacts"
+        case .calendar:
+            "Calendar"
         case .workflows:
             "Workflows"
         case .cronjobs:
-            "Cron Jobs"
+            "Watchdogs"
         case .kanban:
-            "Kanban"
+            "Tasks"
+        case .missionControl:
+            "Mission Control"
+        case .operations:
+            "Ops"
+        case .swarm:
+            "Swarm"
         case .usage:
             "Usage"
+        case .memory:
+            "Memory"
         case .skills:
             "Skills"
+        case .integrations:
+            "Integrations"
+        case .mcp:
+            "MCP"
+        case .profiles:
+            "Profiles"
         case .terminal:
             "Terminal"
         }
@@ -54,22 +84,42 @@ enum AppSection: String, CaseIterable, Identifiable {
             "doc.text"
         case .sessions:
             "bubble.left.and.bubble.right"
+        case .mail:
+            "envelope"
+        case .contacts:
+            "person.2"
+        case .calendar:
+            "calendar"
         case .workflows:
             "bookmark.square"
         case .cronjobs:
             "calendar.badge.clock"
         case .kanban:
             "rectangle.3.group"
+        case .missionControl:
+            "paperplane"
+        case .operations:
+            "person.2.wave.2"
+        case .swarm:
+            "person.3.sequence"
         case .usage:
             "chart.bar.xaxis"
+        case .memory:
+            "brain.head.profile"
         case .skills:
             "book.closed"
+        case .integrations:
+            "link"
+        case .mcp:
+            "point.3.connected.trianglepath.dotted"
+        case .profiles:
+            "person.crop.circle.badge.checkmark"
         case .terminal:
             "terminal"
         }
     }
 
-    var navigationShortcutKey: KeyEquivalent {
+    var navigationShortcutKey: KeyEquivalent? {
         switch self {
         case .connections:
             return "1"
@@ -91,6 +141,17 @@ enum AppSection: String, CaseIterable, Identifiable {
             return "9"
         case .terminal:
             return "0"
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
+            return nil
+        }
+    }
+
+    var isCommandCenterMirrorSection: Bool {
+        switch self {
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp:
+            return true
+        case .connections, .overview, .files, .sessions, .workflows, .cronjobs, .kanban, .usage, .skills, .profiles, .terminal:
+            return false
         }
     }
 }

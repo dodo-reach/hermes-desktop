@@ -36,11 +36,18 @@ struct SessionsView: View {
                 session: selectedSession,
                 messages: appState.sessionMessageDisplays,
                 errorMessage: appState.sessionsError,
+                conversationError: appState.sessionConversationError,
+                isSendingMessage: appState.isSendingSessionMessage,
                 isDeletingSession: selectedSession.map { selectedSession in
                     appState.isDeletingSession && appState.selectedSessionID == selectedSession.id
                 } ?? false,
                 isSessionPinned: selectedSession.map { appState.isSessionPinned($0.id) } ?? false,
                 sessionCompactionNotice: appState.sessionCompactionNotice,
+                activeRun: appState.workspaceSessionActiveRun,
+                pendingTurn: appState.pendingSessionTurn,
+                liveMessages: appState.liveSessionMessageDisplays,
+                liveToolActivityCards: appState.liveToolActivityCards,
+                promptCards: appState.sessionPromptCards,
                 mode: appState.selectedSessionDetailMode,
                 terminal: appState.sessionTUITerminal,
                 terminalTheme: appState.connectionStore.terminalTheme,
@@ -66,6 +73,15 @@ struct SessionsView: View {
                 },
                 onStartChat: {
                     appState.startSelectedSessionChat()
+                },
+                onStartSession: { prompt, autoApproveCommands, attachments in
+                    await appState.startNewSession(with: prompt, autoApproveCommands: autoApproveCommands, attachments: attachments)
+                },
+                onSendMessage: { prompt, autoApproveCommands, attachments in
+                    await appState.sendMessageToSelectedSession(prompt, autoApproveCommands: autoApproveCommands, attachments: attachments)
+                },
+                onRespondToPrompt: { card, response in
+                    await appState.respondToSessionPrompt(card, response: response)
                 },
                 onUpdateTerminalTheme: { newValue in
                     appState.connectionStore.terminalTheme = newValue
@@ -171,7 +187,7 @@ struct SessionsView: View {
         } else {
             HermesSurfacePanel(
                 title: panelTitle,
-                subtitle: "Select a session to inspect its transcript, metadata and last activity."
+                subtitle: "Select a session to continue the chat and inspect its metadata and last activity."
             ) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {

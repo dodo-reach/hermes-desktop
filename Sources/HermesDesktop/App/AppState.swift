@@ -19,7 +19,7 @@ final class AppState: ObservableObject {
     @Published var isRefreshingOverview = false
     @Published var activeConnectionID: UUID?
     @Published var selectedSessionID: String?
-    @Published var selectedSessionDetailMode: SessionDetailMode = .transcript
+    @Published var selectedSessionDetailMode: SessionDetailMode = .chat
     @Published private(set) var sessionTUITerminal: SessionTUITerminal?
     @Published var sessions: [SessionSummary] = []
     @Published var sessionMessages: [SessionMessage] = []
@@ -35,6 +35,7 @@ final class AppState: ObservableObject {
     @Published var liveToolActivityCards: [HermesToolActivityCard] = []
     @Published var sessionPromptCards: [HermesPromptCard] = []
     @Published var sessionCompactionNotice: SessionCompactionNotice?
+    @Published var workspaceSessionActiveRun: WorkspaceSessionActiveRun?
     @Published private(set) var nativeChatBootstrapStatus: HermesChatBootstrapStatus?
     @Published var hasMoreSessions = false
     @Published var totalSessionsCount = 0
@@ -47,6 +48,21 @@ final class AppState: ObservableObject {
     @Published var usageError: String?
     @Published var isLoadingUsage = false
     @Published var isRefreshingUsage = false
+    @Published var caelWorkspaceStatus: CaelWorkspaceStatus?
+    @Published var caelIntegrationStatus: CaelIntegrationStatus?
+    @Published var caelProviderUsageLimits: CaelProviderUsageLimits?
+    @Published var caelN8nGovernance: CaelN8nGovernanceStatus?
+    @Published var caelN8nGovernanceError: String?
+    @Published var caelCommandCenterSummary: CaelCommandCenterSummary?
+    @Published var caelCommandCenterSections: CaelCommandCenterSectionsSnapshot?
+    @Published var caelCommandCenterWarnings: [String] = []
+    @Published var caelCommandCenterCacheNotice: String?
+    @Published var caelWorkspaceError: String?
+    @Published var caelProviderUsageError: String?
+    @Published var isLoadingCaelWorkspace = false
+    @Published var isRefreshingCaelWorkspace = false
+    @Published var isLoadingCaelProviderUsage = false
+    @Published var isRefreshingCaelProviderUsage = false
     @Published var selectedSkillID: String?
     @Published var skills: [SkillSummary] = []
     @Published var selectedSkillDetail: SkillDetail?
@@ -86,7 +102,18 @@ final class AppState: ObservableObject {
     @Published var workspaceFileDocuments: [String: FileEditorDocument] = [:]
     @Published var workspaceFileBrowserListing: RemoteDirectoryListing?
     @Published var workspaceFileBrowserError: String?
+    @Published var workspaceFileBrowserNotice: String?
     @Published var isLoadingWorkspaceFileBrowser = false
+    @Published var workspacePreviewFile: WorkspacePreviewFile?
+    @Published var workspacePreviewError: String?
+    @Published var isLoadingWorkspacePreview = false
+    @Published var isUploadingWorkspaceFile = false
+    @Published var toolArtifacts: [ToolArtifactSummary] = []
+    @Published var selectedToolArtifactID: String?
+    @Published var selectedToolArtifactDetail: ToolArtifactDetail?
+    @Published var toolArtifactsError: String?
+    @Published var isLoadingToolArtifacts = false
+    @Published var isLoadingToolArtifactDetail = false
     @Published var pendingSectionSelection: AppSection?
     @Published var showDiscardChangesAlert = false
     @Published var pendingNewConnectionEditorRequestID: UUID?
@@ -101,6 +128,8 @@ final class AppState: ObservableObject {
     let sessionBrowserService: SessionBrowserService
     let hermesChatService: HermesChatService
     let usageBrowserService: UsageBrowserService
+    let caelWorkspaceAPIService: CaelWorkspaceAPIService
+    let caelCommandCenterSnapshotStore: CaelCommandCenterSnapshotStore
     let skillBrowserService: SkillBrowserService
     let cronBrowserService: CronBrowserService
     let kanbanBrowserService: KanbanBrowserService
@@ -121,12 +150,15 @@ final class AppState: ObservableObject {
     private let automaticUpdateCheckInterval: TimeInterval = 24 * 60 * 60
     private var statusTask: Task<Void, Never>?
     private var sessionTranscriptPollingTask: Task<Void, Never>?
+    private var acceptedWorkspaceSessionMonitorTask: Task<Void, Never>?
+    private var acceptedWorkspaceChatEventsTask: Task<Void, Never>?
     private var gatewayChatService: HermesGatewayChatService?
     private var gatewayEventsTask: Task<Void, Never>?
     private var nativeChatStatusWorkspaceScopeFingerprint: String?
     private var gatewayWorkspaceScopeFingerprint: String?
     private var gatewaySessionID: String?
     private var activeGatewayAssistantMessageID: String?
+    private var hasAcceptedNativeTurnInFlight = false
     private var activeNativeTurnResult: Bool?
     private var activeNativeTurnCompletion: CheckedContinuation<Bool, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -150,6 +182,8 @@ final class AppState: ObservableObject {
         self.sessionBrowserService = SessionBrowserService(sshTransport: sshTransport)
         self.hermesChatService = HermesChatService(sshTransport: sshTransport)
         self.usageBrowserService = UsageBrowserService(sshTransport: sshTransport)
+        self.caelWorkspaceAPIService = CaelWorkspaceAPIService(sshTransport: sshTransport)
+        self.caelCommandCenterSnapshotStore = CaelCommandCenterSnapshotStore(paths: paths)
         self.skillBrowserService = SkillBrowserService(sshTransport: sshTransport)
         self.cronBrowserService = CronBrowserService(sshTransport: sshTransport)
         self.kanbanBrowserService = KanbanBrowserService(sshTransport: sshTransport)
@@ -195,6 +229,10 @@ final class AppState: ObservableObject {
 
     var selectedKanbanBoard: KanbanProject? {
         kanbanBoards.first(where: { $0.slug == selectedKanbanBoardSlug })
+    }
+
+    var isWorkspaceKanbanBoardSelected: Bool {
+        selectedKanbanBoardSlug == KanbanProject.workspaceTasksSlug
     }
 
     var canonicalWorkspaceFileReferences: [WorkspaceFileReference] {
@@ -259,10 +297,13 @@ final class AppState: ObservableObject {
 
     var canRefreshCurrentSection: Bool {
         guard activeConnection != nil else { return false }
+        if selectedSection.isCommandCenterMirrorSection {
+            return !isLoadingCaelWorkspace && !isRefreshingCaelWorkspace
+        }
 
         switch selectedSection {
         case .overview:
-            return !isRefreshingOverview && !isBusy
+            return !isLoadingCaelWorkspace && !isRefreshingCaelWorkspace
         case .sessions:
             return !isLoadingSessions && !isRefreshingSessions
         case .workflows:
@@ -272,10 +313,10 @@ final class AppState: ObservableObject {
         case .kanban:
             return !isLoadingKanbanBoards && !isLoadingKanbanBoard && !isRefreshingKanbanBoard
         case .usage:
-            return !isLoadingUsage && !isRefreshingUsage
+            return !isLoadingUsage && !isRefreshingUsage && !isLoadingCaelProviderUsage && !isRefreshingCaelProviderUsage
         case .skills:
             return !isLoadingSkills && !isRefreshingSkills
-        case .connections, .files, .terminal:
+        case .connections, .files, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles, .terminal:
             return false
         }
     }
@@ -292,7 +333,7 @@ final class AppState: ObservableObject {
         switch selectedSection {
         case .sessions, .workflows, .cronjobs, .kanban, .skills:
             return true
-        case .connections, .overview, .files, .usage, .terminal:
+        case .connections, .overview, .files, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .usage, .memory, .integrations, .mcp, .profiles, .terminal:
             return false
         }
     }
@@ -361,10 +402,14 @@ final class AppState: ObservableObject {
 
     func refreshCurrentSectionFromCommand() async {
         guard canRefreshCurrentSection else { return }
+        if selectedSection.isCommandCenterMirrorSection {
+            await refreshCaelWorkspace()
+            return
+        }
 
         switch selectedSection {
         case .overview:
-            await refreshOverview(manual: true)
+            await refreshCaelWorkspace()
         case .sessions:
             await refreshSessions(query: sessionSearchQuery)
         case .workflows:
@@ -375,9 +420,10 @@ final class AppState: ObservableObject {
             await refreshKanbanBoard()
         case .usage:
             await refreshUsage()
+            await refreshCaelProviderUsage()
         case .skills:
             await refreshSkills()
-        case .connections, .files, .terminal:
+        case .connections, .files, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles, .terminal:
             break
         }
     }
@@ -445,9 +491,12 @@ final class AppState: ObservableObject {
 
     func connect(to profile: ConnectionProfile) {
         let isSwitchingConnection = activeConnection?.workspaceScopeFingerprint != profile.workspaceScopeFingerprint
+        let isSwitchingCaelWorkspace = activeConnection?.commandCenterClientFingerprint != profile.commandCenterClientFingerprint
 
         if isSwitchingConnection {
             resetWorkspaceStateForConnectionChange()
+        } else if isSwitchingCaelWorkspace {
+            resetCaelWorkspaceState()
         }
 
         activeConnectionID = profile.id
@@ -468,6 +517,7 @@ final class AppState: ObservableObject {
         let previous = connectionStore.connections.first(where: { $0.id == normalized.id })
         let isActiveConnection = activeConnectionID == normalized.id
         let isChangingWorkspaceScope = previous?.workspaceScopeFingerprint != normalized.workspaceScopeFingerprint
+        let isChangingCaelWorkspaceScope = previous?.commandCenterClientFingerprint != normalized.commandCenterClientFingerprint
 
         if isActiveConnection && isChangingWorkspaceScope && hasUnsavedFileChanges {
             activeAlert = AppAlert(
@@ -480,14 +530,22 @@ final class AppState: ObservableObject {
         connectionStore.upsert(normalized)
 
         guard isActiveConnection else { return }
-        guard isChangingWorkspaceScope else { return }
+        if isChangingWorkspaceScope {
+            resetWorkspaceStateForConnectionChange()
+            selectedSection = .overview
+            setStatusMessage(L10n.string("Refreshing %@…", normalized.label))
 
-        resetWorkspaceStateForConnectionChange()
-        selectedSection = .overview
-        setStatusMessage(L10n.string("Refreshing %@…", normalized.label))
+            Task {
+                await prepareWorkspaceForActiveConnection()
+            }
+        } else if isChangingCaelWorkspaceScope {
+            resetCaelWorkspaceState()
+            setStatusMessage(L10n.string("Refreshing Cael Workspace for %@…", normalized.label))
 
-        Task {
-            await prepareWorkspaceForActiveConnection()
+            Task {
+                await loadCaelWorkspace(forceRefresh: true)
+                await loadCaelProviderUsage(forceRefresh: true)
+            }
         }
     }
 
@@ -614,6 +672,20 @@ final class AppState: ObservableObject {
         isRefreshingUsage = false
     }
 
+    func refreshCaelWorkspace() async {
+        guard !isLoadingCaelWorkspace, !isRefreshingCaelWorkspace else { return }
+        isRefreshingCaelWorkspace = true
+        await loadCaelWorkspace(forceRefresh: true)
+        isRefreshingCaelWorkspace = false
+    }
+
+    func refreshCaelProviderUsage() async {
+        guard !isLoadingCaelProviderUsage, !isRefreshingCaelProviderUsage else { return }
+        isRefreshingCaelProviderUsage = true
+        await loadCaelProviderUsage(forceRefresh: true)
+        isRefreshingCaelProviderUsage = false
+    }
+
     func refreshSkills() async {
         guard !isLoadingSkills, !isRefreshingSkills else { return }
         isRefreshingSkills = true
@@ -671,9 +743,9 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            let snapshot = try await fileEditorService.read(
-                remotePath: reference.remotePath,
-                connection: profile
+            let snapshot = try await caelWorkspaceAPIService.readWorkspaceFile(
+                connection: profile,
+                path: reference.remotePath
             )
             guard isActiveWorkspace(profile) else { return }
             document.content = snapshot.content
@@ -712,11 +784,11 @@ final class AppState: ObservableObject {
         setDocument(document)
 
         do {
-            let saveResult = try await fileEditorService.write(
-                remotePath: reference.remotePath,
+            let saveResult = try await caelWorkspaceAPIService.writeWorkspaceFile(
+                connection: profile,
+                path: reference.remotePath,
                 content: document.content,
-                expectedContentHash: document.remoteContentHash,
-                connection: profile
+                expectedContentHash: document.remoteContentHash
             )
             guard isActiveWorkspace(profile) else { return }
             document.originalContent = document.content
@@ -832,10 +904,11 @@ final class AppState: ObservableObject {
         workspaceFileBrowserError = nil
 
         do {
-            let listing = try await fileEditorService.listDirectory(
-                remotePath: browsePath,
-                hermesHome: overview?.hermesHome ?? profile.remoteHermesHomePath,
-                connection: profile
+            let listing = try await caelWorkspaceAPIService.listWorkspaceFiles(
+                connection: profile,
+                path: browsePath,
+                maxDepth: 0,
+                maxEntries: 500
             )
             guard isActiveWorkspace(profile) else { return }
             workspaceFileBrowserListing = listing
@@ -844,8 +917,242 @@ final class AppState: ObservableObject {
             guard isActiveWorkspace(profile) else { return }
             isLoadingWorkspaceFileBrowser = false
             workspaceFileBrowserError = error.localizedDescription
+            workspaceFileBrowserNotice = nil
             setStatusMessage(L10n.string("Unable to browse remote files"))
         }
+    }
+
+    func createWorkspaceDirectory(path: String) async {
+        guard let profile = activeConnection else { return }
+        let targetPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetPath.isEmpty else { return }
+
+        do {
+            _ = try await caelWorkspaceAPIService.makeWorkspaceDirectory(connection: profile, path: targetPath)
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserNotice = L10n.string("Folder created")
+            setStatusMessage(L10n.string("Folder created"))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to create folder"))
+        }
+    }
+
+    func renameWorkspacePath(from sourcePath: String, to destinationPath: String) async {
+        guard let profile = activeConnection else { return }
+        let source = sourcePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = destinationPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty, !destination.isEmpty, source != destination else { return }
+
+        do {
+            _ = try await caelWorkspaceAPIService.renameWorkspacePath(connection: profile, from: source, to: destination)
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserNotice = L10n.string("Renamed to %@", destination)
+            setStatusMessage(L10n.string("File renamed"))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to rename path"))
+        }
+    }
+
+    func deleteWorkspacePath(path: String) async {
+        guard let profile = activeConnection else { return }
+        let targetPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetPath.isEmpty else { return }
+
+        do {
+            try await caelWorkspaceAPIService.deleteWorkspacePath(connection: profile, path: targetPath)
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserNotice = L10n.string("Deleted %@", targetPath)
+            setStatusMessage(L10n.string("Path deleted"))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to delete path"))
+        }
+    }
+
+    func uploadWorkspaceFile(localFileURL: URL, to targetPath: String) async {
+        guard let profile = activeConnection else { return }
+        let target = targetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return }
+
+        isUploadingWorkspaceFile = true
+        workspaceFileBrowserError = nil
+        workspaceFileBrowserNotice = nil
+
+        do {
+            let didAccess = localFileURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    localFileURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let data = try Data(contentsOf: localFileURL)
+            guard data.count <= WorkspaceFileLimits.maxDesktopUploadBytes else {
+                throw SSHTransportError.invalidResponse(
+                    L10n.string(
+                        "Desktop uploads are limited to %@.",
+                        WorkspaceFileLimits.decimalMegabytes(for: Int64(WorkspaceFileLimits.maxDesktopUploadBytes))
+                    )
+                )
+            }
+
+            let result = try await caelWorkspaceAPIService.uploadWorkspaceFile(
+                connection: profile,
+                targetPath: target,
+                fileName: localFileURL.lastPathComponent,
+                contentBase64: data.base64EncodedString()
+            )
+            guard isActiveWorkspace(profile) else { return }
+            isUploadingWorkspaceFile = false
+            let uploadedPath = result.path ?? localFileURL.lastPathComponent
+            let sizeText = result.size.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
+            workspaceFileBrowserNotice = sizeText.map { L10n.string("Uploaded %@ (%@)", uploadedPath, $0) } ??
+                L10n.string("Uploaded %@", uploadedPath)
+            setStatusMessage(L10n.string("%@ uploaded", uploadedPath))
+            await browseWorkspaceDirectory(path: workspaceFileBrowserListing?.displayPath ?? workspaceFileBrowserDefaultPath)
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isUploadingWorkspaceFile = false
+            workspaceFileBrowserError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to upload file"))
+        }
+    }
+
+    func previewWorkspacePath(_ path: String) async {
+        guard let profile = activeConnection else { return }
+        let targetPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetPath.isEmpty else { return }
+
+        isLoadingWorkspacePreview = true
+        workspacePreviewError = nil
+        workspacePreviewFile = nil
+
+        do {
+            let preview = try await caelWorkspaceAPIService.loadPreviewFile(connection: profile, path: targetPath)
+            guard isActiveWorkspace(profile) else { return }
+            workspacePreviewFile = preview
+            isLoadingWorkspacePreview = false
+            setStatusMessage(L10n.string("Preview loaded"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingWorkspacePreview = false
+            workspacePreviewError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to preview file"))
+        }
+    }
+
+    func loadToolArtifacts(resetSelection: Bool = false) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingToolArtifacts { return }
+
+        isLoadingToolArtifacts = true
+        toolArtifactsError = nil
+
+        do {
+            let artifacts = try await caelWorkspaceAPIService.loadToolArtifacts(connection: profile, limit: 100)
+            guard isActiveWorkspace(profile) else { return }
+            toolArtifacts = artifacts
+            if resetSelection || selectedToolArtifactID == nil || !artifacts.contains(where: { $0.id == selectedToolArtifactID }) {
+                selectedToolArtifactID = artifacts.first?.id
+                selectedToolArtifactDetail = nil
+            }
+            isLoadingToolArtifacts = false
+            if let selectedToolArtifactID {
+                await loadToolArtifactDetail(id: selectedToolArtifactID)
+            }
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingToolArtifacts = false
+            toolArtifactsError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to load artifacts"))
+        }
+    }
+
+    func selectToolArtifact(_ artifactID: String) async {
+        selectedToolArtifactID = artifactID
+        await loadToolArtifactDetail(id: artifactID)
+    }
+
+    func loadToolArtifactDetail(id artifactID: String) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingToolArtifactDetail { return }
+
+        isLoadingToolArtifactDetail = true
+        toolArtifactsError = nil
+
+        do {
+            let detail = try await caelWorkspaceAPIService.loadToolArtifact(connection: profile, id: artifactID)
+            guard isActiveWorkspace(profile) else { return }
+            selectedToolArtifactDetail = detail
+            isLoadingToolArtifactDetail = false
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isLoadingToolArtifactDetail = false
+            toolArtifactsError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to load artifact detail"))
+        }
+    }
+
+    private func loadSessionPage(
+        connection: ConnectionProfile,
+        offset: Int,
+        limit: Int,
+        query: String
+    ) async throws -> SessionListPage {
+        if query.isEmpty {
+            do {
+                return try await caelWorkspaceAPIService.loadWorkspaceSessions(
+                    connection: connection,
+                    offset: offset,
+                    limit: limit
+                )
+            } catch {
+                return try await sessionBrowserService.listSessions(
+                    connection: connection,
+                    offset: offset,
+                    limit: limit,
+                    query: query
+                )
+            }
+        }
+
+        return try await sessionBrowserService.listSessions(
+            connection: connection,
+            offset: offset,
+            limit: limit,
+            query: query
+        )
+    }
+
+    private func loadSessionMessages(
+        connection: ConnectionProfile,
+        sessionID: String
+    ) async throws -> [SessionMessage] {
+        do {
+            let response = try await caelWorkspaceAPIService.loadWorkspaceSessionHistory(
+                connection: connection,
+                sessionKey: sessionID
+            )
+            if !response.messages.isEmpty {
+                return response.messages
+            }
+        } catch {
+            // Keep the legacy transcript reader as a compatibility fallback while
+            // Sessions moves onto the shared Workspace API contract.
+        }
+
+        return try await sessionBrowserService.loadTranscript(
+            connection: connection,
+            sessionID: sessionID
+        )
     }
 
     func loadSessions(
@@ -876,7 +1183,7 @@ final class AppState: ObservableObject {
         }
 
         do {
-            let page = try await sessionBrowserService.listSessions(
+            let page = try await loadSessionPage(
                 connection: profile,
                 offset: reset ? 0 : sessionOffset,
                 limit: sessionPageSize,
@@ -957,9 +1264,10 @@ final class AppState: ObservableObject {
         selectedSessionID = sessionID
         sessionsError = nil
         sessionConversationError = nil
+        workspaceSessionActiveRun = nil
 
         do {
-            let messages = try await sessionBrowserService.loadTranscript(
+            let messages = try await loadSessionMessages(
                 connection: profile,
                 sessionID: sessionID
             )
@@ -969,7 +1277,7 @@ final class AppState: ObservableObject {
             guard isActiveWorkspace(profile), selectedSessionID == sessionID else { return }
             clearSessionMessages()
             sessionsError = error.localizedDescription
-            setStatusMessage(L10n.string("Unable to load session transcript"))
+            setStatusMessage(L10n.string("Unable to load session history"))
         }
     }
 
@@ -984,29 +1292,19 @@ final class AppState: ObservableObject {
         sessionCompactionNotice = nil
         sessionsError = nil
         sessionConversationError = nil
+        workspaceSessionActiveRun = nil
         selectedSessionDetailMode = .chat
-        startSessionTUI(sessionID: nil, replacesExisting: true)
+        stopSessionTUI()
     }
 
     func setSessionDetailMode(_ mode: SessionDetailMode) {
-        let previousMode = selectedSessionDetailMode
         selectedSessionDetailMode = mode
-
-        switch mode {
-        case .transcript:
-            if previousMode == .chat {
-                Task { [weak self] in
-                    await self?.refreshSessionsAfterChat()
-                }
-            }
-        case .chat:
-            startSessionTUIIfNeededForCurrentSelection()
-        }
+        stopSessionTUI()
     }
 
     func startSelectedSessionChat() {
         selectedSessionDetailMode = .chat
-        startSessionTUI(sessionID: selectedSessionID, replacesExisting: true)
+        stopSessionTUI()
     }
 
     func refreshSessionsAfterChat() async {
@@ -1089,53 +1387,75 @@ final class AppState: ObservableObject {
         sessionScrollOffsets.removeValue(forKey: sessionID)
     }
 
-    func startNewSession(with prompt: String, autoApproveCommands: Bool) async -> Bool {
+    func startNewSession(
+        with prompt: String,
+        autoApproveCommands: Bool,
+        attachments: [WorkspaceChatAttachment] = []
+    ) async -> Bool {
         guard let profile = activeConnection else { return false }
         guard !isSendingSessionMessage else { return false }
 
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return false }
+        guard !trimmedPrompt.isEmpty || !attachments.isEmpty else { return false }
+        let messagePrompt = trimmedPrompt.isEmpty
+            ? L10n.string(attachments.count == 1 ? "Please review the attached image." : "Please review the attached images.")
+            : trimmedPrompt
 
-        let existingVisibleSessionIDs = Set((sessions + pinnedSessionSummaries).map(\.id))
+        // Normal desktop composer sends use the same Workspace API as the web
+        // app so both clients share the server-owned run ledger.
 
         isSendingSessionMessage = true
         pendingSessionTurn = PendingSessionTurn(
             sessionID: nil,
-            prompt: trimmedPrompt,
+            prompt: messagePrompt,
             autoApproveCommands: autoApproveCommands
         )
         sessionConversationError = nil
         sessionsError = nil
 
+        appendPendingUserLiveMessage(prompt: messagePrompt)
+
         do {
-            let turnResult = try await hermesChatService.sendMessage(
-                trimmedPrompt,
-                sessionID: nil,
+            let createdSession = try await caelWorkspaceAPIService.createWorkspaceChatSession(
                 connection: profile,
-                autoApproveCommands: autoApproveCommands
+                label: String(messagePrompt.prefix(80))
+            )
+            let serverSessionID = (createdSession.sessionKey ?? createdSession.friendlyId ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !serverSessionID.isEmpty else {
+                throw SSHTransportError.invalidResponse("Workspace API did not return a session key for the new chat session.")
+            }
+            let sendResponse = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
+                connection: profile,
+                sessionKey: serverSessionID,
+                message: messagePrompt,
+                autoApproveCommands: autoApproveCommands,
+                attachments: attachments
             )
             guard isActiveWorkspace(profile) else { return false }
 
+            let responseSessionID = sendResponse.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let createdSessionID = responseSessionID.isEmpty ? serverSessionID : responseSessionID
             isSendingSessionMessage = false
             pendingSessionTurn = nil
+            markAcceptedWorkspaceRun(sendResponse, sessionID: createdSessionID)
             sessionSearchQuery = ""
+            selectedSessionDetailMode = .chat
+            isNewSessionComposerActive = false
+            selectedSessionID = createdSessionID
+            upsertAcceptedWorkspaceSessionSummary(
+                sessionID: createdSessionID,
+                prompt: messagePrompt,
+                messageCount: max(sessionMessages.count + liveSessionMessageDisplays.count, 1)
+            )
+            scheduleAcceptedWorkspaceSessionRefresh(sessionID: createdSessionID, connection: profile)
             await loadSessions(
                 reset: true,
                 query: "",
-                preferredSessionID: turnResult.sessionID,
-                allowsFallbackSelection: false
+                preferredSessionID: createdSessionID,
+                allowsFallbackSelection: false,
+                updatesSelection: false
             )
-
-            let createdSessionID = turnResult.sessionID ??
-                likelyNewSessionID(
-                    afterStartingWith: trimmedPrompt,
-                    excluding: existingVisibleSessionIDs
-                ) ??
-                sessions.first?.id
-
-            if let createdSessionID {
-                await loadSessionDetail(sessionID: createdSessionID)
-            }
             return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
@@ -1305,7 +1625,11 @@ final class AppState: ObservableObject {
             .lowercased()
     }
 
-    func sendMessageToSelectedSession(_ prompt: String, autoApproveCommands: Bool) async -> Bool {
+    func sendMessageToSelectedSession(
+        _ prompt: String,
+        autoApproveCommands: Bool,
+        attachments: [WorkspaceChatAttachment] = []
+    ) async -> Bool {
         guard let profile = activeConnection,
               let selectedSessionID else {
             return false
@@ -1313,7 +1637,10 @@ final class AppState: ObservableObject {
         guard !isSendingSessionMessage else { return false }
 
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPrompt.isEmpty else { return false }
+        guard !trimmedPrompt.isEmpty || !attachments.isEmpty else { return false }
+        let messagePrompt = trimmedPrompt.isEmpty
+            ? L10n.string(attachments.count == 1 ? "Please review the attached image." : "Please review the attached images.")
+            : trimmedPrompt
 
         if let compactionNotice = knownSessionCompactionNotice(for: selectedSessionID) ??
             (sessionCompactionNotice?.sourceSessionID == selectedSessionID ? sessionCompactionNotice : nil) {
@@ -1324,36 +1651,36 @@ final class AppState: ObservableObject {
             return false
         }
 
+        // Normal desktop composer sends use the same Workspace API as the web
+        // app so focus loss and active-run recovery behave identically.
+
         isSendingSessionMessage = true
         pendingSessionTurn = PendingSessionTurn(
             sessionID: selectedSessionID,
-            prompt: trimmedPrompt,
+            prompt: messagePrompt,
             autoApproveCommands: autoApproveCommands
         )
         sessionConversationError = nil
         sessionsError = nil
-        startSessionTranscriptPolling(sessionID: selectedSessionID, connection: profile)
+        appendPendingUserLiveMessage(prompt: messagePrompt)
 
         do {
-            _ = try await hermesChatService.sendMessage(
-                trimmedPrompt,
-                sessionID: selectedSessionID,
+            let sendResponse = try await caelWorkspaceAPIService.sendWorkspaceSessionMessage(
                 connection: profile,
-                autoApproveCommands: autoApproveCommands
+                sessionKey: selectedSessionID,
+                message: messagePrompt,
+                autoApproveCommands: autoApproveCommands,
+                attachments: attachments
             )
             guard isActiveWorkspace(profile) else { return false }
 
-            stopSessionTranscriptPolling()
-            if self.selectedSessionID == selectedSessionID {
-                await loadSessionDetail(sessionID: selectedSessionID)
-            }
             isSendingSessionMessage = false
             pendingSessionTurn = nil
-            await loadSessions(reset: true, query: sessionSearchQuery)
+            markAcceptedWorkspaceRun(sendResponse, sessionID: selectedSessionID)
+            scheduleAcceptedWorkspaceSessionRefresh(sessionID: selectedSessionID, connection: profile)
             return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
-            stopSessionTranscriptPolling()
             isSendingSessionMessage = false
             pendingSessionTurn = nil
             let message = error.localizedDescription
@@ -1445,89 +1772,23 @@ final class AppState: ObservableObject {
             )
             applyGatewaySessionResult(submitResult, preferredSessionID: resolvedSessionID)
 
-            let didComplete = await waitForActiveNativeTurnCompletion()
-            guard isActiveWorkspace(profile) else { return false }
-
-            if didComplete {
-                stopSessionTranscriptPolling()
-                isSendingSessionMessage = false
-                pendingSessionTurn = nil
-                let sourceSessionID = sessionID ?? resolvedSessionID
-                var hydratedSessionIDs = Set<String>()
-
-                let provisionalSessionID = gatewaySessionID ?? sourceSessionID
-                if await hydrateSessionHistoryFromGateway(
-                    sessionID: provisionalSessionID,
-                    using: gatewayChatService,
-                    profile: profile,
-                    updatesSelection: provisionalSessionID == sourceSessionID
-                ) {
-                    if provisionalSessionID == sourceSessionID {
-                        hydratedSessionIDs.insert(provisionalSessionID)
-                    }
-                }
-
-                let refreshQuery = sessionID == nil ? "" : sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                sessionSearchQuery = refreshQuery
-                await loadSessions(
-                    reset: true,
-                    query: refreshQuery,
-                    allowsFallbackSelection: false,
-                    updatesSelection: false
-                )
-
-                let confirmedCompactionNotice = await confirmSessionCompaction(
-                    from: sourceSessionID,
-                    preferredTargetSessionID: gatewaySessionID,
-                    profile: profile
-                )
-                let resolvedCompactedSessionID = confirmedCompactionNotice?.targetSessionID
-                if let confirmedCompactionNotice {
-                    registerSessionCompaction(confirmedCompactionNotice)
-                }
-
-                let canonicalSessionID = resolvedCompletedNativeTurnSessionID(
-                    sourceSessionID: sourceSessionID,
-                    prompt: prompt,
-                    excluding: existingVisibleSessionIDs,
-                    compactedSessionID: resolvedCompactedSessionID
-                )
-
-                if let canonicalSessionID {
-                    let didHydrateCanonicalSession: Bool
-                    if hydratedSessionIDs.contains(canonicalSessionID) {
-                        didHydrateCanonicalSession = true
-                    } else {
-                        didHydrateCanonicalSession = await hydrateSessionHistoryFromGateway(
-                            sessionID: canonicalSessionID,
-                            using: gatewayChatService,
-                            profile: profile
-                        )
-                    }
-
-                    if !didHydrateCanonicalSession &&
-                        (
-                            resolvedCompactedSessionID != nil ||
-                            selectedSessionID != canonicalSessionID ||
-                            sessionMessageDisplays.isEmpty
-                        ) {
-                        await loadSessionDetail(sessionID: canonicalSessionID)
-                    }
-                } else if hydratedSessionIDs.isEmpty {
-                    clearNativeTurnUIState()
-                }
-                return true
-            }
-
             isSendingSessionMessage = false
             pendingSessionTurn = nil
-            clearNativeTurnUIState()
-            let message = sessionConversationError ?? "Native chat did not complete successfully."
-            sessionConversationError = message
-            setStatusMessage(sessionStatusMessage(forConversationError: message, fallback: "Unable to send prompt to Hermes"))
-            return false
+            hasAcceptedNativeTurnInFlight = true
+            Task {
+                await finishAcceptedNativeSessionTurn(
+                    profile: profile,
+                    sessionID: sessionID,
+                    resolvedSessionID: resolvedSessionID,
+                    prompt: prompt,
+                    existingVisibleSessionIDs: existingVisibleSessionIDs,
+                    gatewayChatService: gatewayChatService
+                )
+            }
+            return true
         } catch {
             guard isActiveWorkspace(profile) else { return false }
+            hasAcceptedNativeTurnInFlight = false
             isSendingSessionMessage = false
             pendingSessionTurn = nil
             clearNativeTurnUIState()
@@ -1537,6 +1798,97 @@ final class AppState: ObservableObject {
             completeActiveNativeTurn(success: false)
             return false
         }
+    }
+
+    private func finishAcceptedNativeSessionTurn(
+        profile: ConnectionProfile,
+        sessionID: String?,
+        resolvedSessionID: String,
+        prompt: String,
+        existingVisibleSessionIDs: Set<String>,
+        gatewayChatService: HermesGatewayChatService
+    ) async {
+        let didComplete = await waitForActiveNativeTurnCompletion()
+        hasAcceptedNativeTurnInFlight = false
+        guard isActiveWorkspace(profile) else { return }
+
+        if didComplete {
+            stopSessionTranscriptPolling()
+            isSendingSessionMessage = false
+            pendingSessionTurn = nil
+            let sourceSessionID = sessionID ?? resolvedSessionID
+            var hydratedSessionIDs = Set<String>()
+
+            let provisionalSessionID = gatewaySessionID ?? sourceSessionID
+            if await hydrateSessionHistoryFromGateway(
+                sessionID: provisionalSessionID,
+                using: gatewayChatService,
+                profile: profile,
+                updatesSelection: provisionalSessionID == sourceSessionID
+            ) {
+                if provisionalSessionID == sourceSessionID {
+                    hydratedSessionIDs.insert(provisionalSessionID)
+                }
+            }
+
+            let refreshQuery = sessionID == nil ? "" : sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            sessionSearchQuery = refreshQuery
+            await loadSessions(
+                reset: true,
+                query: refreshQuery,
+                allowsFallbackSelection: false,
+                updatesSelection: false
+            )
+
+            let confirmedCompactionNotice = await confirmSessionCompaction(
+                from: sourceSessionID,
+                preferredTargetSessionID: gatewaySessionID,
+                profile: profile
+            )
+            let resolvedCompactedSessionID = confirmedCompactionNotice?.targetSessionID
+            if let confirmedCompactionNotice {
+                registerSessionCompaction(confirmedCompactionNotice)
+            }
+
+            let canonicalSessionID = resolvedCompletedNativeTurnSessionID(
+                sourceSessionID: sourceSessionID,
+                prompt: prompt,
+                excluding: existingVisibleSessionIDs,
+                compactedSessionID: resolvedCompactedSessionID
+            )
+
+            if let canonicalSessionID {
+                let didHydrateCanonicalSession: Bool
+                if hydratedSessionIDs.contains(canonicalSessionID) {
+                    didHydrateCanonicalSession = true
+                } else {
+                    didHydrateCanonicalSession = await hydrateSessionHistoryFromGateway(
+                        sessionID: canonicalSessionID,
+                        using: gatewayChatService,
+                        profile: profile
+                    )
+                }
+
+                if !didHydrateCanonicalSession &&
+                    (
+                        resolvedCompactedSessionID != nil ||
+                        selectedSessionID != canonicalSessionID ||
+                        sessionMessageDisplays.isEmpty
+                    ) {
+                    await loadSessionDetail(sessionID: canonicalSessionID)
+                }
+            } else if hydratedSessionIDs.isEmpty {
+                clearNativeTurnUIState()
+            }
+            return
+        }
+
+        isSendingSessionMessage = false
+        pendingSessionTurn = nil
+        clearNativeTurnUIState()
+        let message = sessionConversationError ?? "Native chat did not complete successfully."
+        sessionConversationError = message
+        setStatusMessage(sessionStatusMessage(forConversationError: message, fallback: "Unable to send prompt to Hermes"))
     }
 
     func deleteSession(_ session: SessionSummary) async {
@@ -1608,6 +1960,100 @@ final class AppState: ObservableObject {
             usageProfileBreakdown = nil
             usageError = error.localizedDescription
             setStatusMessage(L10n.string("Unable to load usage"))
+        }
+    }
+
+    func loadCaelWorkspace(forceRefresh: Bool = false) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingCaelWorkspace { return }
+        if !forceRefresh,
+           caelWorkspaceStatus != nil,
+           caelIntegrationStatus != nil,
+           (caelN8nGovernance != nil || caelN8nGovernanceError != nil),
+           caelCommandCenterSummary != nil,
+           caelCommandCenterSections != nil {
+            return
+        }
+
+        if caelCommandCenterSummary == nil, caelCommandCenterSections == nil {
+            _ = applyCachedCommandCenterSnapshot(
+                for: profile,
+                reason: "Refreshing the live Workspace in the background."
+            )
+        }
+
+        isLoadingCaelWorkspace = true
+        caelWorkspaceError = nil
+
+        do {
+            let loadedStatus = try await caelWorkspaceAPIService.loadStatus(connection: profile)
+            let loadedIntegrations = try await caelWorkspaceAPIService.loadIntegrations(connection: profile)
+            let loadedGovernance: CaelN8nGovernanceStatus?
+            let loadedGovernanceError: String?
+            do {
+                loadedGovernance = try await caelWorkspaceAPIService.loadN8nGovernance(connection: profile)
+                loadedGovernanceError = nil
+            } catch {
+                loadedGovernance = nil
+                loadedGovernanceError = error.localizedDescription
+            }
+            let loadedCommandCenter = try? await caelWorkspaceAPIService.loadCommandCenterSummary(connection: profile)
+            let loadedSections = await caelWorkspaceAPIService.loadCommandCenterSections(connection: profile)
+            guard isActiveCaelWorkspace(profile) else { return }
+
+            caelWorkspaceStatus = loadedStatus
+            caelIntegrationStatus = loadedIntegrations
+            caelN8nGovernance = loadedGovernance
+            caelN8nGovernanceError = loadedGovernanceError
+            caelCommandCenterSummary = loadedCommandCenter?.data
+            caelCommandCenterSections = loadedSections
+            caelCommandCenterWarnings = loadedCommandCenter?.warnings ?? []
+            caelCommandCenterCacheNotice = nil
+            try? caelCommandCenterSnapshotStore.save(
+                summaryEnvelope: loadedCommandCenter,
+                sections: loadedSections,
+                for: profile
+            )
+            isLoadingCaelWorkspace = false
+        } catch {
+            guard isActiveCaelWorkspace(profile) else { return }
+            if caelCommandCenterSummary == nil, caelCommandCenterSections == nil {
+                _ = applyCachedCommandCenterSnapshot(
+                    for: profile,
+                    reason: "The live Workspace fetch failed: \(error.localizedDescription)"
+                )
+            }
+            isLoadingCaelWorkspace = false
+            caelWorkspaceError = error.localizedDescription
+            setStatusMessage("Unable to load Cael workspace status")
+        }
+    }
+
+    func loadCaelProviderUsage(forceRefresh: Bool = false) async {
+        guard let profile = activeConnection else { return }
+        if isLoadingCaelProviderUsage { return }
+        if !forceRefresh, caelProviderUsageLimits != nil {
+            return
+        }
+
+        isLoadingCaelProviderUsage = true
+        caelProviderUsageError = nil
+
+        do {
+            let limits = try await caelWorkspaceAPIService.loadProviderUsage(
+                connection: profile,
+                force: forceRefresh
+            )
+            guard isActiveCaelWorkspace(profile) else { return }
+
+            caelProviderUsageLimits = limits
+            isLoadingCaelProviderUsage = false
+        } catch {
+            guard isActiveCaelWorkspace(profile) else { return }
+            isLoadingCaelProviderUsage = false
+            caelProviderUsageLimits = nil
+            caelProviderUsageError = error.localizedDescription
+            setStatusMessage("Unable to load provider usage limits")
         }
     }
 
@@ -1828,6 +2274,18 @@ final class AppState: ObservableObject {
         sessionsError = nil
         sessionConversationError = nil
         selectedSessionDetailMode = .chat
+        selectedSection = .sessions
+
+        if await preferredChatTransport(for: profile) == .native {
+            setStatusMessage(L10n.string("Running %@ in native Chat…", workflow.name))
+            _ = await startNativeSessionTurn(
+                prompt: invocation.initialInput,
+                sessionID: nil,
+                autoApproveCommands: false
+            )
+            return
+        }
+
         sessionTUITerminal = SessionTUITerminal(
             sessionID: nil,
             connection: profile.updated(),
@@ -1836,8 +2294,7 @@ final class AppState: ObservableObject {
             startupInput: invocation.initialInput,
             workflowLaunchDiagnosticsContext: workflowLaunchDiagnosticsContext
         )
-        selectedSection = .sessions
-        setStatusMessage(L10n.string("Opening %@ in Chat…", workflow.name))
+        setStatusMessage(L10n.string("Opening %@ in Chat TUI fallback…", workflow.name))
     }
 
     func loadSkillDetail(summary: SkillSummary) async {
@@ -1959,7 +2416,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            let jobs = try await cronBrowserService.listJobs(connection: profile)
+            let jobs = try await caelWorkspaceAPIService.loadWorkspaceCronJobs(connection: profile)
             guard isActiveWorkspace(profile) else { return }
             cronJobs = jobs
             isLoadingCronJobs = false
@@ -1987,7 +2444,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            try await cronBrowserService.pauseJob(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.pauseWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
@@ -2018,10 +2475,16 @@ final class AppState: ObservableObject {
         setStatusMessage(L10n.string("Creating cron job…"))
 
         do {
-            let jobID = try await cronBrowserService.createJob(connection: profile, draft: draft)
+            let result: CronJobMutationResult
+            if draft.noAgent {
+                let jobID = try await cronBrowserService.createJob(connection: profile, draft: draft)
+                result = CronJobMutationResult(jobID: jobID, job: nil)
+            } else {
+                result = try await caelWorkspaceAPIService.createWorkspaceCronJob(connection: profile, draft: draft)
+            }
             guard isActiveWorkspace(profile) else { return false }
             await loadCronJobs()
-            selectedCronJobID = jobID
+            selectedCronJobID = result.jobID ?? result.job?.id
             isSavingCronJobDraft = false
             setStatusMessage(L10n.string("%@ created", draft.normalizedName))
             return true
@@ -2050,7 +2513,11 @@ final class AppState: ObservableObject {
         setStatusMessage(L10n.string("Updating %@…", job.resolvedName))
 
         do {
-            try await cronBrowserService.updateJob(connection: profile, jobID: job.id, draft: draft)
+            if draft.noAgent || job.noAgent {
+                try await cronBrowserService.updateJob(connection: profile, jobID: job.id, draft: draft)
+            } else {
+                _ = try await caelWorkspaceAPIService.updateWorkspaceCronJob(connection: profile, jobID: job.id, draft: draft)
+            }
             guard isActiveWorkspace(profile) else { return false }
             await loadCronJobs()
             selectedCronJobID = job.id
@@ -2075,7 +2542,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            try await cronBrowserService.resumeJob(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.resumeWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
@@ -2099,7 +2566,7 @@ final class AppState: ObservableObject {
         cronJobsError = nil
 
         do {
-            try await cronBrowserService.removeJob(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.deleteWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
@@ -2124,7 +2591,7 @@ final class AppState: ObservableObject {
         setStatusMessage(L10n.string("Triggering %@…", job.resolvedName))
 
         do {
-            try await cronBrowserService.runJobNow(connection: profile, jobID: job.id)
+            try await caelWorkspaceAPIService.triggerWorkspaceCronJob(connection: profile, jobID: job.id)
             guard isActiveWorkspace(profile) else { return }
             await loadCronJobs()
             isOperatingOnCronJob = false
@@ -2150,26 +2617,27 @@ final class AppState: ObservableObject {
             let response = try await kanbanBrowserService.loadBoards(connection: profile)
             guard isActiveWorkspace(profile) else { return }
 
-            kanbanBoards = response.boards.isEmpty
+            let remoteBoards = response.boards.isEmpty
                 ? [KanbanProject(slug: KanbanProject.defaultSlug)]
                 : response.boards
+            kanbanBoards = [KanbanProject.workspaceTasks] + remoteBoards
             remoteCurrentKanbanBoardSlug = response.current
             supportsKanbanBoardManagement = response.supportsBoardManagement
 
             if !kanbanBoards.contains(where: { $0.slug == selectedKanbanBoardSlug }) {
-                if let current = response.current,
-                   kanbanBoards.contains(where: { $0.slug == current }) {
-                    selectedKanbanBoardSlug = current
-                } else {
-                    selectedKanbanBoardSlug = kanbanBoards.first?.slug ?? KanbanProject.defaultSlug
-                }
+                selectedKanbanBoardSlug = KanbanProject.workspaceTasksSlug
+            } else if selectedKanbanBoardSlug == KanbanProject.defaultSlug {
+                selectedKanbanBoardSlug = KanbanProject.workspaceTasksSlug
             }
 
             isLoadingKanbanBoards = false
         } catch {
             guard isActiveWorkspace(profile) else { return }
             isLoadingKanbanBoards = false
-            kanbanBoards = kanbanBoards.isEmpty ? [KanbanProject(slug: KanbanProject.defaultSlug)] : kanbanBoards
+            kanbanBoards = kanbanBoards.isEmpty ? [KanbanProject.workspaceTasks, KanbanProject(slug: KanbanProject.defaultSlug)] : kanbanBoards
+            if !kanbanBoards.contains(where: { $0.slug == selectedKanbanBoardSlug }) {
+                selectedKanbanBoardSlug = KanbanProject.workspaceTasksSlug
+            }
             remoteCurrentKanbanBoardSlug = nil
             supportsKanbanBoardManagement = false
             kanbanError = error.localizedDescription
@@ -2208,11 +2676,20 @@ final class AppState: ObservableObject {
         kanbanError = nil
 
         do {
-            let board = try await kanbanBrowserService.loadBoard(
-                connection: profile,
-                boardSlug: boardSlug,
-                includeArchived: includeArchivedKanbanTasks
-            )
+            let board: KanbanBoard
+            if boardSlug == KanbanProject.workspaceTasksSlug {
+                let tasks = try await caelWorkspaceAPIService.loadWorkspaceTasks(
+                    connection: profile,
+                    includeDone: includeArchivedKanbanTasks
+                )
+                board = .workspaceTasks(tasks, includeDone: includeArchivedKanbanTasks)
+            } else {
+                board = try await kanbanBrowserService.loadBoard(
+                    connection: profile,
+                    boardSlug: boardSlug,
+                    includeArchived: includeArchivedKanbanTasks
+                )
+            }
             guard isActiveWorkspace(profile), selectedKanbanBoardSlug == boardSlug else { return }
             kanbanBoard = board
             isLoadingKanbanBoard = false
@@ -2246,6 +2723,12 @@ final class AppState: ObservableObject {
         selectedKanbanTaskID = taskID
         isLoadingKanbanTaskDetail = true
         kanbanError = nil
+
+        if boardSlug == KanbanProject.workspaceTasksSlug {
+            selectedKanbanTaskDetail = nil
+            isLoadingKanbanTaskDetail = false
+            return
+        }
 
         do {
             let detail = try await kanbanBrowserService.loadTaskDetail(
@@ -2350,11 +2833,23 @@ final class AppState: ObservableObject {
 
         do {
             let boardSlug = selectedKanbanBoardSlug
-            let taskID = try await kanbanBrowserService.createTask(connection: profile, boardSlug: boardSlug, draft: draft)
+            let taskID: String
+            if boardSlug == KanbanProject.workspaceTasksSlug {
+                taskID = try await caelWorkspaceAPIService.createWorkspaceTask(
+                    connection: profile,
+                    draft: draft
+                ).id
+            } else {
+                taskID = try await kanbanBrowserService.createTask(connection: profile, boardSlug: boardSlug, draft: draft)
+            }
             guard isActiveWorkspace(profile), selectedKanbanBoardSlug == boardSlug else { return false }
             await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
             selectedKanbanTaskID = taskID
-            await loadKanbanTaskDetail(taskID: taskID)
+            if boardSlug == KanbanProject.workspaceTasksSlug {
+                selectedKanbanTaskDetail = nil
+            } else {
+                await loadKanbanTaskDetail(taskID: taskID)
+            }
             isSavingKanbanTaskDraft = false
             setStatusMessage(L10n.string("Kanban task created"))
             return true
@@ -2365,6 +2860,191 @@ final class AppState: ObservableObject {
             setStatusMessage(L10n.string("Unable to create Kanban task"))
             return false
         }
+    }
+
+    func moveWorkspaceKanbanTask(taskID: String, to status: KanbanTaskStatus) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            try await caelWorkspaceAPIService.moveWorkspaceTask(
+                connection: profile,
+                taskID: taskID,
+                column: WorkspaceTaskColumn.fromKanbanStatus(status)
+            )
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(L10n.string("Workspace task moved"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to move Workspace task"))
+        }
+    }
+
+    func deleteWorkspaceKanbanTask(taskID: String) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            try await caelWorkspaceAPIService.deleteWorkspaceTask(connection: profile, taskID: taskID)
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            if selectedKanbanTaskID == taskID {
+                selectedKanbanTaskID = kanbanBoard?.tasks.first?.id
+            }
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(L10n.string("Workspace task deleted"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to delete Workspace task"))
+        }
+    }
+
+    func updateWorkspaceKanbanTask(taskID: String, draft: KanbanTaskDraft) async -> Bool {
+        guard let profile = activeConnection else { return false }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return false }
+
+        if let validationError = draft.validationError {
+            let localizedError = L10n.string(validationError)
+            kanbanError = localizedError
+            setStatusMessage(localizedError)
+            return false
+        }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            try await caelWorkspaceAPIService.updateWorkspaceTask(
+                connection: profile,
+                taskID: taskID,
+                title: draft.normalizedTitle,
+                description: draft.normalizedBody ?? "",
+                priority: WorkspaceTaskPriority.fromKanbanPriority(draft.priority),
+                assignee: draft.normalizedAssignee,
+                tags: draft.skills
+            )
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return false }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(L10n.string("Workspace task updated"))
+            return true
+        } catch {
+            guard isActiveWorkspace(profile) else { return false }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to update Workspace task"))
+            return false
+        }
+    }
+
+
+    func launchWorkspaceKanbanTaskSession(taskID: String) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+        setStatusMessage(L10n.string("Launching Workspace task session..."))
+
+        do {
+            let launch = try await caelWorkspaceAPIService.launchWorkspaceTaskSession(connection: profile, taskID: taskID)
+            let sessionID = launch.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !sessionID.isEmpty else {
+                throw SSHTransportError.invalidResponse("Workspace API did not return a task session id.")
+            }
+            _ = try await caelWorkspaceAPIService.linkWorkspaceTaskSession(connection: profile, taskID: taskID, sessionID: sessionID)
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            await openWorkspaceTaskSession(sessionID: sessionID)
+            setStatusMessage(L10n.string("Workspace task session launched"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to launch Workspace task session"))
+        }
+    }
+
+    func linkWorkspaceKanbanTaskSession(taskID: String, sessionID: String?) async {
+        guard let profile = activeConnection else { return }
+        guard isWorkspaceKanbanBoardSelected, !isOperatingOnKanbanTask else { return }
+        let trimmedSessionID = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalizedSessionID = trimmedSessionID.isEmpty ? nil : trimmedSessionID
+
+        isOperatingOnKanbanTask = true
+        operatingKanbanTaskID = taskID
+        kanbanError = nil
+
+        do {
+            _ = try await caelWorkspaceAPIService.linkWorkspaceTaskSession(
+                connection: profile,
+                taskID: taskID,
+                sessionID: normalizedSessionID
+            )
+            guard isActiveWorkspace(profile), isWorkspaceKanbanBoardSelected else { return }
+            await loadKanbanBoard(includeArchived: includeArchivedKanbanTasks)
+            selectedKanbanTaskID = taskID
+            selectedKanbanTaskDetail = nil
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            setStatusMessage(normalizedSessionID == nil ? L10n.string("Workspace task session link cleared") : L10n.string("Workspace task session linked"))
+        } catch {
+            guard isActiveWorkspace(profile) else { return }
+            isOperatingOnKanbanTask = false
+            operatingKanbanTaskID = nil
+            kanbanError = error.localizedDescription
+            setStatusMessage(L10n.string("Unable to link Workspace task session"))
+        }
+    }
+
+    func openWorkspaceTaskSession(sessionID: String) async {
+        let normalizedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionID.isEmpty else { return }
+
+        stopSessionTUI()
+        isNewSessionComposerActive = false
+        selectedSessionDetailMode = .chat
+        selectedSection = .sessions
+        await loadSessions(
+            reset: true,
+            query: "",
+            preferredSessionID: normalizedSessionID,
+            allowsFallbackSelection: false,
+            updatesSelection: false
+        )
+        await loadSessionDetail(sessionID: normalizedSessionID)
     }
 
     func addKanbanComment(taskID: String, body: String) async -> Bool {
@@ -2738,9 +3418,14 @@ final class AppState: ObservableObject {
     }
 
     private func handleSectionEntry(_ section: AppSection) {
+        if section.isCommandCenterMirrorSection {
+            Task { await loadCaelWorkspace() }
+            return
+        }
+
         switch section {
         case .overview:
-            Task { await refreshOverview() }
+            Task { await loadCaelWorkspace() }
         case .files:
             Task { await ensureInitialFileLoads() }
         case .sessions:
@@ -2756,12 +3441,15 @@ final class AppState: ObservableObject {
         case .kanban:
             Task { await loadKanbanBoard() }
         case .usage:
-            Task { await loadUsage(forceRefresh: true) }
+            Task {
+                await loadUsage(forceRefresh: true)
+                await loadCaelProviderUsage(forceRefresh: true)
+            }
         case .skills:
             Task { await loadSkills(reset: true) }
         case .terminal:
             ensureTerminalSession()
-        case .connections:
+        case .connections, .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
             break
         }
     }
@@ -2834,6 +3522,10 @@ final class AppState: ObservableObject {
         activeConnection?.workspaceScopeFingerprint == profile.workspaceScopeFingerprint
     }
 
+    private func isActiveCaelWorkspace(_ profile: ConnectionProfile) -> Bool {
+        activeConnection?.commandCenterClientFingerprint == profile.commandCenterClientFingerprint
+    }
+
     private func setDocument(_ document: FileEditorDocument) {
         workspaceFileDocuments[document.fileID] = document
     }
@@ -2847,6 +3539,11 @@ final class AppState: ObservableObject {
     }
 
     private func reloadSectionAfterScopeChange(_ section: AppSection) async {
+        if section.isCommandCenterMirrorSection {
+            await loadCaelWorkspace()
+            return
+        }
+
         switch section {
         case .connections, .overview:
             break
@@ -2868,10 +3565,14 @@ final class AppState: ObservableObject {
             await loadSkills(reset: true)
         case .terminal:
             ensureTerminalSession()
+        case .mail, .contacts, .calendar, .missionControl, .operations, .swarm, .memory, .integrations, .mcp, .profiles:
+            break
         }
     }
 
     private func clearSessionMessages() {
+        acceptedWorkspaceChatEventsTask?.cancel()
+        acceptedWorkspaceChatEventsTask = nil
         guard !sessionMessages.isEmpty ||
                 !sessionMessageDisplays.isEmpty ||
                 !liveSessionMessageDisplays.isEmpty ||
@@ -3086,6 +3787,7 @@ final class AppState: ObservableObject {
         gatewaySessionID = nil
         activeGatewayAssistantMessageID = nil
         clearNativeTurnUIState()
+        hasAcceptedNativeTurnInFlight = false
         completeActiveNativeTurn(success: false)
         activeNativeTurnResult = nil
         activeNativeTurnCompletion = nil
@@ -3135,8 +3837,256 @@ final class AppState: ObservableObject {
     }
 
     private func prepareActiveNativeTurnWait() {
+        hasAcceptedNativeTurnInFlight = false
         activeNativeTurnResult = nil
         activeNativeTurnCompletion = nil
+    }
+
+    private func scheduleAcceptedWorkspaceSessionRefresh(sessionID: String, connection: ConnectionProfile) {
+        let workspaceScopeFingerprint = connection.workspaceScopeFingerprint
+        acceptedWorkspaceSessionMonitorTask?.cancel()
+        acceptedWorkspaceChatEventsTask?.cancel()
+        acceptedWorkspaceChatEventsTask = Task { [weak self] in
+            var sawTerminalEvent = false
+            while !Task.isCancelled, !sawTerminalEvent {
+                sawTerminalEvent = await self?.tailAcceptedWorkspaceChatEvents(
+                    sessionID: sessionID,
+                    workspaceScopeFingerprint: workspaceScopeFingerprint,
+                    timeoutSeconds: 8
+                ) ?? false
+                if sawTerminalEvent { return }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        acceptedWorkspaceSessionMonitorTask = Task { [weak self] in
+            let startedAt = Date()
+            var sawActiveRun = false
+            var emptyRunChecks = 0
+
+            for delay in [1.2, 3, 5, 8, 13] as [Double] {
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled else { return }
+
+                let run = await self?.refreshAcceptedWorkspaceSession(
+                    sessionID: sessionID,
+                    workspaceScopeFingerprint: workspaceScopeFingerprint
+                )
+                if let run {
+                    sawActiveRun = true
+                    emptyRunChecks = 0
+                    if Self.isTerminalWorkspaceRunStatus(run.status) { return }
+                } else {
+                    emptyRunChecks += 1
+                    if sawActiveRun { return }
+                }
+            }
+
+            while !Task.isCancelled, Date().timeIntervalSince(startedAt) < 10 * 60 {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { return }
+
+                let run = await self?.refreshAcceptedWorkspaceSession(
+                    sessionID: sessionID,
+                    workspaceScopeFingerprint: workspaceScopeFingerprint
+                )
+                if let run {
+                    sawActiveRun = true
+                    emptyRunChecks = 0
+                    if Self.isTerminalWorkspaceRunStatus(run.status) { return }
+                } else {
+                    emptyRunChecks += 1
+                    if sawActiveRun || emptyRunChecks >= 2 { return }
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func refreshAcceptedWorkspaceSession(sessionID: String, workspaceScopeFingerprint: String) async -> WorkspaceSessionActiveRun? {
+        guard let profile = activeConnection,
+              profile.workspaceScopeFingerprint == workspaceScopeFingerprint else { return nil }
+        var activeRun: WorkspaceSessionActiveRun?
+        if selectedSessionID == sessionID {
+            activeRun = await refreshWorkspaceSessionActiveRun(sessionID: sessionID, connection: profile)
+            let loadedWorkspaceHistory = await hydrateWorkspaceSessionHistory(sessionID: sessionID, connection: profile)
+            if !loadedWorkspaceHistory {
+                await loadSessionDetail(sessionID: sessionID)
+            }
+        }
+        await loadSessions(
+            reset: true,
+            query: sessionSearchQuery,
+            preferredSessionID: sessionID,
+            allowsFallbackSelection: false,
+            updatesSelection: false
+        )
+        return activeRun
+    }
+
+    nonisolated private static func isTerminalWorkspaceRunStatus(_ status: String) -> Bool {
+        switch status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "complete", "completed", "succeeded", "success", "done", "failed", "failure", "error", "cancelled", "canceled":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func upsertAcceptedWorkspaceSessionSummary(sessionID: String, prompt: String, messageCount: Int) {
+        let now = SessionTimestamp.unixSeconds(Date().timeIntervalSince1970)
+        let title = String(prompt.prefix(80))
+        let summary = SessionSummary(
+            id: sessionID,
+            title: title,
+            model: nil,
+            startedAt: now,
+            lastActive: now,
+            messageCount: messageCount,
+            preview: prompt
+        )
+        if let index = sessions.firstIndex(where: { $0.id == sessionID }) {
+            sessions[index] = summary
+        } else {
+            sessions.insert(summary, at: 0)
+            totalSessionsCount = max(totalSessionsCount, sessions.count)
+        }
+    }
+
+    private func markAcceptedWorkspaceRun(_ response: WorkspaceSessionSendResponse, sessionID: String) {
+        guard let runID = response.runId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !runID.isEmpty else {
+            return
+        }
+        let now = Date().timeIntervalSince1970 * 1000
+        workspaceSessionActiveRun = WorkspaceSessionActiveRun(
+            runId: runID,
+            sessionKey: sessionID,
+            friendlyId: sessionID,
+            status: "accepted",
+            createdAt: now,
+            updatedAt: now,
+            lastEventAt: now,
+            assistantText: "",
+            thinkingText: "",
+            toolCalls: [],
+            lifecycleEvents: [],
+            errorMessage: nil
+        )
+    }
+
+    @discardableResult
+    private func refreshWorkspaceSessionActiveRun(sessionID: String, connection: ConnectionProfile) async -> WorkspaceSessionActiveRun? {
+        do {
+            let response = try await caelWorkspaceAPIService.loadWorkspaceSessionActiveRun(
+                connection: connection,
+                sessionKey: sessionID
+            )
+            guard isActiveWorkspace(connection), selectedSessionID == sessionID else { return nil }
+            workspaceSessionActiveRun = response.run
+            return response.run
+        } catch {
+            return nil
+        }
+    }
+
+    @discardableResult
+    private func tailAcceptedWorkspaceChatEvents(
+        sessionID: String,
+        workspaceScopeFingerprint: String,
+        timeoutSeconds: Int
+    ) async -> Bool {
+        guard let profile = activeConnection,
+              profile.workspaceScopeFingerprint == workspaceScopeFingerprint,
+              selectedSessionID == sessionID else { return true }
+
+        do {
+            let response = try await caelWorkspaceAPIService.tailWorkspaceChatEvents(
+                connection: profile,
+                sessionKey: sessionID,
+                timeoutSeconds: timeoutSeconds
+            )
+            guard isActiveWorkspace(profile), selectedSessionID == sessionID else { return true }
+            var terminalEvent = false
+            for event in response.events {
+                terminalEvent = applyWorkspaceChatEvent(event, sessionID: sessionID) || terminalEvent
+            }
+            return terminalEvent
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    private func applyWorkspaceChatEvent(_ event: WorkspaceChatEvent, sessionID: String) -> Bool {
+        if let eventSessionID = gatewayValue(in: event.data, keys: ["sessionKey"]),
+           eventSessionID != sessionID {
+            return false
+        }
+
+        switch event.event {
+        case "connected", "heartbeat", "started", "user_message":
+            return false
+        case "message":
+            startLiveAssistantMessage(with: workspaceAssistantMessagePayload(from: event.data))
+            return false
+        case "chunk":
+            if event.data["fullReplace"]?.boolValue == true {
+                replaceLiveAssistantText(from: event.data)
+            } else {
+                appendLiveAssistantDelta(from: event.data)
+            }
+            return false
+        case "thinking":
+            if let thinking = gatewayValue(in: event.data, keys: ["text", "delta", "content"]) {
+                appendLiveSystemMessage(thinking)
+            }
+            return false
+        case "tool", "artifact":
+            let state = gatewayValue(in: event.data, keys: ["phase", "state", "status"])?.lowercased() ?? ""
+            updateToolActivityCard(for: event.data, defaultRunning: state != "complete" && state != "completed")
+            return false
+        case "done":
+            completeLiveAssistantMessage(from: event.data)
+            return true
+        case "error":
+            let message = gatewayValue(in: event.data, keys: ["message", "error"]) ?? "Workspace chat event stream reported an error."
+            appendLiveSystemMessage(message)
+            sessionConversationError = message
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func workspaceAssistantMessagePayload(from payload: [String: JSONValue]) -> [String: JSONValue] {
+        guard let message = payload["message"]?.objectValue else { return payload }
+        return [
+            "id": message["id"] ?? .string(UUID().uuidString),
+            "text": .string("")
+        ]
+    }
+
+    private func hydrateWorkspaceSessionHistory(sessionID: String, connection: ConnectionProfile) async -> Bool {
+        do {
+            let response = try await caelWorkspaceAPIService.loadWorkspaceSessionHistory(
+                connection: connection,
+                sessionKey: sessionID
+            )
+            guard isActiveWorkspace(connection), selectedSessionID == sessionID else { return false }
+            guard !response.messages.isEmpty else { return false }
+            await setSessionMessages(response.messages, for: connection, sessionID: sessionID)
+            if let last = response.messages.last {
+                upsertAcceptedWorkspaceSessionSummary(
+                    sessionID: sessionID,
+                    prompt: last.content ?? sessionID,
+                    messageCount: response.messages.count
+                )
+            }
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func waitForActiveNativeTurnCompletion() async -> Bool {
@@ -3199,13 +4149,13 @@ final class AppState: ObservableObject {
             upsertPromptCard(kind: .secret, payload: event.payload, fallbackSessionID: event.sessionID)
         case "error":
             let message = gatewayValue(in: event.payload, keys: ["message", "error"]) ?? "Unknown gateway error"
-            if isSendingSessionMessage {
+            if isSendingSessionMessage || hasAcceptedNativeTurnInFlight {
                 appendLiveSystemMessage(message)
             }
             sessionConversationError = message
             completeActiveNativeTurn(success: false)
         case "gateway.closed":
-            if isSendingSessionMessage {
+            if isSendingSessionMessage || hasAcceptedNativeTurnInFlight {
                 let message = gatewayValue(in: event.payload, keys: ["error"]) ?? "Native chat disconnected."
                 appendLiveSystemMessage(message)
                 sessionConversationError = message
@@ -3285,6 +4235,32 @@ final class AppState: ObservableObject {
             id: existing.id,
             role: existing.role,
             content: (existing.content ?? "") + delta,
+            timestampText: existing.timestampText,
+            metadataItems: existing.metadataItems,
+            toolSummary: existing.toolSummary,
+            isStreaming: true
+        )
+    }
+
+    private func replaceLiveAssistantText(from payload: [String: JSONValue]) {
+        let text = gatewayValue(in: payload, keys: ["text", "content"]) ?? ""
+        guard !text.isEmpty else { return }
+
+        if activeGatewayAssistantMessageID == nil {
+            startLiveAssistantMessage(with: payload)
+            return
+        }
+
+        guard let messageID = activeGatewayAssistantMessageID,
+              let index = liveSessionMessageDisplays.lastIndex(where: { $0.id == messageID }) else {
+            return
+        }
+
+        let existing = liveSessionMessageDisplays[index]
+        liveSessionMessageDisplays[index] = SessionMessageDisplay(
+            id: existing.id,
+            role: existing.role,
+            content: text,
             timestampText: existing.timestampText,
             metadataItems: existing.metadataItems,
             toolSummary: existing.toolSummary,
@@ -3614,8 +4590,9 @@ final class AppState: ObservableObject {
             isSendingSessionMessage = false
             sessionConversationError = nil
             pendingSessionTurn = nil
+            hasAcceptedNativeTurnInFlight = false
             sessionCompactionNotice = nil
-            selectedSessionDetailMode = .transcript
+            selectedSessionDetailMode = .chat
             stopSessionTUI()
             clearNativeTurnUIState()
             nativeChatBootstrapStatus = nil
@@ -3674,6 +4651,39 @@ final class AppState: ObservableObject {
         await loadSessions(reset: true)
     }
 
+
+    @discardableResult
+    private func applyCachedCommandCenterSnapshot(for profile: ConnectionProfile, reason: String) -> Bool {
+        guard let cached = caelCommandCenterSnapshotStore.load(for: profile) else { return false }
+        caelCommandCenterSummary = cached.summaryEnvelope?.data
+        caelCommandCenterSections = cached.sections
+        let cachedAt = cached.cachedAt.formatted(date: .abbreviated, time: .shortened)
+        let notice = "Showing last-known command center snapshot from \(cachedAt). \(reason)"
+        var warnings = cached.summaryEnvelope?.warnings ?? []
+        warnings.insert(notice, at: 0)
+        caelCommandCenterWarnings = warnings
+        caelCommandCenterCacheNotice = notice
+        return true
+    }
+
+    private func resetCaelWorkspaceState() {
+        caelWorkspaceStatus = nil
+        caelIntegrationStatus = nil
+        caelProviderUsageLimits = nil
+        caelN8nGovernance = nil
+        caelN8nGovernanceError = nil
+        caelCommandCenterSummary = nil
+        caelCommandCenterSections = nil
+        caelCommandCenterWarnings = []
+        caelCommandCenterCacheNotice = nil
+        caelWorkspaceError = nil
+        caelProviderUsageError = nil
+        isLoadingCaelWorkspace = false
+        isRefreshingCaelWorkspace = false
+        isLoadingCaelProviderUsage = false
+        isRefreshingCaelProviderUsage = false
+    }
+
     private func resetWorkspaceStateForConnectionChange(closeTerminalTabs: Bool = true) {
         isBusy = false
         connectionTestRequestID = nil
@@ -3689,8 +4699,9 @@ final class AppState: ObservableObject {
         isSendingSessionMessage = false
         sessionConversationError = nil
         pendingSessionTurn = nil
+        hasAcceptedNativeTurnInFlight = false
         sessionCompactionNotice = nil
-        selectedSessionDetailMode = .transcript
+        selectedSessionDetailMode = .chat
         stopSessionTUI()
         clearNativeTurnUIState()
         nativeChatBootstrapStatus = nil
@@ -3714,6 +4725,7 @@ final class AppState: ObservableObject {
         usageError = nil
         isLoadingUsage = false
         isRefreshingUsage = false
+        resetCaelWorkspaceState()
         skills = []
         selectedSkillID = nil
         selectedSkillDetail = nil
@@ -3759,7 +4771,12 @@ final class AppState: ObservableObject {
         workspaceFileDocuments = [:]
         workspaceFileBrowserListing = nil
         workspaceFileBrowserError = nil
+        workspaceFileBrowserNotice = nil
         isLoadingWorkspaceFileBrowser = false
+        workspacePreviewFile = nil
+        workspacePreviewError = nil
+        isLoadingWorkspacePreview = false
+        isUploadingWorkspaceFile = false
         selectedWorkspaceFileID = RemoteTrackedFile.memory.workspaceFileID
     }
 

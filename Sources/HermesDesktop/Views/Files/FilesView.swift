@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct FilesView: View {
     @EnvironmentObject private var appState: AppState
@@ -21,6 +23,7 @@ struct FilesView: View {
 
                 filesToolbar
                 libraryPanel
+                toolArtifactsPanel
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(.horizontal, 20)
@@ -32,6 +35,9 @@ struct FilesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: selectedFileLoadTaskID) {
             await appState.loadSelectedWorkspaceFile()
+        }
+        .task(id: appState.activeConnectionID) {
+            await appState.loadToolArtifacts(resetSelection: true)
         }
         .sheet(isPresented: $showBrowserSheet) {
             WorkspaceFileBrowserSheet()
@@ -107,6 +113,61 @@ struct FilesView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private var toolArtifactsPanel: some View {
+        HermesSurfacePanel(
+            title: "Tool Artifacts",
+            subtitle: "Externalized tool output from Workspace sessions."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    if appState.isLoadingToolArtifacts {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        Task {
+                            await appState.loadToolArtifacts(resetSelection: false)
+                        }
+                    } label: {
+                        Label(L10n.string("Refresh"), systemImage: "arrow.clockwise")
+                    }
+                    .controlSize(.small)
+                    .disabled(appState.isLoadingToolArtifacts)
+                }
+
+                if let errorMessage = appState.toolArtifactsError {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                } else if appState.toolArtifacts.isEmpty {
+                    Text(L10n.string("No tool artifacts surfaced."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(appState.toolArtifacts.prefix(8)) { artifact in
+                                ToolArtifactRow(
+                                    artifact: artifact,
+                                    isSelected: artifact.id == appState.selectedToolArtifactID
+                                ) {
+                                    Task {
+                                        await appState.selectToolArtifact(artifact.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                }
+            }
         }
     }
 
@@ -265,31 +326,41 @@ struct FilesView: View {
     private var editorPane: some View {
         Group {
             if let selectedReference {
-                WorkspaceFileEditorPane(
-                    reference: selectedReference,
-                    document: currentDocument,
-                    text: editorBinding,
-                    onReload: {
-                        if currentDocument?.isDirty == true {
-                            showReloadDiscardAlert = true
-                        } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let artifact = appState.selectedToolArtifactDetail {
+                        ToolArtifactDetailPanel(
+                            artifact: artifact,
+                            isLoading: appState.isLoadingToolArtifactDetail
+                        )
+                    }
+
+                    WorkspaceFileEditorPane(
+                        reference: selectedReference,
+                        document: currentDocument,
+                        text: editorBinding,
+                        onReload: {
+                            if currentDocument?.isDirty == true {
+                                showReloadDiscardAlert = true
+                            } else {
+                                Task {
+                                    await appState.loadWorkspaceFile(selectedReference, forceReload: true)
+                                }
+                            }
+                        },
+                        onSave: {
                             Task {
-                                await appState.loadWorkspaceFile(selectedReference, forceReload: true)
+                                await appState.saveWorkspaceFile(fileID: selectedReference.id)
+                            }
+                        },
+                        onRemove: selectedReference.bookmarkID.map { bookmarkID in
+                            {
+                                bookmarkPendingRemoval = bookmarkID
+                                showRemoveBookmarkAlert = true
                             }
                         }
-                    },
-                    onSave: {
-                        Task {
-                            await appState.saveWorkspaceFile(fileID: selectedReference.id)
-                        }
-                    },
-                    onRemove: selectedReference.bookmarkID.map { bookmarkID in
-                        {
-                            bookmarkPendingRemoval = bookmarkID
-                            showRemoveBookmarkAlert = true
-                        }
-                    }
-                )
+                    )
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 ScrollView {
                     HermesSurfacePanel {
@@ -343,6 +414,115 @@ struct FilesView: View {
 
     private var selectedFileLoadTaskID: String {
         "\(appState.activeConnectionID?.uuidString ?? "none")|\(appState.selectedWorkspaceFileID)"
+    }
+}
+
+private struct ToolArtifactRow: View {
+    let artifact: ToolArtifactSummary
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: iconName)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16)
+
+                    Text(artifact.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(artifact.kind)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                }
+
+                Text(artifact.preview.isEmpty ? artifact.summary : artifact.preview)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var iconName: String {
+        switch artifact.kind {
+        case "diff":
+            "plus.forwardslash.minus"
+        case "terminal_log":
+            "terminal"
+        case "file_read":
+            "doc.text.magnifyingglass"
+        case "skill_doc":
+            "puzzlepiece"
+        default:
+            "doc.text"
+        }
+    }
+}
+
+private struct ToolArtifactDetailPanel: View {
+    let artifact: ToolArtifactDetail
+    let isLoading: Bool
+
+    var body: some View {
+        HermesSurfacePanel(
+            title: artifact.title,
+            subtitle: "\(artifact.kind) / \(artifact.sessionId)"
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(artifact.contentSize), countStyle: .file))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(DateFormatters.relativeFormatter().localizedString(for: artifact.createdDate, relativeTo: .now))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                Text(artifact.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                ScrollView {
+                    Text(artifact.content.isEmpty ? artifact.preview : artifact.content)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .frame(maxHeight: 180)
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 22)
     }
 }
 
@@ -420,6 +600,7 @@ private struct WorkspaceFileEditorPane: View {
     let onReload: () -> Void
     let onSave: () -> Void
     let onRemove: (() -> Void)?
+    @State private var showSaveReview = false
 
     private var isDirty: Bool {
         document?.isDirty == true
@@ -452,6 +633,20 @@ private struct WorkspaceFileEditorPane: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(isPresented: $showSaveReview) {
+            if let document {
+                WorkspaceFileSaveReviewSheet(
+                    reference: reference,
+                    document: document,
+                    editedText: text,
+                    onCancel: { showSaveReview = false },
+                    onConfirm: {
+                        showSaveReview = false
+                        onSave()
+                    }
+                )
+            }
+        }
     }
 
     private var headerPanel: some View {
@@ -506,7 +701,9 @@ private struct WorkspaceFileEditorPane: View {
             Button(L10n.string("Reload"), action: onReload)
             .disabled(isLoading)
 
-            Button(L10n.string("Save"), action: onSave)
+            Button(L10n.string("Save")) {
+                showSaveReview = true
+            }
             .buttonStyle(.borderedProminent)
             .disabled(!isDirty || isLoading || !hasLoaded)
 
@@ -558,11 +755,265 @@ private struct WorkspaceFileEditorPane: View {
     }
 }
 
+private struct WorkspaceFileSaveReviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let reference: WorkspaceFileReference
+    let document: FileEditorDocument
+    let editedText: String
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    private var summary: WorkspaceFileChangeSummary {
+        WorkspaceFileChangeSummary(original: document.originalContent, edited: editedText)
+    }
+
+    private var rows: [WorkspaceFileDiffRow] {
+        WorkspaceFileDiffRow.rows(original: document.originalContent, edited: editedText)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.string("Review Save"))
+                        .font(.title2.weight(.semibold))
+
+                    Text(reference.remotePath)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+
+                Spacer(minLength: 12)
+
+                HermesBadge(text: "Unsaved", tint: .orange)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
+                WorkspaceFileChangeMetric(label: "Changed", value: "\(summary.changedLineCount)")
+                WorkspaceFileChangeMetric(label: "Added", value: "\(summary.addedLineCount)")
+                WorkspaceFileChangeMetric(label: "Removed", value: "\(summary.removedLineCount)")
+                WorkspaceFileChangeMetric(label: "Characters", value: summary.characterDeltaText)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.string("Server guard"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Text(document.remoteContentHash.map { L10n.string("Save will use the last loaded content hash: %@", $0) } ?? L10n.string("Reload this file before saving so the server can detect remote changes."))
+                    .font(.caption)
+                    .foregroundStyle(document.remoteContentHash == nil ? .orange : .secondary)
+                    .textSelection(.enabled)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(L10n.string("Changed lines"))
+                        .font(.headline)
+
+                    Spacer()
+
+                    if rows.count > WorkspaceFileDiffRow.previewLimit {
+                        Text(L10n.string("Showing %@ of %@", "\(WorkspaceFileDiffRow.previewLimit)", "\(rows.count)"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        if rows.isEmpty {
+                            Text(L10n.string("No line-level changes detected."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ForEach(rows.prefix(WorkspaceFileDiffRow.previewLimit)) { row in
+                                WorkspaceFileDiffRowView(row: row)
+                            }
+                        }
+                    }
+                    .padding(10)
+                }
+                .frame(minHeight: 180, maxHeight: 300)
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+            }
+
+            HStack {
+                Button(L10n.string("Cancel")) {
+                    dismiss()
+                    onCancel()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button(L10n.string("Save to Workspace")) {
+                    dismiss()
+                    onConfirm()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(document.remoteContentHash == nil)
+            }
+        }
+        .padding(22)
+        .frame(width: 680)
+        .frame(minHeight: 560)
+    }
+}
+
+private struct WorkspaceFileChangeSummary {
+    let changedLineCount: Int
+    let addedLineCount: Int
+    let removedLineCount: Int
+    let originalCharacterCount: Int
+    let editedCharacterCount: Int
+
+    init(original: String, edited: String) {
+        let originalLines = WorkspaceFileDiffRow.lines(original)
+        let editedLines = WorkspaceFileDiffRow.lines(edited)
+        let sharedCount = min(originalLines.count, editedLines.count)
+        let changed = (0..<sharedCount).filter { originalLines[$0] != editedLines[$0] }.count
+
+        self.changedLineCount = changed
+        self.addedLineCount = max(0, editedLines.count - originalLines.count)
+        self.removedLineCount = max(0, originalLines.count - editedLines.count)
+        self.originalCharacterCount = original.count
+        self.editedCharacterCount = edited.count
+    }
+
+    var characterDeltaText: String {
+        let delta = editedCharacterCount - originalCharacterCount
+        if delta > 0 { return "+\(delta)" }
+        return "\(delta)"
+    }
+}
+
+private struct WorkspaceFileChangeMetric: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(L10n.string(label))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct WorkspaceFileDiffRow: Identifiable {
+    enum Kind {
+        case added
+        case removed
+    }
+
+    static let previewLimit = 120
+    let id: String
+    let kind: Kind
+    let lineNumber: Int
+    let text: String
+
+    static func rows(original: String, edited: String) -> [WorkspaceFileDiffRow] {
+        let originalLines = lines(original)
+        let editedLines = lines(edited)
+        let maxCount = max(originalLines.count, editedLines.count)
+        var rows: [WorkspaceFileDiffRow] = []
+
+        for index in 0..<maxCount {
+            let lineNumber = index + 1
+            let originalLine = index < originalLines.count ? originalLines[index] : nil
+            let editedLine = index < editedLines.count ? editedLines[index] : nil
+
+            switch (originalLine, editedLine) {
+            case let (old?, new?) where old != new:
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-removed", kind: .removed, lineNumber: lineNumber, text: old))
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-added", kind: .added, lineNumber: lineNumber, text: new))
+            case let (old?, nil):
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-removed", kind: .removed, lineNumber: lineNumber, text: old))
+            case let (nil, new?):
+                rows.append(WorkspaceFileDiffRow(id: "\(lineNumber)-added", kind: .added, lineNumber: lineNumber, text: new))
+            default:
+                break
+            }
+        }
+
+        return rows
+    }
+
+    static func lines(_ value: String) -> [String] {
+        value.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    }
+}
+
+private struct WorkspaceFileDiffRowView: View {
+    let row: WorkspaceFileDiffRow
+
+    private var marker: String {
+        switch row.kind {
+        case .added: return "+"
+        case .removed: return "-"
+        }
+    }
+
+    private var tint: Color {
+        switch row.kind {
+        case .added: return .green
+        case .removed: return .red
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(marker)
+                .font(.system(.caption, design: .monospaced).weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 12)
+
+            Text("\(row.lineNumber)")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 38, alignment: .trailing)
+
+            Text(row.text.isEmpty ? " " : row.text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
+
 private struct WorkspaceFileBrowserSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var pathText = ""
     @State private var didLoadInitialDirectory = false
+    @State private var pathActionDraft: WorkspaceFilePathActionDraft?
+    @State private var pendingDeleteEntry: RemoteDirectoryEntry?
+    @State private var showDeletePathAlert = false
+    @State private var showUploadImporter = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -621,6 +1072,25 @@ private struct WorkspaceFileBrowserSheet: View {
                     }
                 }
 
+                Button {
+                    beginCreateFolder()
+                } label: {
+                    Label(L10n.string("New Folder"), systemImage: "folder.badge.plus")
+                }
+                .disabled(appState.workspaceFileBrowserListing == nil)
+
+                Button {
+                    showUploadImporter = true
+                } label: {
+                    Label(L10n.string("Upload"), systemImage: "square.and.arrow.up")
+                }
+                .disabled(appState.workspaceFileBrowserListing == nil || appState.isUploadingWorkspaceFile)
+
+                if appState.isUploadingWorkspaceFile {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
                 Spacer()
             }
             .controlSize(.small)
@@ -634,7 +1104,17 @@ private struct WorkspaceFileBrowserSheet: View {
                     .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
+            if let notice = appState.workspaceFileBrowserNotice {
+                Text(notice)
+                    .font(.subheadline)
+                    .foregroundStyle(.green)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
             browserContent
+            previewPanel
 
             HStack {
                 if let listing = appState.workspaceFileBrowserListing {
@@ -660,7 +1140,41 @@ private struct WorkspaceFileBrowserSheet: View {
             }
         }
         .padding(22)
-        .frame(width: 760, height: 560)
+        .frame(width: 820, height: 700)
+        .fileImporter(
+            isPresented: $showUploadImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            handleUploadSelection(result)
+        }
+        .sheet(item: $pathActionDraft) { draft in
+            WorkspaceFilePathActionSheet(draft: draft) { submittedPath in
+                switch draft.kind {
+                case .newFolder:
+                    Task {
+                        await appState.createWorkspaceDirectory(path: submittedPath)
+                    }
+                case .rename(let sourcePath):
+                    Task {
+                        await appState.renameWorkspacePath(from: sourcePath, to: submittedPath)
+                    }
+                }
+            }
+        }
+        .alert(L10n.string("Delete this path?"), isPresented: $showDeletePathAlert, presenting: pendingDeleteEntry) { entry in
+            Button(L10n.string("Delete"), role: .destructive) {
+                Task {
+                    await appState.deleteWorkspacePath(path: entry.displayPath)
+                    pendingDeleteEntry = nil
+                }
+            }
+            Button(L10n.string("Cancel"), role: .cancel) {
+                pendingDeleteEntry = nil
+            }
+        } message: { entry in
+            Text(L10n.string("This removes %@ from the active workspace.", entry.name))
+        }
         .task {
             guard !didLoadInitialDirectory else { return }
             didLoadInitialDirectory = true
@@ -744,6 +1258,37 @@ private struct WorkspaceFileBrowserSheet: View {
                 }
                 .controlSize(.small)
             }
+
+            Menu {
+                if entry.kind == .file {
+                    Button {
+                        Task {
+                            await appState.previewWorkspacePath(entry.displayPath)
+                        }
+                    } label: {
+                        Label(L10n.string("Preview"), systemImage: "eye")
+                    }
+                }
+
+                Button {
+                    beginRename(entry)
+                } label: {
+                    Label(L10n.string("Rename"), systemImage: "pencil")
+                }
+
+                Button(role: .destructive) {
+                    pendingDeleteEntry = entry
+                    showDeletePathAlert = true
+                } label: {
+                    Label(L10n.string("Delete"), systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .imageScale(.medium)
+                    .frame(width: 24, height: 24)
+            }
+            .menuStyle(.borderlessButton)
+            .controlSize(.small)
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
@@ -753,6 +1298,57 @@ private struct WorkspaceFileBrowserSheet: View {
                 addBookmark(entry)
             }
         }
+    }
+
+    @ViewBuilder
+    private var previewPanel: some View {
+        if appState.isLoadingWorkspacePreview || appState.workspacePreviewFile != nil || appState.workspacePreviewError != nil {
+            HermesSurfacePanel(
+                title: "Preview",
+                subtitle: appState.workspacePreviewFile?.path ?? "Workspace preview endpoint"
+            ) {
+                if appState.isLoadingWorkspacePreview {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(L10n.string("Loading preview..."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let errorMessage = appState.workspacePreviewError {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let preview = appState.workspacePreviewFile {
+                    WorkspacePreviewPanel(preview: preview)
+                }
+            }
+            .frame(maxHeight: 190)
+        }
+    }
+
+    private func beginCreateFolder() {
+        let parentPath = appState.workspaceFileBrowserListing?.displayPath ?? pathText
+        pathActionDraft = WorkspaceFilePathActionDraft(
+            kind: .newFolder,
+            title: L10n.string("Create Folder"),
+            prompt: L10n.string("Enter the full workspace path for the new folder."),
+            initialPath: appendingPathComponent("New Folder", to: parentPath),
+            submitTitle: L10n.string("Create")
+        )
+    }
+
+    private func beginRename(_ entry: RemoteDirectoryEntry) {
+        pathActionDraft = WorkspaceFilePathActionDraft(
+            kind: .rename(sourcePath: entry.displayPath),
+            title: L10n.string("Rename Path"),
+            prompt: L10n.string("Enter the new full workspace path."),
+            initialPath: entry.displayPath,
+            submitTitle: L10n.string("Rename")
+        )
     }
 
     private func browse(_ path: String) {
@@ -776,6 +1372,22 @@ private struct WorkspaceFileBrowserSheet: View {
 
     private func addBookmark(_ entry: RemoteDirectoryEntry) {
         appState.addWorkspaceFileBookmark(remotePath: entry.displayPath, selectAfterAdd: false)
+    }
+
+    private func handleUploadSelection(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            Task {
+                await appState.uploadWorkspaceFile(localFileURL: url, to: currentUploadTargetPath)
+            }
+        case .failure(let error):
+            appState.workspaceFileBrowserError = error.localizedDescription
+        }
+    }
+
+    private var currentUploadTargetPath: String {
+        appState.workspaceFileBrowserListing?.displayPath ?? pathText
     }
 
     private func isBookmarked(_ entry: RemoteDirectoryEntry) -> Bool {
@@ -828,5 +1440,125 @@ private struct WorkspaceFileBrowserSheet: View {
         }
 
         return parts.joined(separator: " / ")
+    }
+
+    private func appendingPathComponent(_ component: String, to parent: String) -> String {
+        let trimmedParent = parent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedParent.isEmpty else { return component }
+        return trimmedParent.hasSuffix("/") ? "\(trimmedParent)\(component)" : "\(trimmedParent)/\(component)"
+    }
+}
+
+private struct WorkspacePreviewPanel: View {
+    let preview: WorkspacePreviewFile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(preview.kind)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.10), in: Capsule())
+
+                Text(preview.mime)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(ByteCountFormatter.string(fromByteCount: preview.size, countStyle: .file))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if preview.isText {
+                ScrollView {
+                    Text(preview.content ?? "")
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else if preview.isImage,
+                      let encoded = preview.contentBase64,
+                      let data = Data(base64Encoded: encoded),
+                      let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 110, alignment: .leading)
+            } else {
+                Text(L10n.string("Binary preview metadata loaded."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private enum WorkspaceFilePathActionKind {
+    case newFolder
+    case rename(sourcePath: String)
+}
+
+private struct WorkspaceFilePathActionDraft: Identifiable {
+    let id = UUID()
+    let kind: WorkspaceFilePathActionKind
+    let title: String
+    let prompt: String
+    let initialPath: String
+    let submitTitle: String
+}
+
+private struct WorkspaceFilePathActionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let draft: WorkspaceFilePathActionDraft
+    let onSubmit: (String) -> Void
+    @State private var pathText: String
+
+    init(draft: WorkspaceFilePathActionDraft, onSubmit: @escaping (String) -> Void) {
+        self.draft = draft
+        self.onSubmit = onSubmit
+        _pathText = State(initialValue: draft.initialPath)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(draft.title)
+                .font(.title3.weight(.semibold))
+
+            Text(draft.prompt)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            TextField(L10n.string("Workspace path"), text: $pathText)
+                .font(.system(.body, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(submit)
+
+            HStack {
+                Spacer()
+                Button(L10n.string("Cancel")) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(draft.submitTitle) {
+                    submit()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(pathText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+    }
+
+    private func submit() {
+        let trimmed = pathText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onSubmit(trimmed)
+        dismiss()
     }
 }

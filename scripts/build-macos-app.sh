@@ -111,7 +111,14 @@ generate_icon() {
     mkdir -p "$ICONSET_PATH"
 
     if [[ ! -f "$ICON_SOURCE" ]]; then
-        env "${BUILD_ENV[@]}" swift "$ROOT_DIR/scripts/generate-app-icon.swift" "$ICON_SOURCE"
+        if [[ -f "$ROOT_DIR/packaging/CaelImageGenMaster.png" && -f "$ROOT_DIR/../hermes-workspace-cael/scripts/generate-cael-brand-assets.swift" ]]; then
+            env "${BUILD_ENV[@]}" swift "$ROOT_DIR/../hermes-workspace-cael/scripts/generate-cael-brand-assets.swift" \
+                "$ROOT_DIR/packaging/CaelImageGenMaster.png" \
+                "$ROOT_DIR" \
+                "$ROOT_DIR/../hermes-workspace-cael"
+        else
+            env "${BUILD_ENV[@]}" swift "$ROOT_DIR/scripts/generate-app-icon.swift" "$ICON_SOURCE"
+        fi
     fi
 
     sips -z 16 16 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_16x16.png" >/dev/null
@@ -239,11 +246,13 @@ if [[ ! -d "$APP_RESOURCE_BUNDLE_PATH" ]]; then
     echo "error: expected SwiftPM resource bundle not found at $APP_RESOURCE_BUNDLE_PATH" >&2
     exit 1
 fi
+rm -rf "$RESOURCES_PATH/$APP_RESOURCE_BUNDLE_NAME"
 cp -R "$APP_RESOURCE_BUNDLE_PATH" "$RESOURCES_PATH/"
 if [[ -d "$LOCALIZATION_SOURCE_PATH" ]]; then
     find "$LOCALIZATION_SOURCE_PATH" -maxdepth 1 -name "*.lproj" -type d -exec cp -R {} "$RESOURCES_PATH/" \;
 fi
 verify_localization_resources
+xattr -cr "$BUNDLE_PATH"
 codesign --force --deep --sign - "$BUNDLE_PATH" >/dev/null
 codesign --verify --deep --strict "$BUNDLE_PATH" >/dev/null
 

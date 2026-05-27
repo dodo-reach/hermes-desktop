@@ -4,16 +4,23 @@ struct SkillsView: View {
     @EnvironmentObject private var appState: AppState
     @Binding var splitLayout: HermesSplitLayout
     @State private var searchText = ""
+    @State private var libraryTab: SkillLibraryTab = .installed
     @State private var editorMode: SkillEditorMode?
     @State private var editorDraft = SkillDraft()
     @State private var rawMarkdownContent = ""
+    @State private var workspaceSkills: [WorkspaceSkillItem] = []
+    @State private var hubSkills: [WorkspaceSkillHubItem] = []
+    @State private var sharedSkillsError: String?
+    @State private var sharedSkillsWarning: String?
+    @State private var isLoadingSharedSkills = false
+    @State private var actionSkillID: String?
 
     var body: some View {
         HermesCollapsibleHSplitView(layout: $splitLayout, detailMinWidth: 420) {
             VStack(alignment: .leading, spacing: 18) {
                 HermesPageHeader(
                     title: "Skills",
-                    subtitle: "Browse the Hermes skill library discovered on the active host."
+                    subtitle: "Browse installed skills, featured skills, and marketplace search from the shared Workspace API."
                 ) {
                     HermesExpandableSearchField(
                         text: $searchText,
@@ -40,11 +47,24 @@ struct SkillsView: View {
                 await appState.loadSkills(reset: true)
             }
         }
+        .task(id: sharedSkillsReloadID) {
+            await loadSharedSkillsIfNeeded(force: false)
+        }
     }
 
     @ViewBuilder
     private var skillsContent: some View {
-        skillsPanel
+        switch libraryTab {
+        case .installed:
+            skillsPanel
+        case .featured:
+            workspaceSkillsPanel(
+                title: "Featured Skills",
+                subtitle: "Featured skills are loaded from the same Workspace API used by the web app."
+            )
+        case .marketplace:
+            marketplacePanel
+        }
     }
 
     @ViewBuilder
@@ -113,12 +133,151 @@ struct SkillsView: View {
         }
     }
 
+    @ViewBuilder
+    private var workspaceSkillsPanel: some View {
+        workspaceSkillsPanel(
+            title: "Workspace Skills",
+            subtitle: "Skills returned by the shared Workspace API."
+        )
+    }
+
+    private func workspaceSkillsPanel(title: String, subtitle: String) -> some View {
+        HermesSurfacePanel(title: title, subtitle: subtitle) {
+            sharedSkillsListContent
+        }
+        .overlay(alignment: .topTrailing) {
+            if isLoadingSharedSkills && (!workspaceSkills.isEmpty || !hubSkills.isEmpty) {
+                HermesLoadingOverlay()
+                    .padding(18)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var marketplacePanel: some View {
+        HermesSurfacePanel(
+            title: "Marketplace Search",
+            subtitle: "Search the skills hub through the server-side Workspace route. Install actions stay server-gated."
+        ) {
+            sharedSkillsListContent
+        }
+        .overlay(alignment: .topTrailing) {
+            if isLoadingSharedSkills && !hubSkills.isEmpty {
+                HermesLoadingOverlay()
+                    .padding(18)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sharedSkillsListContent: some View {
+        if isLoadingSharedSkills && workspaceSkills.isEmpty && hubSkills.isEmpty {
+            HermesLoadingState(label: "Loading skills…", minHeight: 300)
+        } else if let sharedSkillsError, workspaceSkills.isEmpty && hubSkills.isEmpty {
+            ContentUnavailableView(
+                "Unable to load Workspace skills",
+                systemImage: "exclamationmark.triangle",
+                description: Text(sharedSkillsError)
+            )
+            .frame(maxWidth: .infinity, minHeight: 300)
+        } else if libraryTab == .marketplace {
+            if hubSkills.isEmpty {
+                ContentUnavailableView(
+                    "No marketplace results",
+                    systemImage: "shippingbox",
+                    description: Text(sharedSkillsWarning ?? "Try another marketplace search.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 300)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if let sharedSkillsWarning {
+                            Text(sharedSkillsWarning)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        ForEach(hubSkills, id: \.resolvedIdentifier) { skill in
+                            WorkspaceHubSkillCardRow(
+                                skill: skill,
+                                actionSkillID: actionSkillID,
+                                onInstall: {
+                                    await runSharedSkillAction(
+                                        action: "install",
+                                        identifier: skill.resolvedIdentifier,
+                                        category: skill.category
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        } else if workspaceSkills.isEmpty {
+            ContentUnavailableView(
+                "No featured skills",
+                systemImage: "star",
+                description: Text("The Workspace API did not return any featured skills for the current filters.")
+            )
+            .frame(maxWidth: .infinity, minHeight: 300)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(workspaceSkills) { skill in
+                        WorkspaceSkillCardRow(
+                            skill: skill,
+                            actionSkillID: actionSkillID,
+                            onInstall: {
+                                await runSharedSkillAction(
+                                    action: "install",
+                                    identifier: skill.id,
+                                    category: skill.category
+                                )
+                            },
+                            onToggle: {
+                                await runSharedSkillAction(
+                                    action: "toggle",
+                                    identifier: skill.id,
+                                    enabled: !skill.isEnabled
+                                )
+                            },
+                            onUninstall: {
+                                await runSharedSkillAction(
+                                    action: "uninstall",
+                                    identifier: skill.id
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private var skillsToolbar: some View {
         HStack(spacing: 10) {
-            HermesCreateActionButton("New Skill") {
-                startCreating()
+            Picker("Skills view", selection: $libraryTab) {
+                ForEach(SkillLibraryTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
             }
-            .disabled(appState.isSavingSkillDraft || appState.isLoadingSkills)
+            .pickerStyle(.segmented)
+            .frame(width: 330)
+
+            if libraryTab == .installed {
+                HermesCreateActionButton("New Skill") {
+                    startCreating()
+                }
+                .disabled(appState.isSavingSkillDraft || appState.isLoadingSkills)
+            } else {
+                Button {
+                    Task { await loadSharedSkillsIfNeeded(force: true) }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoadingSharedSkills)
+            }
         }
         .fixedSize(horizontal: true, vertical: false)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -142,6 +301,10 @@ struct SkillsView: View {
     private var selectedSkill: SkillSummary? {
         guard let selectedSkillID = appState.selectedSkillID else { return nil }
         return appState.skills.first(where: { $0.id == selectedSkillID })
+    }
+
+    private var sharedSkillsReloadID: String {
+        "\(appState.activeConnectionID?.uuidString ?? "none")|\(libraryTab.rawValue)|\(searchText)"
     }
 
     @ViewBuilder
@@ -176,6 +339,82 @@ struct SkillsView: View {
             )
         }
     }
+
+    private func loadSharedSkillsIfNeeded(force: Bool) async {
+        guard libraryTab != .installed else { return }
+        guard let connection = appState.activeConnection else { return }
+        if isLoadingSharedSkills && !force { return }
+
+        isLoadingSharedSkills = true
+        sharedSkillsError = nil
+        sharedSkillsWarning = nil
+
+        do {
+            switch libraryTab {
+            case .installed:
+                break
+            case .featured:
+                let response = try await appState.caelWorkspaceAPIService.loadWorkspaceSkills(
+                    connection: connection,
+                    tab: "featured",
+                    search: searchText,
+                    limit: 30
+                )
+                workspaceSkills = response.skills
+                hubSkills = []
+                sharedSkillsError = response.error
+            case .marketplace:
+                let response = try await appState.caelWorkspaceAPIService.searchWorkspaceSkillsHub(
+                    connection: connection,
+                    query: searchText,
+                    limit: 20
+                )
+                workspaceSkills = []
+                hubSkills = response.results
+                sharedSkillsWarning = response.warning
+                sharedSkillsError = response.error
+            }
+        } catch {
+            workspaceSkills = []
+            hubSkills = []
+            sharedSkillsError = error.localizedDescription
+        }
+
+        isLoadingSharedSkills = false
+    }
+
+    private func runSharedSkillAction(
+        action: String,
+        identifier: String,
+        enabled: Bool? = nil,
+        category: String? = nil
+    ) async {
+        guard let connection = appState.activeConnection else { return }
+        actionSkillID = identifier
+        sharedSkillsError = nil
+
+        do {
+            _ = try await appState.caelWorkspaceAPIService.runWorkspaceSkillAction(
+                connection: connection,
+                action: action,
+                identifier: identifier,
+                enabled: enabled,
+                category: category
+            )
+            await appState.loadSkills(reset: true)
+            await loadSharedSkillsIfNeeded(force: true)
+        } catch {
+            let message = error.localizedDescription
+            sharedSkillsError = message
+            appState.activeAlert = AppAlert(
+                title: "Skill action failed",
+                message: message
+            )
+        }
+
+        actionSkillID = nil
+    }
+
     private func startCreating() {
         var draft = SkillDraft()
         draft.refreshSuggestedSlug()
@@ -215,6 +454,162 @@ struct SkillsView: View {
         }
     }
 }
+
+private enum SkillLibraryTab: String, CaseIterable, Identifiable {
+    case installed
+    case featured
+    case marketplace
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .installed:
+            return "Installed"
+        case .featured:
+            return "Featured"
+        case .marketplace:
+            return "Marketplace"
+        }
+    }
+}
+
+private struct WorkspaceSkillCardRow: View {
+    let skill: WorkspaceSkillItem
+    let actionSkillID: String?
+    let onInstall: () async -> Void
+    let onToggle: () async -> Void
+    let onUninstall: () async -> Void
+
+    private var isOperating: Bool { actionSkillID == skill.id }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(skill.resolvedName)
+                        .font(.headline)
+                    if let description = skill.resolvedDescription {
+                        Text(description)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    HermesBadge(text: skill.resolvedCategory, tint: .secondary)
+                    HermesBadge(text: skill.isInstalled ? (skill.isEnabled ? "Enabled" : "Disabled") : "Not installed", tint: skill.isEnabled ? .green : .secondary)
+                }
+            }
+
+            HStack(spacing: 8) {
+                if skill.isInstalled {
+                    Button(skill.isEnabled ? "Disable" : "Enable") {
+                        Task { await onToggle() }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Uninstall") {
+                        Task { await onUninstall() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(skill.isBuiltin)
+                } else {
+                    Button("Install") {
+                        Task { await onInstall() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                Spacer()
+
+                Text(skill.resolvedOrigin)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(isOperating)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+    }
+}
+
+private struct WorkspaceHubSkillCardRow: View {
+    let skill: WorkspaceSkillHubItem
+    let actionSkillID: String?
+    let onInstall: () async -> Void
+
+    private var isOperating: Bool { actionSkillID == skill.resolvedIdentifier }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(skill.resolvedName)
+                        .font(.headline)
+                    if let description = skill.resolvedDescription {
+                        Text(description)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    HermesBadge(text: skill.resolvedSource, tint: .secondary)
+                    if skill.isInstalled {
+                        HermesBadge(text: "Installed", tint: .green)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                if skill.isInstalled {
+                    Button("Installed") {}
+                        .buttonStyle(.bordered)
+                        .disabled(true)
+                } else {
+                    Button("Install") {
+                        Task { await onInstall() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isOperating)
+                }
+
+                Spacer()
+
+                Text(skill.resolvedIdentifier)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        }
+    }
+}
+
 
 private struct SkillCardRow: View {
     let skill: SkillSummary

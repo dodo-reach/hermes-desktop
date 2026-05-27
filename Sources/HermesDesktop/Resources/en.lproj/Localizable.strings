@@ -955,3 +955,11 @@
 "Run in chat" = "Run in chat";
 "Run in terminal" = "Run in terminal";
 "Workspace Sidebar is locked while Chat TUI is active" = "Workspace Sidebar is locked while Chat TUI is active";
+"Chat is ready; Sessions reads persisted conversation history from the host." = "Chat is ready; Sessions reads persisted conversation history from the host.";
+"Hermes TUI will create the next session on the host; the conversation will appear here when it is available." = "Hermes TUI will create the next session on the host; the conversation will appear here when it is available.";
+"Native chat and session history" = "Native chat and session history";
+"No messages yet" = "No messages yet";
+"Readiness for native chat and the persisted session history read back from the host." = "Readiness for native chat and the persisted session history read back from the host.";
+"Select a session to continue the chat and inspect its metadata and last activity." = "Select a session to continue the chat and inspect its metadata and last activity.";
+"Session history files" = "Session history files";
+"Unable to load session history" = "Unable to load session history";

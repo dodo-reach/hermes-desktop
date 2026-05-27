@@ -2,12 +2,24 @@ import Foundation
 
 @MainActor
 final class TerminalSession: ObservableObject, @unchecked Sendable {
+    enum Backend: Equatable {
+        case nativeSSH
+        case workspacePTY(sessionId: String? = nil)
+
+        var attachedWorkspaceSessionId: String? {
+            guard case let .workspacePTY(sessionId) = self else { return nil }
+            return sessionId
+        }
+    }
+
     let connection: ConnectionProfile
     let sshArguments: [String]
     let startupInput: String?
     let workflowLaunchDiagnosticsContext: WorkflowLaunchDiagnosticsContext?
+    let backend: Backend
     private let workflowLaunchDiagnostics: WorkflowLaunchDiagnostics
     private let viewHost = TerminalViewHost()
+    private let workspaceViewHost = WorkspaceTerminalViewHost()
 
     @Published var terminalTitle: String
     @Published var currentDirectory: String?
@@ -21,19 +33,37 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
         sshTransport: SSHTransport,
         startupCommandLine: String? = nil,
         startupInput: String? = nil,
+        backend: Backend = .nativeSSH,
         workflowLaunchDiagnostics: WorkflowLaunchDiagnostics,
         workflowLaunchDiagnosticsContext: WorkflowLaunchDiagnosticsContext? = nil
     ) {
         self.connection = connection
         self.startupInput = startupInput
+        self.backend = backend
         self.workflowLaunchDiagnostics = workflowLaunchDiagnostics
         self.workflowLaunchDiagnosticsContext = workflowLaunchDiagnosticsContext
         self.sshArguments = sshTransport.shellArguments(
             for: connection,
             startupCommandLine: startupCommandLine
         )
-        self.terminalTitle = "\(connection.label) · \(connection.resolvedHermesProfileName)"
+        self.terminalTitle = backend.isWorkspacePTY
+            ? "Shared PTY · \(connection.resolvedHermesProfileName)"
+            : "\(connection.label) · \(connection.resolvedHermesProfileName)"
         viewHost.setEventHandlers(
+            onProcessStart: { [weak self] in
+                self?.markStarted()
+            },
+            onTitleChange: { [weak self] title in
+                self?.updateTitle(title)
+            },
+            onDirectoryChange: { [weak self] directory in
+                self?.currentDirectory = directory
+            },
+            onProcessExit: { [weak self] exitCode in
+                self?.markExited(exitCode)
+            }
+        )
+        workspaceViewHost.setEventHandlers(
             onProcessStart: { [weak self] in
                 self?.markStarted()
             },
@@ -84,27 +114,69 @@ final class TerminalSession: ObservableObject, @unchecked Sendable {
     }
 
     func mount(in container: TerminalMountContainerView, appearance: TerminalThemeAppearance, isActive: Bool) {
-        viewHost.mount(
-            in: container,
-            request: TerminalLaunchRequest(
-                sshArguments: sshArguments,
-                launchToken: launchToken,
-                initialInput: startupInput,
-                workflowLaunchDiagnostics: workflowLaunchDiagnostics,
-                workflowLaunchDiagnosticsContext: workflowLaunchDiagnosticsContext
-            ),
-            appearance: appearance,
-            isActive: isActive
-        )
+        switch backend {
+        case .nativeSSH:
+            viewHost.mount(
+                in: container,
+                request: TerminalLaunchRequest(
+                    sshArguments: sshArguments,
+                    launchToken: launchToken,
+                    initialInput: startupInput,
+                    workflowLaunchDiagnostics: workflowLaunchDiagnostics,
+                    workflowLaunchDiagnosticsContext: workflowLaunchDiagnosticsContext
+                ),
+                appearance: appearance,
+                isActive: isActive
+            )
+        case .workspacePTY:
+            workspaceViewHost.mount(
+                in: container,
+                request: WorkspaceTerminalLaunchRequest(
+                    baseURL: connection.resolvedCaelWorkspaceBaseURL,
+                    launchToken: launchToken,
+                    attachedSessionId: backend.attachedWorkspaceSessionId,
+                    label: "Desktop · \(connection.resolvedHermesProfileName)"
+                ),
+                appearance: appearance,
+                isActive: isActive
+            )
+        }
     }
 
     func unmount(from container: TerminalMountContainerView) {
-        viewHost.unmount(from: container)
+        switch backend {
+        case .nativeSSH:
+            viewHost.unmount(from: container)
+        case .workspacePTY:
+            workspaceViewHost.unmount(from: container)
+        }
     }
 
     func stop() {
         viewHost.terminate()
+        workspaceViewHost.terminate()
         isRunning = false
         currentDirectory = nil
+    }
+
+    var backendLabel: String {
+        switch backend {
+        case .nativeSSH:
+            return "Native SSH"
+        case .workspacePTY(let sessionId):
+            return sessionId == nil ? "Shared PTY" : "Attached PTY"
+        }
+    }
+
+    var isWorkspacePTY: Bool {
+        backend.isWorkspacePTY
+    }
+}
+
+
+private extension TerminalSession.Backend {
+    var isWorkspacePTY: Bool {
+        if case .workspacePTY = self { return true }
+        return false
     }
 }

@@ -57,6 +57,7 @@ final class TerminalWorkspaceStore: ObservableObject {
         for connection: ConnectionProfile,
         startupCommandLine: String? = nil,
         startupInput: String? = nil,
+        backend: TerminalSession.Backend = .nativeSSH,
         workflowLaunchDiagnosticsContext: WorkflowLaunchDiagnosticsContext? = nil
     ) -> TerminalTabModel {
         let session = TerminalSession(
@@ -64,6 +65,7 @@ final class TerminalWorkspaceStore: ObservableObject {
             sshTransport: sshTransport,
             startupCommandLine: startupCommandLine,
             startupInput: startupInput,
+            backend: backend,
             workflowLaunchDiagnostics: workflowLaunchDiagnostics,
             workflowLaunchDiagnosticsContext: workflowLaunchDiagnosticsContext
         )
@@ -77,6 +79,13 @@ final class TerminalWorkspaceStore: ObservableObject {
         tabs.append(tab)
         selectTab(tab.id)
         return tab
+    }
+
+    @discardableResult
+    func addWorkspaceTerminalTab(for connection: ConnectionProfile, sessionId: String? = nil) -> TerminalTabModel {
+        let trimmedSessionId = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedSessionId = trimmedSessionId?.isEmpty == false ? trimmedSessionId : nil
+        return addTab(for: connection, backend: .workspacePTY(sessionId: resolvedSessionId))
     }
 
     func closeTab(_ tab: TerminalTabModel) {

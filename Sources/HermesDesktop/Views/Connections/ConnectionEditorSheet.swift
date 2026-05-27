@@ -11,6 +11,7 @@ struct ConnectionEditorSheet: View {
         case port
         case hermesProfile
         case customHermesHome
+        case caelWorkspaceBaseURL
     }
 
     @State private var draft: ConnectionProfile
@@ -95,6 +96,17 @@ struct ConnectionEditorSheet: View {
                                     .focused($focusedField, equals: .hermesProfile)
                                     .textFieldStyle(.roundedBorder)
                             }
+
+                            EditorField(label: "Cael Workspace URL") {
+                                TextField(ConnectionProfile.defaultCaelWorkspaceBaseURL, text: caelWorkspaceBaseURLBinding)
+                                    .focused($focusedField, equals: .caelWorkspaceBaseURL)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+
+                            Text(L10n.string("Leave this empty for the default BigMac Workspace at `http://100.97.216.111:3077`. Set it only when this host should use a different Cael Workspace API root."))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
 
                             DisclosureGroup(
                                 isExpanded: $showsCustomHermesHomeOptions
@@ -268,6 +280,14 @@ struct ConnectionEditorSheet: View {
             draft.customHermesHomePath ?? ""
         } set: { newValue in
             draft.customHermesHomePath = newValue
+        }
+    }
+
+    private var caelWorkspaceBaseURLBinding: Binding<String> {
+        Binding {
+            draft.caelWorkspaceBaseURL ?? ""
+        } set: { newValue in
+            draft.caelWorkspaceBaseURL = newValue
         }
     }
 }

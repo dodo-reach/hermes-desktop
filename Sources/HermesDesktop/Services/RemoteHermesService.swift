@@ -112,6 +112,13 @@ final class RemoteHermesService: @unchecked Sendable {
             kanban_database_path = default_hermes_home / "kanban.db"
             profiles_dir = default_hermes_home / "profiles"
 
+            def profile_display_name(name):
+                if name == "default":
+                    return "Cael"
+                if name == "cael":
+                    return "Cael Legacy Profile"
+                return name.replace("_", " ").replace("-", " ").title()
+
             active_profile_name = payload.get("profile_name")
             if hermes_home == default_hermes_home:
                 active_profile_name = "default"
@@ -120,6 +127,7 @@ final class RemoteHermesService: @unchecked Sendable {
 
             active_profile = {
                 "name": active_profile_name,
+                "display_name": profile_display_name(active_profile_name),
                 "path": tilde(hermes_home, home),
                 "is_default": hermes_home == default_hermes_home,
                 "exists": hermes_home.exists(),
@@ -130,6 +138,7 @@ final class RemoteHermesService: @unchecked Sendable {
             else:
                 available_profiles = [{
                     "name": "default",
+                    "display_name": profile_display_name("default"),
                     "path": tilde(default_hermes_home, home),
                     "is_default": True,
                     "exists": default_hermes_home.exists(),
@@ -142,6 +151,7 @@ final class RemoteHermesService: @unchecked Sendable {
                     ):
                         available_profiles.append({
                             "name": item.name,
+                            "display_name": profile_display_name(item.name),
                             "path": tilde(item, home),
                             "is_default": False,
                             "exists": True,
