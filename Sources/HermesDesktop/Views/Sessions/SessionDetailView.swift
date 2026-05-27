@@ -333,7 +333,35 @@ struct SessionDetailView: View {
     private var allChatMessages: [SessionMessageDisplay] {
         var seen = Set<String>()
         return (messages + liveMessages).filter { message in
-            seen.insert(message.id).inserted
+            let key = sessionMessageDeduplicationKey(for: message)
+            return seen.insert(key).inserted
+        }
+    }
+
+    private func sessionMessageDeduplicationKey(
+        for message: SessionMessageDisplay
+    ) -> String {
+        let text = (message.content ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard !text.isEmpty else {
+            return "id:\(message.id)"
+        }
+        return "\(sessionMessageRoleKey(message.role)):\(text)"
+    }
+
+    private func sessionMessageRoleKey(_ role: SessionMessageRole) -> String {
+        switch role {
+        case .assistant:
+            return "assistant"
+        case .user:
+            return "user"
+        case .system:
+            return "system"
+        case .event:
+            return "event"
+        case .custom(let value):
+            return value
         }
     }
 
