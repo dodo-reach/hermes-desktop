@@ -252,6 +252,7 @@ if [[ -d "$LOCALIZATION_SOURCE_PATH" ]]; then
     find "$LOCALIZATION_SOURCE_PATH" -maxdepth 1 -name "*.lproj" -type d -exec cp -R {} "$RESOURCES_PATH/" \;
 fi
 verify_localization_resources
+xattr -cr "$BUNDLE_PATH"
 codesign --force --deep --sign - "$BUNDLE_PATH" >/dev/null
 codesign --verify --deep --strict "$BUNDLE_PATH" >/dev/null
 

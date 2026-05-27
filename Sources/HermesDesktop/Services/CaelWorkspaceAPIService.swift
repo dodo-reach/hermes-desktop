@@ -341,9 +341,10 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         autoApproveCommands: Bool,
         attachments: [WorkspaceChatAttachment] = []
     ) async throws -> WorkspaceSessionSendResponse {
+        let encodedSession = Self.pathSegment(sessionKey)
         let response = try await postJSON(
             connection: connection,
-            path: "/api/session-send",
+            path: "/api/chat/threads/\(encodedSession)/turns",
             body: WorkspaceSessionSendRequest(
                 sessionKey: sessionKey,
                 message: message,
@@ -406,9 +407,10 @@ final class CaelWorkspaceAPIService: @unchecked Sendable {
         timeoutSeconds: Int = 8,
         maxEvents: Int = 80
     ) async throws -> WorkspaceChatEventsResponse {
+        let encodedSession = Self.pathSegment(sessionKey)
         let path = apiPath(
-            "/api/chat-events",
-            queryItems: [URLQueryItem(name: "sessionKey", value: sessionKey)]
+            "/api/chat/threads/\(encodedSession)/events",
+            queryItems: [URLQueryItem(name: "limit", value: String(maxEvents))]
         )
         return try await requestChatEventTail(
             connection: connection,
