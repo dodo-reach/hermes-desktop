@@ -1176,6 +1176,13 @@ final class HermesNativeChatStore: ObservableObject {
         }
 
         appendSystemNotice(message)
+        if isCurrentSession {
+            HermesPhoneNotificationService.shared.notifyContinuation(
+                sessionID: newSessionID,
+                workspaceFingerprint: phoneStore?.activeWorkspaceScopeFingerprint,
+                message: message
+            )
+        }
         await phoneStore?.loadSessions()
     }
 
@@ -1272,6 +1279,7 @@ final class HermesNativeChatStore: ObservableObject {
             startAssistantMessage(with: payload)
         }
 
+        var completedMessage: HermesChatMessage?
         if let messageID = currentAssistantMessageID,
            let index = messages.lastIndex(where: { $0.id == messageID }) {
             let trailingText = value(in: payload, keys: ["text", "content"])
@@ -1279,6 +1287,16 @@ final class HermesNativeChatStore: ObservableObject {
                 messages[index].text = trailingText
             }
             messages[index].isStreaming = false
+            completedMessage = messages[index]
+        }
+
+        if let completedMessage {
+            HermesPhoneNotificationService.shared.notifyAssistantReply(
+                messageID: completedMessage.id,
+                sessionID: currentSessionID,
+                workspaceFingerprint: phoneStore?.activeWorkspaceScopeFingerprint,
+                text: completedMessage.text
+            )
         }
 
         currentAssistantMessageID = nil
@@ -1387,6 +1405,25 @@ final class HermesNativeChatStore: ObservableObject {
             promptCards[index] = card
         } else {
             promptCards.append(card)
+            HermesPhoneNotificationService.shared.notifyPendingRequest(
+                requestID: requestID,
+                kindTitle: notificationTitle(for: card),
+                sessionID: sessionID,
+                workspaceFingerprint: phoneStore?.activeWorkspaceScopeFingerprint
+            )
+        }
+    }
+
+    private func notificationTitle(for card: HermesChatPromptCard) -> String {
+        switch card.kind {
+        case .approval:
+            return "Approval requested"
+        case .clarify:
+            return "Clarification requested"
+        case .sudo:
+            return "Sudo password requested"
+        case .secret:
+            return "Secret requested"
         }
     }
 
@@ -1543,7 +1580,8 @@ struct NativeChatScreen: View {
             .onChange(of: chatContentRevision) { _, _ in
                 scrollToBottomAfterContentChange(using: proxy)
             }
-            .onChange(of: chatStore.currentSessionID) { _, _ in
+            .onChange(of: chatStore.currentSessionID) { _, newSessionID in
+                HermesPhoneNotificationService.shared.updateVisibleConversationSession(newSessionID)
                 dismissedLatestToolActivityID = nil
                 isToolTickerExpanded = false
                 scrollToBottom(using: proxy, animated: false)
@@ -1577,6 +1615,12 @@ struct NativeChatScreen: View {
         .navigationTitle(chatStore.isResumingSession ? "Continuing" : (chatStore.currentSessionID == nil ? "New Chat" : "Conversation"))
         .navigationBarTitleDisplayMode(.inline)
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: visibleToolActivityID)
+        .onAppear {
+            HermesPhoneNotificationService.shared.setConversationVisible(true, sessionID: chatStore.currentSessionID)
+        }
+        .onDisappear {
+            HermesPhoneNotificationService.shared.setConversationVisible(false, sessionID: nil)
+        }
         .onChange(of: latestToolActivityID) { _, newValue in
             if newValue.isEmpty {
                 dismissedLatestToolActivityID = nil

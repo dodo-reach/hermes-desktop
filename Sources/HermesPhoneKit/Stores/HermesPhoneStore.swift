@@ -398,6 +398,46 @@ final class HermesPhoneStore: ObservableObject {
         chatNavigationPath = [.conversation]
     }
 
+    func openNotificationRoute(_ route: HermesPhoneNotificationRoute) {
+        selectedRootTab = .chat
+
+        if let routeWorkspace = route.workspaceFingerprint,
+           routeWorkspace != activeWorkspaceScopeFingerprint {
+            chatNavigationPath = []
+            alertMessage = "This notification belongs to a different Hermes profile. Switch to that profile to reopen the chat."
+            return
+        }
+
+        if nativeChatStore.hasRestorableConversation {
+            chatNavigationPath = [.conversation]
+            return
+        }
+
+        guard let sessionID = route.sessionID else {
+            chatNavigationPath = [.conversation]
+            return
+        }
+
+        if let session = notificationSession(matching: sessionID) {
+            continueSessionInChat(session)
+            return
+        }
+
+        chatNavigationPath = []
+        Task { @MainActor in
+            await loadSessions()
+            if let session = notificationSession(matching: sessionID) {
+                continueSessionInChat(session)
+            }
+        }
+    }
+
+    private func notificationSession(matching sessionID: String) -> SessionSummary? {
+        sessions.first { session in
+            session.id == sessionID || session.parentSessionID == sessionID
+        }
+    }
+
     func openNativeChat() {
         openNewChat()
     }

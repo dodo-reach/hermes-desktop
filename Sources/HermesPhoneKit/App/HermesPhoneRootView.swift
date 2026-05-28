@@ -11,6 +11,7 @@ import UIKit
 public struct HermesPhoneRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = HermesPhoneStore()
+    @StateObject private var notifications = HermesPhoneNotificationService.shared
 
     public init() {}
 
@@ -99,11 +100,21 @@ public struct HermesPhoneRootView: View {
             FileEditorSheet(draft: draft)
                 .environmentObject(store)
         }
+        .task {
+            notifications.configure()
+            notifications.updateScenePhase(scenePhase)
+        }
         .onChange(of: scenePhase) { _, newPhase in
+            notifications.updateScenePhase(newPhase)
             guard newPhase == .active else { return }
             Task { @MainActor in
                 await store.nativeChatStore.refreshCurrentConversationFromRemote()
             }
+        }
+        .onChange(of: notifications.pendingRoute) { _, route in
+            guard let route else { return }
+            store.openNotificationRoute(route)
+            notifications.consumePendingRoute(route)
         }
     }
 }
