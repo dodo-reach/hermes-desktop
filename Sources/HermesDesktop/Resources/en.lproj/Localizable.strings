@@ -450,6 +450,7 @@
 "Show full output" = "Show full output";
 "Render the full tool output on demand" = "Render the full tool output on demand";
 "Connecting to %@…" = "Connecting to %@…";
+"Host saved: %@" = "Host saved: %@";
 "Refreshing %@…" = "Refreshing %@…";
 "Switching to %@…" = "Switching to %@…";
 "Testing %@…" = "Testing %@…";
