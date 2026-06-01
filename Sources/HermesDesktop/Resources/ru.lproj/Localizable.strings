@@ -450,6 +450,7 @@
 "Show full output" = "Показать полный вывод";
 "Render the full tool output on demand" = "Показать полный вывод инструмента по запросу";
 "Connecting to %@…" = "Подключение к %@…";
+"Host saved: %@" = "Хост сохранён: %@";
 "Refreshing %@…" = "Обновление %@…";
 "Switching to %@…" = "Переключение на %@…";
 "Testing %@…" = "Проверка %@…";

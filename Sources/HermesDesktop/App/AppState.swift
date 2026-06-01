@@ -159,9 +159,26 @@ final class AppState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        self.activeConnectionID = connectionStore.lastConnectionID
+        let initialConnectionID = Self.initialActiveConnectionID(from: connectionStore)
+        self.activeConnectionID = initialConnectionID
+        if connectionStore.lastConnectionID != initialConnectionID {
+            connectionStore.lastConnectionID = initialConnectionID
+        }
 
         selectedSection = .connections
+    }
+
+    private static func initialActiveConnectionID(from connectionStore: ConnectionStore) -> UUID? {
+        if let lastConnectionID = connectionStore.lastConnectionID,
+           connectionStore.connections.contains(where: { $0.id == lastConnectionID }) {
+            return lastConnectionID
+        }
+
+        return connectionStore.connections.max { lhs, rhs in
+            let lhsDate = lhs.lastConnectedAt ?? lhs.updatedAt
+            let rhsDate = rhs.lastConnectedAt ?? rhs.updatedAt
+            return lhsDate < rhsDate
+        }?.id
     }
 
     var activeConnection: ConnectionProfile? {
@@ -475,6 +492,7 @@ final class AppState: ObservableObject {
         let previous = connectionStore.connections.first(where: { $0.id == normalized.id })
         let isActiveConnection = activeConnectionID == normalized.id
         let isChangingWorkspaceScope = previous?.workspaceScopeFingerprint != normalized.workspaceScopeFingerprint
+        let shouldActivateSavedConnection = activeConnection == nil
 
         if isActiveConnection && isChangingWorkspaceScope && hasUnsavedFileChanges {
             activeAlert = AppAlert(
@@ -485,6 +503,15 @@ final class AppState: ObservableObject {
         }
 
         connectionStore.upsert(normalized)
+
+        if shouldActivateSavedConnection {
+            resetWorkspaceStateForConnectionChange()
+            activeConnectionID = normalized.id
+            connectionStore.lastConnectionID = normalized.id
+            selectedSection = .connections
+            setStatusMessage(L10n.string("Host saved: %@", normalized.label))
+            return
+        }
 
         guard isActiveConnection else { return }
         guard isChangingWorkspaceScope else { return }

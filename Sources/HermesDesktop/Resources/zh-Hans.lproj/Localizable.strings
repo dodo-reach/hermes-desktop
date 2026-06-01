@@ -450,6 +450,7 @@
 "Show full output" = "显示完整输出";
 "Render the full tool output on demand" = "按需显示完整工具输出";
 "Connecting to %@…" = "正在连接 %@…";
+"Host saved: %@" = "已保存主机：%@";
 "Refreshing %@…" = "正在刷新 %@…";
 "Switching to %@…" = "正在切换到 %@…";
 "Testing %@…" = "正在测试 %@…";
