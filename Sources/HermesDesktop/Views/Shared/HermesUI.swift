@@ -910,7 +910,14 @@ struct HermesToolbarPrincipalTitle: View {
     }
 }
 
-final class HermesTitleBarConfiguratorView: NSView {}
+final class HermesTitleBarConfiguratorView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let window else { return }
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = false
+    }
+}
 
 struct HermesWindowTitleBarConfigurator: NSViewRepresentable {
     let backgroundImageActive: Bool
