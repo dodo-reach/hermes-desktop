@@ -2236,11 +2236,19 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         if event.deltaY == 0 {
             return
         }
-        let velocity = calcScrollingVelocity(delta: Int (abs (event.deltaY)))
-        if event.deltaY > 0 {
-            scrollUp (lines: velocity)
+        if terminal.isDisplayBufferAlternate {
+            if event.deltaY > 0 {
+                pageUp()
+            } else {
+                pageDown()
+            }
         } else {
-            scrollDown(lines: velocity)
+            let velocity = calcScrollingVelocity(delta: Int(abs(event.deltaY)))
+            if event.deltaY > 0 {
+                scrollUp(lines: velocity)
+            } else {
+                scrollDown(lines: velocity)
+            }
         }
     }
     
