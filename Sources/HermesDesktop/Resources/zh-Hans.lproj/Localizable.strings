@@ -1032,3 +1032,8 @@
 "Add or select a host, then run diagnostics." = "添加或选择主机，然后运行诊断。";
 "Browse Files" = "浏览文件";
 "User" = "用户";
+"Background Image" = "背景图片";
+"Choose an image to use as terminal background." = "选择图片作为终端背景。";
+"Choose Image…" = "选择图片…";
+"Clear Image" = "清除图片";
+"No background image selected." = "未选择背景图片。";

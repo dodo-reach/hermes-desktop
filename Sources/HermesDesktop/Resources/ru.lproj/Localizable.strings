@@ -1032,3 +1032,8 @@
 "Add or select a host, then run diagnostics." = "Добавьте или выберите хост, затем запустите диагностику.";
 "Browse Files" = "Просмотреть файлы";
 "User" = "Пользователь";
+"Background Image" = "Фоновое изображение";
+"Choose an image to use as terminal background." = "Выберите изображение для фона терминала.";
+"Choose Image…" = "Выбрать изображение…";
+"Clear Image" = "Удалить изображение";
+"No background image selected." = "Фоновое изображение не выбрано.";

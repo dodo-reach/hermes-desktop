@@ -1,5 +1,16 @@
 import SwiftUI
 
+private struct BackgroundImageActiveKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var backgroundImageActive: Bool {
+        get { self[BackgroundImageActiveKey.self] }
+        set { self[BackgroundImageActiveKey.self] = newValue }
+    }
+}
+
 enum HermesTheme {
     static let pageHorizontalPadding: CGFloat = 24
     static let pageVerticalPadding: CGFloat = 22
@@ -298,6 +309,8 @@ struct HermesSurfacePanel<Content: View>: View {
     let subtitle: String?
     let content: Content
 
+    @Environment(\.backgroundImageActive) private var backgroundImageActive
+
     init(
         title: String? = nil,
         subtitle: String? = nil,
@@ -330,19 +343,29 @@ struct HermesSurfacePanel<Content: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: HermesTheme.panelCornerRadius, style: .continuous)
-                .fill(HermesTheme.panelFill)
-        )
+                .fill(panelBackground)
+        }
         .overlay {
             RoundedRectangle(cornerRadius: HermesTheme.panelCornerRadius, style: .continuous)
                 .strokeBorder(HermesTheme.subtleStroke, lineWidth: 1)
+        }
+    }
+
+    private var panelBackground: AnyShapeStyle {
+        if backgroundImageActive {
+            AnyShapeStyle(HermesTheme.panelFill.opacity(0.45))
+        } else {
+            AnyShapeStyle(HermesTheme.panelFill)
         }
     }
 }
 
 struct HermesInsetSurface<Content: View>: View {
     let content: Content
+
+    @Environment(\.backgroundImageActive) private var backgroundImageActive
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -353,10 +376,18 @@ struct HermesInsetSurface<Content: View>: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: HermesTheme.insetCornerRadius, style: .continuous)
-                    .fill(HermesTheme.insetFill)
-            )
+                    .fill(insetBackground)
+            }
+    }
+
+    private var insetBackground: AnyShapeStyle {
+        if backgroundImageActive {
+            AnyShapeStyle(HermesTheme.insetFill.opacity(0.45))
+        } else {
+            AnyShapeStyle(HermesTheme.insetFill)
+        }
     }
 }
 
@@ -879,22 +910,21 @@ struct HermesToolbarPrincipalTitle: View {
     }
 }
 
-final class HermesTitleBarConfiguratorView: NSView {
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard let window else { return }
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = false
-    }
-}
+final class HermesTitleBarConfiguratorView: NSView {}
 
 struct HermesWindowTitleBarConfigurator: NSViewRepresentable {
+    let backgroundImageActive: Bool
+
     func makeNSView(context: Context) -> NSView {
         HermesTitleBarConfiguratorView(frame: .zero)
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        // Configuration is applied in HermesTitleBarConfiguratorView.viewDidMoveToWindow.
+        guard let window = nsView.window else { return }
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = backgroundImageActive
+        window.isOpaque = !backgroundImageActive
+        window.backgroundColor = backgroundImageActive ? .clear : .windowBackgroundColor
     }
 }
 

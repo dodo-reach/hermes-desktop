@@ -192,6 +192,7 @@ struct TerminalThemeAppearance: Equatable {
     let ansiPalette: [TerminalThemeColor]
     let paletteStyle: TerminalThemeStyle
     let isCustom: Bool
+    let backgroundImagePath: String?
 }
 
 struct TerminalThemePreference: Codable, Equatable {
@@ -199,6 +200,7 @@ struct TerminalThemePreference: Codable, Equatable {
     var customBackgroundColor: TerminalThemeColor?
     var customForegroundColor: TerminalThemeColor?
     var paletteStyle: TerminalThemeStyle?
+    var backgroundImagePath: String?
 
     static let defaultValue = TerminalThemePreference()
 
@@ -212,7 +214,8 @@ struct TerminalThemePreference: Codable, Equatable {
                 foregroundColor: TerminalThemeColor(nsColor: NSColor.textColor),
                 ansiPalette: Self.systemPalette,
                 paletteStyle: .system,
-                isCustom: false
+                isCustom: false,
+                backgroundImagePath: backgroundImagePath
             )
         case .custom:
             let basePreset = Self.preset(for: paletteStyle ?? .graphite) ?? Self.graphitePreset
@@ -223,7 +226,8 @@ struct TerminalThemePreference: Codable, Equatable {
                 foregroundColor: customForegroundColor ?? basePreset.foregroundColor,
                 ansiPalette: basePreset.ansiPalette,
                 paletteStyle: basePreset.style,
-                isCustom: true
+                isCustom: true,
+                backgroundImagePath: backgroundImagePath
             )
         case .graphite, .evergreen, .dusk, .paper, .harbor, .ember:
             let preset = Self.preset(for: style) ?? Self.graphitePreset
@@ -234,13 +238,16 @@ struct TerminalThemePreference: Codable, Equatable {
                 foregroundColor: preset.foregroundColor,
                 ansiPalette: preset.ansiPalette,
                 paletteStyle: preset.style,
-                isCustom: false
+                isCustom: false,
+                backgroundImagePath: backgroundImagePath
             )
         }
     }
 
     func selectingPreset(_ style: TerminalThemeStyle) -> TerminalThemePreference {
-        TerminalThemePreference(style: style)
+        var pref = TerminalThemePreference(style: style)
+        pref.backgroundImagePath = backgroundImagePath
+        return pref
     }
 
     func updatingBackgroundColor(_ color: TerminalThemeColor) -> TerminalThemePreference {
@@ -249,7 +256,8 @@ struct TerminalThemePreference: Codable, Equatable {
             style: .custom,
             customBackgroundColor: color,
             customForegroundColor: appearance.foregroundColor,
-            paletteStyle: appearance.paletteStyle
+            paletteStyle: appearance.paletteStyle,
+            backgroundImagePath: backgroundImagePath
         )
     }
 
@@ -259,7 +267,8 @@ struct TerminalThemePreference: Codable, Equatable {
             style: .custom,
             customBackgroundColor: appearance.backgroundColor,
             customForegroundColor: color,
-            paletteStyle: appearance.paletteStyle
+            paletteStyle: appearance.paletteStyle,
+            backgroundImagePath: backgroundImagePath
         )
     }
 
@@ -269,7 +278,8 @@ struct TerminalThemePreference: Codable, Equatable {
             style: .custom,
             customBackgroundColor: appearance.backgroundColor,
             customForegroundColor: appearance.foregroundColor,
-            paletteStyle: style
+            paletteStyle: style,
+            backgroundImagePath: backgroundImagePath
         )
     }
 
@@ -279,7 +289,8 @@ struct TerminalThemePreference: Codable, Equatable {
             style: .custom,
             customBackgroundColor: backgroundColor,
             customForegroundColor: foregroundColor,
-            paletteStyle: appearance.paletteStyle
+            paletteStyle: appearance.paletteStyle,
+            backgroundImagePath: backgroundImagePath
         )
     }
 

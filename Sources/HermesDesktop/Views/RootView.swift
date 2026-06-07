@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 private let workbenchPrimaryColumnWidth: CGFloat = 460
 
@@ -143,6 +144,32 @@ struct RootView: View {
 
     @ViewBuilder
     private var rootContent: some View {
+        ZStack {
+            if appState.connectionStore.backgroundImagePath != nil {
+                backgroundImageView
+            }
+
+            mainSplitView
+        }
+    }
+    @ViewBuilder
+    private var backgroundImageView: some View {
+        if let imagePath = appState.connectionStore.backgroundImagePath,
+           let nsImage = NSImage(contentsOfFile: imagePath) {
+            GeometryReader { geometry in
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .ignoresSafeArea()
+            }
+            .ignoresSafeArea()
+            .overlay(Color.black.opacity(0.25))
+        }
+    }
+
+    private var mainSplitView: some View {
         HermesCollapsibleHSplitView(layout: workspaceSidebarSplitLayout, detailMinWidth: 0) {
             workspaceSidebar
         } detail: {
@@ -151,6 +178,7 @@ struct RootView: View {
                 .layoutPriority(1)
                 .clipped()
         }
+        .environment(\.backgroundImageActive, appState.connectionStore.backgroundImagePath != nil)
     }
 
     private var workspaceSidebar: some View {
@@ -169,6 +197,12 @@ struct RootView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(alignment: .leading) {
+            if appState.connectionStore.backgroundImagePath != nil {
+                Rectangle().fill(HermesTheme.sidebarBackground.opacity(0.45))
+            }
+        }
         .frame(minWidth: 160, idealWidth: 188, maxWidth: 220)
     }
 
@@ -519,3 +553,4 @@ private struct WorkspaceSidebarCard: View {
         ]
     }
 }
+

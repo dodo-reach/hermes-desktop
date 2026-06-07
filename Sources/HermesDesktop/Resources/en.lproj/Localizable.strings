@@ -1032,3 +1032,8 @@
 "Add or select a host, then run diagnostics." = "Add or select a host, then run diagnostics.";
 "Browse Files" = "Browse Files";
 "User" = "User";
+"Background Image" = "Background Image";
+"Choose an image to use as terminal background." = "Choose an image to use as terminal background.";
+"Choose Image…" = "Choose Image…";
+"Clear Image" = "Clear Image";
+"No background image selected." = "No background image selected.";

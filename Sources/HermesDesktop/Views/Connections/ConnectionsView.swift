@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct ConnectionsView: View {
     @Environment(\.openURL) private var openURL
@@ -215,6 +217,56 @@ struct ConnectionsView: View {
                     fixedWidth: nil,
                     contentPadding: 0
                 )
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(L10n.string("Background Image"))
+                        .font(.headline)
+
+                    Text(L10n.string("Choose an image to use as terminal background."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let imagePath = appState.connectionStore.backgroundImagePath,
+                       let image = NSImage(contentsOfFile: imagePath) {
+                        HStack(spacing: 10) {
+                            Image(nsImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 80, height: 50)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(URL(fileURLWithPath: imagePath).lastPathComponent)
+                                    .font(.caption)
+                                    .lineLimit(1)
+
+                                Button(L10n.string("Change Image…")) {
+                                    chooseBackgroundImage()
+                                }
+                                .buttonStyle(.borderless)
+                                .font(.caption2)
+                            }
+
+                            Spacer()
+                        }
+
+                        Button(role: .destructive) {
+                            appState.connectionStore.backgroundImagePath = nil
+                        } label: {
+                            Label(L10n.string("Clear Image"), systemImage: "xmark.circle")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                    } else {
+                        Button(L10n.string("Choose Image…")) {
+                            chooseBackgroundImage()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
 
                 Divider()
 
@@ -502,6 +554,20 @@ struct ConnectionsView: View {
             appState.connectionStore.terminalFontSize
         } set: { newValue in
             appState.connectionStore.terminalFontSize = newValue
+        }
+    }
+
+    private func chooseBackgroundImage() {
+        let panel = NSOpenPanel()
+        panel.title = L10n.string("Choose Image…")
+        panel.allowedContentTypes = [.png, .jpeg, .heic]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                appState.connectionStore.backgroundImagePath = url.path
+            }
         }
     }
 

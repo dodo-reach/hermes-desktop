@@ -35,6 +35,11 @@ final class ConnectionStore: ObservableObject {
             persistPreferencesIfNeeded()
         }
     }
+    @Published var backgroundImagePath: String? = nil {
+        didSet {
+            persistPreferencesIfNeeded()
+        }
+    }
     @Published var lastAutomaticUpdateCheckAt: Date? {
         didSet {
             persistPreferencesIfNeeded()
@@ -309,6 +314,7 @@ final class ConnectionStore: ObservableObject {
             appAppearance: appAppearance,
             automaticallyChecksForUpdates: automaticallyChecksForUpdates,
             lastAutomaticUpdateCheckAt: lastAutomaticUpdateCheckAt,
+            backgroundImagePath: backgroundImagePath,
             workspaceFileBookmarks: workspaceFileBookmarks,
             pinnedSessions: pinnedSessions,
             workflows: workflows,
@@ -374,6 +380,7 @@ final class ConnectionStore: ObservableObject {
                 appAppearance: .system,
                 automaticallyChecksForUpdates: true,
                 lastAutomaticUpdateCheckAt: nil,
+                backgroundImagePath: nil,
                 workspaceFileBookmarks: [],
                 pinnedSessions: [],
                 workflows: [],
@@ -391,6 +398,7 @@ final class ConnectionStore: ObservableObject {
         appAppearance = preferences.appAppearance ?? .system
         automaticallyChecksForUpdates = preferences.automaticallyChecksForUpdates ?? true
         lastAutomaticUpdateCheckAt = preferences.lastAutomaticUpdateCheckAt
+        backgroundImagePath = preferences.backgroundImagePath
         workspaceFileBookmarks = preferences.workspaceFileBookmarks ?? []
         pinnedSessions = preferences.pinnedSessions ?? []
         workflows = preferences.workflows ?? []
@@ -415,6 +423,7 @@ private struct AppPreferences: Codable {
     var appAppearance: AppAppearancePreference?
     var automaticallyChecksForUpdates: Bool?
     var lastAutomaticUpdateCheckAt: Date?
+    var backgroundImagePath: String?
     var workspaceFileBookmarks: [WorkspaceFileBookmark]?
     var pinnedSessions: [PinnedSession]?
     var workflows: [WorkflowPreset]?

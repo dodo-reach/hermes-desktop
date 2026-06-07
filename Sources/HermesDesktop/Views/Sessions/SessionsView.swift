@@ -335,6 +335,7 @@ private struct SessionCardRow: View {
     let onSelect: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.backgroundImageActive) private var backgroundImageActive
 
     var body: some View {
         Button(action: onSelect) {
@@ -345,7 +346,7 @@ private struct SessionCardRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: HermesTheme.rowCornerRadius, style: .continuous)
-                        .fill(isSelected ? HermesTheme.selectedFill : HermesTheme.rowFill)
+                        .fill(rowBackground(isSelected: isSelected))
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: HermesTheme.rowCornerRadius, style: .continuous)
@@ -385,7 +386,7 @@ private struct SessionCardRow: View {
                 .frame(width: 24, height: 24)
                 .background(
                     Circle()
-                        .fill(isPinned ? HermesTheme.warningFill : HermesTheme.rowFill)
+                        .fill(pinBackground)
                 )
                 .contentShape(Circle())
         }
@@ -509,5 +510,33 @@ private struct SessionCardRow: View {
         Text(text)
             .font(.caption)
             .foregroundStyle(.secondary)
+    }
+
+    private var rowFillStyle: AnyShapeStyle {
+        if backgroundImageActive {
+            AnyShapeStyle(HermesTheme.rowFill.opacity(0.45))
+        } else {
+            AnyShapeStyle(HermesTheme.rowFill)
+        }
+    }
+
+    private var pinBackground: AnyShapeStyle {
+        if isPinned {
+            AnyShapeStyle(HermesTheme.warningFill)
+        } else if backgroundImageActive {
+            AnyShapeStyle(HermesTheme.rowFill.opacity(0.45))
+        } else {
+            AnyShapeStyle(HermesTheme.rowFill)
+        }
+    }
+
+    private func rowBackground(isSelected: Bool) -> AnyShapeStyle {
+        if isSelected {
+            AnyShapeStyle(HermesTheme.selectedFill)
+        } else if backgroundImageActive {
+            AnyShapeStyle(HermesTheme.rowFill.opacity(0.45))
+        } else {
+            AnyShapeStyle(HermesTheme.rowFill)
+        }
     }
 }

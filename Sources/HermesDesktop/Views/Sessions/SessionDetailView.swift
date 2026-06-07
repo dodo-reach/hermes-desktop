@@ -944,6 +944,8 @@ private struct TranscriptMessageSurface<Content: View>: View {
     let tint: Color
     let content: Content
 
+    @Environment(\.backgroundImageActive) private var backgroundImageActive
+
     init(tint: Color, @ViewBuilder content: () -> Content) {
         self.tint = tint
         self.content = content()
@@ -956,7 +958,7 @@ private struct TranscriptMessageSurface<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: HermesTheme.rowCornerRadius, style: .continuous)
-                    .fill(HermesTheme.rowFill)
+                    .fill(backgroundImageActive ? AnyShapeStyle(HermesTheme.rowFill.opacity(0.45)) : AnyShapeStyle(HermesTheme.rowFill))
             )
             .overlay(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 999, style: .continuous)
@@ -1220,6 +1222,8 @@ private struct ToolOutputView: View {
     let summary: SessionToolMessageSummary?
     @State private var isShowingFullOutput = false
 
+    @Environment(\.backgroundImageActive) private var backgroundImageActive
+
     private var visibleContent: String? {
         guard isShowingFullOutput else {
             return SessionToolMessageSummary.detailPreview(from: content)
@@ -1243,7 +1247,10 @@ private struct ToolOutputView: View {
                         .padding(10)
                 }
                 .frame(maxHeight: isShowingFullOutput ? 280 : 180)
-                .background(HermesTheme.insetFill, in: RoundedRectangle(cornerRadius: HermesTheme.insetCornerRadius, style: .continuous))
+                .background(
+                    backgroundImageActive ? AnyShapeStyle(HermesTheme.insetFill.opacity(0.45)) : AnyShapeStyle(HermesTheme.insetFill),
+                    in: RoundedRectangle(cornerRadius: HermesTheme.insetCornerRadius, style: .continuous)
+                )
                 .overlay {
                     RoundedRectangle(cornerRadius: HermesTheme.insetCornerRadius, style: .continuous)
                         .strokeBorder(HermesTheme.subtleStroke, lineWidth: 1)
