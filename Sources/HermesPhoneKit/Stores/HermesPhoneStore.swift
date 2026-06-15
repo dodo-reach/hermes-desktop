@@ -19,6 +19,8 @@ final class HermesPhoneStore: ObservableObject {
     @Published var overview: RemoteDiscovery?
     @Published var sessions: [SessionSummary] = []
     @Published var sessionsLoadState: SessionListLoadState = .idle
+    @Published var hasMoreSessions = false
+    @Published var totalSessionsCount = 0
     @Published var cronJobs: [CronJob] = []
     @Published var directoryListing: RemoteDirectoryListing?
     @Published var activeDirectoryPath: String = "~/.hermes"
@@ -50,7 +52,10 @@ final class HermesPhoneStore: ObservableObject {
     private lazy var skillBrowserService = SkillBrowserService(sshTransport: sshTransport)
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let sessionPageSize = 20
     private var currentSessionsLoadID: UUID?
+    private var sessionOffset = 0
+    private var sessionSearchQuery = ""
     private var transcriptCache: [String: [SessionMessage]] = [:]
     private var sessionCacheByWorkspace: [String: [SessionSummary]] = [:]
     private var transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:]
@@ -313,16 +318,31 @@ final class HermesPhoneStore: ObservableObject {
     }
 
     func loadSessions(query: String = "") async {
+        await loadSessionsPage(query: query, reset: true)
+    }
+
+    func loadMoreSessions() async {
+        await loadSessionsPage(query: sessionSearchQuery, reset: false)
+    }
+
+    private func loadSessionsPage(query: String, reset: Bool) async {
         guard let connection = activeConnection else {
             sessions = []
             sessionsLoadState = .idle
+            hasMoreSessions = false
+            totalSessionsCount = 0
+            sessionOffset = 0
+            sessionSearchQuery = ""
             currentSessionsLoadID = nil
             isLoadingSessions = false
             return
         }
+        guard reset || hasMoreSessions else { return }
         let requestedFingerprint = connection.workspaceScopeFingerprint
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let requestID = UUID()
         currentSessionsLoadID = requestID
+        sessionSearchQuery = normalizedQuery
         sessionsLoadState = .loading
         isLoadingSessions = true
         defer {
@@ -335,18 +355,26 @@ final class HermesPhoneStore: ObservableObject {
         do {
             let page = try await sessionBrowserService.listSessions(
                 connection: connection,
-                offset: 0,
-                limit: 100,
-                query: query
+                offset: reset ? 0 : sessionOffset,
+                limit: sessionPageSize,
+                query: normalizedQuery
             )
             guard currentSessionsLoadID == requestID,
                   activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             let incoming = deduplicatedSessionLineage(page.items)
-            sessions = mergeSessionPage(
-                previous: sessions,
-                incoming: incoming,
-                keepIDs: nativeChatStore.activeLineageSessionIDs
-            )
+            if reset {
+                sessions = mergeSessionPage(
+                    previous: sessions,
+                    incoming: incoming,
+                    keepIDs: nativeChatStore.activeLineageSessionIDs
+                )
+                sessionOffset = page.items.count
+            } else {
+                sessions = deduplicatedSessionLineage(sessions + incoming)
+                sessionOffset += page.items.count
+            }
+            totalSessionsCount = page.totalCount
+            hasMoreSessions = sessionOffset < totalSessionsCount
             cacheSessionsForActiveWorkspace(sessions)
             scheduleRecentTranscriptPrefetch()
             sessionsLoadState = .loaded
@@ -840,6 +868,10 @@ final class HermesPhoneStore: ObservableObject {
         isLoadingSessions = false
         guard activeConnection != nil else {
             sessionsLoadState = .idle
+            hasMoreSessions = false
+            totalSessionsCount = 0
+            sessionOffset = 0
+            sessionSearchQuery = ""
             return
         }
         sessionsLoadState = sessions.isEmpty ? .pending : .loaded
@@ -848,10 +880,17 @@ final class HermesPhoneStore: ObservableObject {
     private func restoreCachedSessionsForActiveConnection() {
         guard let key = activeWorkspaceScopeFingerprint else {
             sessions = []
+            hasMoreSessions = false
+            totalSessionsCount = 0
+            sessionOffset = 0
+            sessionSearchQuery = ""
             transcriptPrefetchTask?.cancel()
             return
         }
         sessions = sessionCacheByWorkspace[key] ?? []
+        hasMoreSessions = false
+        totalSessionsCount = sessions.count
+        sessionOffset = sessions.count
         hydrateTranscriptSnapshotCacheForActiveConnection()
         scheduleRecentTranscriptPrefetch()
     }
@@ -1097,21 +1136,11 @@ final class SSHTransport: @unchecked Sendable {
 
         try validateSuccessfulExit(result, for: connection)
 
-        guard let data = result.stdout.data(using: .utf8) else {
-            throw SSHTransportError.invalidResponse("Remote output was not valid UTF-8.")
-        }
-
-        do {
-            return try JSONDecoder().decode(Response.self, from: data)
-        } catch {
-            throw SSHTransportError.invalidResponse(
-                formattedInvalidJSONResponse(
-                    stdout: result.stdout,
-                    stderr: result.stderr,
-                    decodingError: error
-                )
-            )
-        }
+        return try RemoteJSONResponseDecoder.decode(
+            Response.self,
+            stdout: result.stdout,
+            stderr: result.stderr
+        )
     }
 
     func executeJSONLines<Response: Decodable>(

@@ -394,15 +394,22 @@ struct ActiveWorkspaceStrip: View {
     let compact: Bool
     let showsConnectionSummary: Bool
     let showsProfiles: Bool
+    let showsDestination: Bool
 
-    init(compact: Bool = false, showsConnectionSummary: Bool = true, showsProfiles: Bool = true) {
+    init(
+        compact: Bool = false,
+        showsConnectionSummary: Bool = true,
+        showsProfiles: Bool = true,
+        showsDestination: Bool = false
+    ) {
         self.compact = compact
         self.showsConnectionSummary = showsConnectionSummary
         self.showsProfiles = showsProfiles
+        self.showsDestination = showsDestination
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
+        VStack(alignment: .leading, spacing: compact ? 8 : 10) {
             if showsProfiles {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -420,8 +427,8 @@ struct ActiveWorkspaceStrip: View {
                                         .lineLimit(1)
                                 }
                                 .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                                .padding(.horizontal, compact ? 10 : 11)
+                                .padding(.vertical, compact ? 6 : 7)
                                 .background(profileBackground(for: profile), in: Capsule())
                             }
                             .buttonStyle(.plain)
@@ -433,34 +440,40 @@ struct ActiveWorkspaceStrip: View {
             }
 
             if showsConnectionSummary, let connection = store.activeConnection {
-                VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(connection.label)
-                        .font(compact ? .headline : .title3.weight(.semibold))
+                        .font(compact ? .subheadline.weight(.semibold) : .headline)
                         .lineLimit(1)
-                    Text(connection.displayDestination)
-                        .font(.caption)
+                    Text(connection.resolvedHermesProfileName)
+                        .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    if showsDestination {
+                        Text(connection.displayDestination)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
-        .padding(.horizontal, compact ? 12 : 16)
-        .padding(.vertical, compact ? 10 : 14)
+        .padding(.horizontal, compact ? 12 : 14)
+        .padding(.vertical, compact ? 9 : 12)
         .background(
-            RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+            RoundedRectangle(cornerRadius: compact ? 14 : 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: compact ? 18 : 22, style: .continuous)
-                .stroke(Color.white.opacity(0.06))
+            RoundedRectangle(cornerRadius: compact ? 14 : 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.06))
         )
     }
 
     private func profileBackground(for profile: RemoteHermesProfile) -> Color {
         if profile.name == store.activeConnection?.resolvedHermesProfileName {
-            return Color(red: 0.12, green: 0.36, blue: 0.31)
+            return Color(red: 0.18, green: 0.72, blue: 0.62).opacity(0.16)
         }
-        return Color.white.opacity(0.06)
+        return Color(.tertiarySystemFill)
     }
 }
 

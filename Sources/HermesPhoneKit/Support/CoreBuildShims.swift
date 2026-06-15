@@ -158,21 +158,11 @@ final class SSHTransport: @unchecked Sendable {
 
         try validateSuccessfulExit(result, for: connection)
 
-        guard let data = result.stdout.data(using: .utf8) else {
-            throw SSHTransportError.invalidResponse("Remote output was not valid UTF-8.")
-        }
-
-        do {
-            return try JSONDecoder().decode(Response.self, from: data)
-        } catch {
-            throw SSHTransportError.invalidResponse(
-                formattedInvalidJSONResponse(
-                    stdout: result.stdout,
-                    stderr: result.stderr,
-                    decodingError: error
-                )
-            )
-        }
+        return try RemoteJSONResponseDecoder.decode(
+            Response.self,
+            stdout: result.stdout,
+            stderr: result.stderr
+        )
     }
 
     func executeJSONLines<Response: Decodable>(

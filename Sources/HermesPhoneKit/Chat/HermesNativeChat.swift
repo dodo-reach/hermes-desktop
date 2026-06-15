@@ -46,6 +46,12 @@ struct HermesChatToolCard: Identifiable, Hashable, Sendable {
     var expandedDetail: String?
     var isRunning: Bool
     var updatedAt: Date
+
+    var isReasoningActivity: Bool {
+        id == "reasoning-current" ||
+            title.localizedCaseInsensitiveCompare("Reasoning") == .orderedSame ||
+            toolType?.localizedCaseInsensitiveCompare("reasoning") == .orderedSame
+    }
 }
 
 enum HermesChatPromptKind: String, Sendable {
@@ -544,6 +550,12 @@ final class HermesNativeChatStore: ObservableObject {
 
     var latestToolCard: HermesChatToolCard? {
         toolCards.max(by: { $0.updatedAt < $1.updatedAt })
+    }
+
+    var latestTickerToolCard: HermesChatToolCard? {
+        toolCards
+            .filter { !$0.isReasoningActivity }
+            .max(by: { $0.updatedAt < $1.updatedAt })
     }
 
     var dailyCommandSuggestions: [HermesChatCommandSuggestion] {
@@ -1586,9 +1598,9 @@ final class HermesNativeChatStore: ObservableObject {
         case "message.complete":
             completeAssistantMessage(from: event.payload)
         case "reasoning.delta":
-            updateReasoningCard(from: event.payload, isComplete: false)
+            applyReasoningUpdate(from: event.payload, isComplete: false)
         case "reasoning.available":
-            updateReasoningCard(from: event.payload, isComplete: true)
+            applyReasoningUpdate(from: event.payload, isComplete: true)
         case "thinking.delta":
             if let text = value(in: event.payload, keys: ["text", "status", "message"]) {
                 sessionStatus = text
@@ -1931,18 +1943,27 @@ final class HermesNativeChatStore: ObservableObject {
         }
     }
 
-    private func updateReasoningCard(from payload: [String: JSONValue], isComplete: Bool) {
-        let text = value(in: payload, keys: ["text", "summary", "message"]) ?? "Reasoning available"
-        updateToolCard(
-            for: [
-                "tool_id": .string("reasoning-current"),
-                "title": .string("Reasoning"),
-                "summary": .string(text),
-                "status": .string(isComplete ? "Available" : "Thinking"),
-                "running": .bool(!isComplete)
-            ],
-            defaultRunning: !isComplete
-        )
+    private func applyReasoningUpdate(from payload: [String: JSONValue], isComplete: Bool) {
+        if isComplete {
+            if isReasoningStatus(sessionStatus) {
+                sessionStatus = "Hermes is responding..."
+            }
+            return
+        }
+
+        guard latestTickerToolCard?.isRunning != true else { return }
+        let text = value(in: payload, keys: ["text", "summary", "message"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let text, !text.isEmpty {
+            sessionStatus = text
+        } else {
+            sessionStatus = "Hermes is thinking..."
+        }
+    }
+
+    private func isReasoningStatus(_ status: String) -> Bool {
+        status.localizedCaseInsensitiveContains("reasoning") ||
+            status.localizedCaseInsensitiveContains("thinking")
     }
 
     private func updateSubagentCard(from event: HermesGatewayEvent) {
@@ -2392,14 +2413,14 @@ struct NativeChatScreen: View {
     }
 
     private var visibleToolCard: HermesChatToolCard? {
-        guard let latestToolCard = chatStore.latestToolCard else { return nil }
+        guard let latestToolCard = chatStore.latestTickerToolCard else { return nil }
         let token = "\(latestToolCard.id)-\(latestToolCard.updatedAt.timeIntervalSinceReferenceDate)"
         guard dismissedLatestToolActivityID != token else { return nil }
         return latestToolCard
     }
 
     private var latestToolActivityID: String {
-        guard let latestToolCard = chatStore.latestToolCard else { return "" }
+        guard let latestToolCard = chatStore.latestTickerToolCard else { return "" }
         return "\(latestToolCard.id)-\(latestToolCard.updatedAt.timeIntervalSinceReferenceDate)"
     }
 
@@ -2780,15 +2801,16 @@ private struct ChatStatusHeader: View {
     let connection: ConnectionProfile?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(connection?.resolvedHermesProfileName ?? "Hermes")
                         .font(.headline)
                     if let connection {
-                        Text("\(connection.label) · \(connection.displayDestination)")
+                        Text(connection.label)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     } else {
                         Text("Select a saved host to start chatting.")
                             .font(.caption)
@@ -2798,22 +2820,22 @@ private struct ChatStatusHeader: View {
 
                 Spacer(minLength: 0)
 
-                StatusPill(
-                    title: availabilityTitle,
-                    color: availabilityColor
-                )
+                Circle()
+                    .fill(availabilityColor)
+                    .frame(width: 8, height: 8)
+                    .accessibilityLabel(availabilityTitle)
             }
 
             Text(chatStore.lastError ?? chatStore.sessionStatus)
-                .font(.subheadline)
-                .foregroundStyle(chatStore.lastError == nil ? Color.primary : Color.red)
+                .font(.caption)
+                .foregroundStyle(chatStore.lastError == nil ? Color.secondary : Color.red)
+                .lineLimit(2)
 
-            HStack(alignment: .top, spacing: 12) {
-                StatusPill(title: chatStore.connectionStatus, color: .blue)
+            HStack(alignment: .center, spacing: 7) {
+                StatusPill(title: availabilityTitle, color: availabilityColor)
 
-                if let displaySessionID = chatStore.currentStoredSessionID ?? chatStore.currentSessionID,
-                   !displaySessionID.isEmpty {
-                    StatusPill(title: "Session \(displaySessionID.prefix(8))", color: .secondary)
+                if let model = chatStore.gatewayInfo["Model"], !model.isEmpty {
+                    StatusPill(title: model, color: .secondary)
                 }
 
                 if chatStore.continuation != nil {
@@ -2824,21 +2846,18 @@ private struct ChatStatusHeader: View {
                     StatusPill(title: "Summarizing", color: .purple)
                 }
             }
-
-            if !chatStore.gatewayInfo.isEmpty {
-                FlowInfoRow(items: chatStore.gatewayInfo)
-            }
         }
-        .padding(16)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var availabilityTitle: String {
         if chatStore.isCheckingBootstrap || chatStore.bootstrapStatus == nil {
             return "Checking"
         }
-        return chatStore.canUseNativeChat ? "Native" : "Unavailable"
+        return chatStore.canUseNativeChat ? "Ready" : "Unavailable"
     }
 
     private var availabilityColor: Color {
@@ -2909,10 +2928,7 @@ private struct ConversationEmptyState: View {
     let connection: ConnectionProfile?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Start a new Hermes chat")
-                .font(.headline)
-
+        VStack(alignment: .leading, spacing: 10) {
             Text(promptText)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -2933,7 +2949,7 @@ private struct ConversationEmptyState: View {
         if let lastError = chatStore.lastError, !lastError.isEmpty {
             return lastError
         }
-        return "Write a message below to create a fresh conversation with the selected Hermes profile. You can always jump back to Terminal for power-user work."
+        return "Start with a message. Hermes will keep this conversation here when you leave and come back."
     }
 }
 
@@ -3028,95 +3044,66 @@ private struct ChatComposerView: View {
     @FocusState private var isMessageFocused: Bool
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 9) {
             if !chatStore.pendingAttachments.isEmpty {
                 pendingAttachmentStrip
             }
 
-            HStack(alignment: .bottom, spacing: 12) {
+            HStack(alignment: .bottom, spacing: 8) {
                 Button {
                     isPresentingInsertSheet = true
                 } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 30))
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .background(Color(.tertiarySystemFill), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
+                .foregroundStyle(canUseSessionTools ? Color(red: 0.18, green: 0.72, blue: 0.62) : .secondary)
                 .disabled(!canUseSessionTools)
-                .opacity(canUseSessionTools ? 1 : 0.45)
-
-                PhotosPicker(
-                    selection: $selectedPhotoItems,
-                    maxSelectionCount: 6,
-                    matching: .images
-                ) {
-                    Image(systemName: "photo.circle.fill")
-                        .font(.system(size: 30))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
-                .disabled(!canUseSessionTools || chatStore.isAttachingFile)
-                .opacity(canUseSessionTools && !chatStore.isAttachingFile ? 1 : 0.45)
-
-                Button {
-                    isPresentingFileImporter = true
-                } label: {
-                    Image(systemName: "paperclip.circle.fill")
-                        .font(.system(size: 30))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
-                .disabled(!canUseSessionTools || chatStore.isAttachingFile)
-                .opacity(canUseSessionTools && !chatStore.isAttachingFile ? 1 : 0.45)
 
                 TextField("Message Hermes", text: $chatStore.draftMessage, axis: .vertical)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .frame(minHeight: 38)
                     .lineLimit(1 ... 6)
                     .focused($isMessageFocused)
                     .disabled(!canType)
-
-                Button {
-                    Task { await toggleDictation() }
-                } label: {
-                    Image(systemName: voiceDictation.isRecording ? "mic.circle.fill" : "mic.circle")
-                        .font(.system(size: 32))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(voiceDictation.isRecording ? .red : Color(red: 0.18, green: 0.72, blue: 0.62))
-                .disabled(!canType || chatStore.isWorking)
-                .opacity(canType && !chatStore.isWorking ? 1 : 0.45)
 
                 if chatStore.isWorking {
                     Button {
                         Task { await chatStore.interrupt() }
                     } label: {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 34))
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .frame(width: 32, height: 32)
+                            .background(.orange, in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("Stop response")
                 } else {
                     Button {
                         Task { await chatStore.sendCurrentDraft() }
                     } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 34))
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 17, weight: .bold))
+                            .frame(width: 32, height: 32)
+                            .background(sendButtonBackground, in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(
-                        canSend ? Color(red: 0.18, green: 0.72, blue: 0.62) : Color.secondary
-                    )
+                    .foregroundStyle(canSend ? .white : .secondary)
                     .disabled(!canSend)
+                    .accessibilityLabel("Send message")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.12))
+                    .stroke(Color.primary.opacity(0.08))
             )
 
             if composerStatusLine != nil {
@@ -3140,8 +3127,28 @@ private struct ChatComposerView: View {
                 commandsError: chatStore.slashCommandCatalogError,
                 skills: skills,
                 isLoadingSkills: isLoadingSkills,
+                canAttach: canUseSessionTools && !chatStore.isAttachingFile,
+                canDictate: canType && !chatStore.isWorking,
+                isDictating: voiceDictation.isRecording,
+                isWorking: chatStore.isWorking,
                 onLoadCommands: { await chatStore.loadSlashCommandCatalogIfNeeded() },
                 onLoadSkills: loadSkills,
+                selectedPhotoItems: $selectedPhotoItems,
+                onImportFiles: {
+                    presentFileImporterAfterInsertSheet()
+                },
+                onToggleDictation: {
+                    isPresentingInsertSheet = false
+                    Task { await toggleDictation() }
+                },
+                onStop: {
+                    isPresentingInsertSheet = false
+                    Task { await chatStore.interrupt() }
+                },
+                onCloseChat: {
+                    isPresentingInsertSheet = false
+                    Task { await chatStore.closeChat() }
+                },
                 onSelectCommand: insertCommand,
                 onSelectSkill: insertSkill
             )
@@ -3156,6 +3163,7 @@ private struct ChatComposerView: View {
         }
         .onChange(of: selectedPhotoItems) { _, items in
             guard !items.isEmpty else { return }
+            isPresentingInsertSheet = false
             Task { await handleSelectedPhotos(items) }
         }
         .onChange(of: voiceDictation.composedText) { _, value in
@@ -3200,6 +3208,10 @@ private struct ChatComposerView: View {
 
     private var canSend: Bool {
         canUseSessionTools && !chatStore.isAttachingFile && (!trimmedDraft.isEmpty || !chatStore.pendingAttachments.isEmpty)
+    }
+
+    private var sendButtonBackground: Color {
+        canSend ? Color(red: 0.18, green: 0.72, blue: 0.62) : Color(.tertiarySystemFill)
     }
 
     private var composerStatusLine: String? {
@@ -3267,6 +3279,13 @@ private struct ChatComposerView: View {
         }
     }
 
+    private func presentFileImporterAfterInsertSheet() {
+        isPresentingInsertSheet = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            isPresentingFileImporter = true
+        }
+    }
+
     private func insertCommand(_ command: HermesChatCommandSuggestion) {
         insertSlashCommand(command.command, acceptsDraftAsArgument: command.acceptsDraftAsArgument)
     }
@@ -3331,19 +3350,34 @@ private struct ChatInsertSheet: View {
     let commandsError: String?
     let skills: [SkillSummary]
     let isLoadingSkills: Bool
+    let canAttach: Bool
+    let canDictate: Bool
+    let isDictating: Bool
+    let isWorking: Bool
     let onLoadCommands: () async -> Void
     let onLoadSkills: () async -> Void
+    @Binding var selectedPhotoItems: [PhotosPickerItem]
+    let onImportFiles: () -> Void
+    let onToggleDictation: () -> Void
+    let onStop: () -> Void
+    let onCloseChat: () -> Void
     let onSelectCommand: (HermesChatCommandSuggestion) -> Void
     let onSelectSkill: (SkillSummary) -> Void
     @State private var query = ""
 
     var body: some View {
         NavigationStack {
-            List {
-                commandSection
-                skillSections
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    quickActionSection
+                    commandSection
+                    skillSections
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 18)
             }
-            .navigationTitle("Insert")
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Add")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query, prompt: "Search commands or skills")
             .toolbar {
@@ -3365,23 +3399,101 @@ private struct ChatInsertSheet: View {
     }
 
     @ViewBuilder
+    private var quickActionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Quick Actions")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
+            LazyVGrid(columns: actionColumns, spacing: 10) {
+                PhotosPicker(
+                    selection: $selectedPhotoItems,
+                    maxSelectionCount: 6,
+                    matching: .images
+                ) {
+                    ChatInsertActionTile(
+                        title: "Image",
+                        subtitle: "Attach photos",
+                        systemImage: "photo",
+                        tint: Color(red: 0.18, green: 0.72, blue: 0.62),
+                        isDisabled: !canAttach
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAttach)
+
+                Button(action: onImportFiles) {
+                    ChatInsertActionTile(
+                        title: "File",
+                        subtitle: "PDF or docs",
+                        systemImage: "paperclip",
+                        tint: .blue,
+                        isDisabled: !canAttach
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAttach)
+
+                Button(action: onToggleDictation) {
+                    ChatInsertActionTile(
+                        title: isDictating ? "Stop Voice" : "Voice",
+                        subtitle: isDictating ? "Finish dictation" : "Dictate prompt",
+                        systemImage: isDictating ? "mic.fill" : "mic",
+                        tint: isDictating ? .red : .purple,
+                        isDisabled: !canDictate && !isDictating
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canDictate && !isDictating)
+
+                Button(action: isWorking ? onStop : onCloseChat) {
+                    ChatInsertActionTile(
+                        title: isWorking ? "Stop" : "End",
+                        subtitle: isWorking ? "Interrupt agent" : "Close chat",
+                        systemImage: isWorking ? "stop.fill" : "xmark.circle",
+                        tint: isWorking ? .orange : .secondary,
+                        isDisabled: false
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var commandSection: some View {
-        Section {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Commands")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
             if isLoadingCommands && commands.isEmpty {
                 HStack {
                     Spacer()
                     ProgressView("Loading commands...")
                     Spacer()
                 }
+                .padding(.vertical, 14)
             }
 
-            ForEach(filteredCommands) { command in
-                Button {
-                    onSelectCommand(command)
-                } label: {
-                    ChatCommandRow(command: command)
+            VStack(spacing: 0) {
+                ForEach(filteredCommands) { command in
+                    Button {
+                        onSelectCommand(command)
+                    } label: {
+                        ChatCommandRow(command: command)
+                    }
+                    .buttonStyle(.plain)
+
+                    if command.id != filteredCommands.last?.id {
+                        Divider()
+                            .padding(.leading, 12)
+                    }
                 }
             }
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             if filteredCommands.isEmpty && !isLoadingCommands && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("No matching commands")
@@ -3394,25 +3506,34 @@ private struct ChatInsertSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        } header: {
-            Text("Commands")
-        } footer: {
+
             Text("Commands are dispatched through the Hermes TUI runtime. Use /commands for the complete catalog.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
     @ViewBuilder
     private var skillSections: some View {
         if isLoadingSkills && skills.isEmpty {
-            Section("Skills") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Skills")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
                 HStack {
                     Spacer()
                     ProgressView("Loading skills...")
                     Spacer()
                 }
+                .padding(.vertical, 14)
             }
         } else if filteredSkills.isEmpty {
-            Section("Skills") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Skills")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
                 ContentUnavailableView(
                     "No Skills",
                     systemImage: "book.closed",
@@ -3420,20 +3541,42 @@ private struct ChatInsertSheet: View {
                 )
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         } else {
             ForEach(groupedFilteredSkills) { group in
-                Section("Skills · \(group.category)") {
-                    ForEach(group.skills) { skill in
-                        Button {
-                            onSelectSkill(skill)
-                        } label: {
-                            ChatSkillRow(skill: skill)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Skills · \(group.category)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+
+                    VStack(spacing: 0) {
+                        ForEach(group.skills) { skill in
+                            Button {
+                                onSelectSkill(skill)
+                            } label: {
+                                ChatSkillRow(skill: skill)
+                            }
+                            .buttonStyle(.plain)
+
+                            if skill.id != group.skills.last?.id {
+                                Divider()
+                                    .padding(.leading, 12)
+                            }
                         }
                     }
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
         }
+    }
+
+    private var actionColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ]
     }
 
     private var filteredCommands: [HermesChatCommandSuggestion] {
@@ -3474,6 +3617,42 @@ private struct SkillInsertGroup: Identifiable, Hashable {
     var id: String { category }
 }
 
+private struct ChatInsertActionTile: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+    let isDisabled: Bool
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(isDisabled ? .secondary : tint)
+                .frame(width: 34, height: 34)
+                .background((isDisabled ? Color.secondary : tint).opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .opacity(isDisabled ? 0.55 : 1)
+    }
+}
+
 private struct ChatCommandRow: View {
     let command: HermesChatCommandSuggestion
 
@@ -3498,7 +3677,10 @@ private struct ChatCommandRow: View {
                     .textCase(.uppercase)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
@@ -3520,7 +3702,10 @@ private struct ChatSkillRow: View {
                     .lineLimit(2)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
@@ -3540,9 +3725,20 @@ private struct ChatBubble: View {
                 Text(message.text + (message.isStreaming ? "▍" : ""))
                     .font(.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
             }
             .padding(14)
             .background(backgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contextMenu {
+                Button {
+                    UIPasteboard.general.string = message.text
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+            }
+            .accessibilityAction(named: "Copy message") {
+                UIPasteboard.general.string = message.text
+            }
 
             if message.role != .user {
                 Spacer(minLength: 36)
@@ -3886,6 +4082,7 @@ private struct StatusPill: View {
     var body: some View {
         Text(title)
             .font(.caption.weight(.semibold))
+            .lineLimit(1)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(color.opacity(0.14), in: Capsule())

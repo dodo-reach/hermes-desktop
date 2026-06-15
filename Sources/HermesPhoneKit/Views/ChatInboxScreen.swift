@@ -15,7 +15,7 @@ struct ChatInboxScreen: View {
     var body: some View {
         List {
             Section {
-                ActiveWorkspaceStrip()
+                ActiveWorkspaceStrip(compact: true)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
             }
@@ -122,6 +122,23 @@ struct ChatInboxScreen: View {
                                 }
                             }
                         }
+
+                        if store.hasMoreSessions {
+                            Button {
+                                Task { await store.loadMoreSessions() }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    if store.isLoadingSessions {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                    Text(store.isLoadingSessions ? "Loading More..." : "Load More")
+                                    Spacer()
+                                }
+                            }
+                            .disabled(store.isLoadingSessions)
+                        }
                     }
                 }
             } else {
@@ -219,7 +236,7 @@ struct ChatInboxScreen: View {
             return "Try another search or clear the query to return to recent conversations."
         }
         if store.nativeChatStore.hasRestorableConversation {
-            return "The open background chat is shown above. Other conversations for this profile will appear here."
+            return "Your open chat is shown above. Other conversations for this profile will appear here."
         }
         return "Start a new Hermes chat with the selected profile. Your past conversations for this profile will appear here."
     }
@@ -241,78 +258,68 @@ struct BackgroundConversationCard: View {
     let onClose: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.title3)
-                    .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
-                    .frame(width: 34, height: 34)
-                    .background(Color(red: 0.18, green: 0.72, blue: 0.62).opacity(0.14), in: Circle())
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(title)
-                        .font(.headline)
-                        .lineLimit(1)
-
-                    Text(chatStore.restorableConversationPreview)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 0)
-
-                Menu {
-                    Button("Open Chat", systemImage: "arrow.up.right.bubble") {
-                        onOpen()
-                    }
-                    Button("Close Chat", systemImage: "xmark.circle", role: .destructive) {
-                        onClose()
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.title3)
-                }
-            }
-
-            HStack(spacing: 8) {
-                DetailBadge(title: chatStore.restorableConversationStatus, tint: Color(red: 0.18, green: 0.72, blue: 0.62))
-
-                if let model = session?.displayModel {
-                    DetailBadge(title: model, tint: .blue)
-                }
-
-                if let updatedAt {
-                    DetailBadge(title: DateFormatters.shortDateTimeString(from: updatedAt), tint: .secondary)
-                }
-            }
-
+        HStack(alignment: .center, spacing: 8) {
             Button(action: onOpen) {
-                Label("Open Chat", systemImage: "arrow.up.right.bubble")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
+                        .frame(width: 30, height: 30)
+                        .background(Color(red: 0.18, green: 0.72, blue: 0.62).opacity(0.12), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("Continue")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(title)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Text(chatStore.restorableConversationPreview)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
+
+            Menu {
+                Button("Open Chat", systemImage: "arrow.up.right.bubble") {
+                    onOpen()
+                }
+                Button("Close Chat", systemImage: "xmark.circle", role: .destructive) {
+                    onClose()
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
-        .padding(18)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color(red: 0.18, green: 0.72, blue: 0.62).opacity(0.22), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Open background chat")
+        .accessibilityLabel("Continue open chat")
     }
 
     private var title: String {
         session?.resolvedTitle ?? chatStore.restorableConversationTitle
     }
 
-    private var updatedAt: Date? {
-        chatStore.restorableConversationUpdatedAt ??
-            session?.lastActive?.dateValue ??
-            session?.startedAt?.dateValue
-    }
 }
 
 struct ConversationLaunchCard: View {
@@ -322,52 +329,37 @@ struct ConversationLaunchCard: View {
     let onOpenTerminal: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
                 Button(action: onNewChat) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                        Text("New Chat")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
+                    Label("New Chat", systemImage: "square.and.pencil")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
 
                 Button(action: onOpenTerminal) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "terminal")
-                        Text("Terminal")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
+                    Image(systemName: "terminal")
+                        .font(.headline)
+                        .frame(width: 44, height: 34)
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel("Open terminal")
             }
 
             if !chatStore.canUseNativeChat, let fallbackReason = chatStore.fallbackReason {
                 Text(fallbackReason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.09, green: 0.18, blue: 0.17),
-                            Color(red: 0.06, green: 0.11, blue: 0.13)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.08))
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.primary.opacity(0.06))
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chat actions for \(connection.resolvedHermesProfileName)")

@@ -130,16 +130,27 @@ struct ConnectionHeader: View {
 
     var body: some View {
         if let connection {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(connection.label)
-                    .font(.headline)
-                Text("\(connection.displayDestination) · \(connection.resolvedHermesProfileName)")
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(connection.label)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(connection.resolvedHermesProfileName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 }
