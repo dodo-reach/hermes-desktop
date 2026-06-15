@@ -149,6 +149,45 @@ struct HermesGatewayCoreTests {
     }
 
     @Test
+    func slashCommandCatalogParserHandlesUpstreamPairsCatalogs() {
+        let catalog = JSONValue.object([
+            "categories": .array([
+                .object([
+                    "name": .string("Session"),
+                    "pairs": .array([
+                        .array([.string("/status"), .string("Show session info")]),
+                        .array([.string("/compress <focus>"), .string("Compress context")])
+                    ])
+                ])
+            ])
+        ])
+
+        let entries = HermesSlashCommandCatalogParser.parse(catalog)
+        #expect(entries.first { $0.name == "/status" }?.description == "Show session info")
+        #expect(entries.first { $0.name == "/compress" }?.usage == "/compress <focus>")
+        #expect(entries.first { $0.name == "/compress" }?.category == "Session")
+    }
+
+    @Test
+    func sessionSummaryMatchesLineageRootIdentity() throws {
+        let data = """
+        {
+          "id": "tip-5",
+          "_lineage_root_id": "root-1",
+          "parent_session_id": "tip-4",
+          "title": "Compacted chat"
+        }
+        """.data(using: .utf8)!
+
+        let summary = try JSONDecoder().decode(SessionSummary.self, from: data)
+        #expect(summary.durableSessionID == "root-1")
+        #expect(summary.lineageMatchID == "root-1")
+        #expect(summary.matchesSessionIdentity("tip-5"))
+        #expect(summary.matchesSessionIdentity("tip-4"))
+        #expect(summary.matchesSessionIdentity("root-1"))
+    }
+
+    @Test
     func capabilityProbeParsesBooleansAndReasons() {
         #expect(HermesNativeChatCapabilityProbe.bool(from: "1\n"))
         #expect(HermesNativeChatCapabilityProbe.bool(from: "true"))

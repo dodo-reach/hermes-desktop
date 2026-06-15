@@ -103,11 +103,17 @@ public struct HermesPhoneRootView: View {
         .task {
             notifications.configure()
             notifications.updateScenePhase(scenePhase)
+            await store.nativeChatStore.warmGatewayIfUseful()
+        }
+        .task(id: store.activeWorkspaceScopeFingerprint) {
+            guard scenePhase == .active else { return }
+            await store.nativeChatStore.warmGatewayIfUseful()
         }
         .onChange(of: scenePhase) { _, newPhase in
             notifications.updateScenePhase(newPhase)
             guard newPhase == .active else { return }
             Task { @MainActor in
+                await store.nativeChatStore.warmGatewayIfUseful()
                 await store.nativeChatStore.refreshCurrentConversationFromRemote()
             }
         }

@@ -340,12 +340,13 @@ struct TerminalSessionChip: View {
     }
 }
 
+@MainActor
 final class KeyboardObserver: ObservableObject {
     @Published var bottomInset: CGFloat = 0
 
     var isVisible: Bool { bottomInset > 0 }
 
-    private var observers: [NSObjectProtocol] = []
+    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
 
     init() {
         let center = NotificationCenter.default
@@ -356,9 +357,7 @@ final class KeyboardObserver: ObservableObject {
             queue: .main
         ) { [weak self] notification in
             let frame = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-            Task { @MainActor [weak self] in
-                self?.handle(keyboardFrame: frame)
-            }
+            self?.handle(keyboardFrame: frame)
         })
 
         observers.append(center.addObserver(

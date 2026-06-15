@@ -52,6 +52,9 @@ final class HermesPhoneStore: ObservableObject {
     private let decoder = JSONDecoder()
     private var currentSessionsLoadID: UUID?
     private var transcriptCache: [String: [SessionMessage]] = [:]
+    private var sessionCacheByWorkspace: [String: [SessionSummary]] = [:]
+    private var transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:]
+    private var transcriptPrefetchTask: Task<Void, Never>?
 
     init() {
         terminalWorkspace.onChange = { [weak self] in
@@ -338,7 +341,14 @@ final class HermesPhoneStore: ObservableObject {
             )
             guard currentSessionsLoadID == requestID,
                   activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
-            sessions = page.items
+            let incoming = deduplicatedSessionLineage(page.items)
+            sessions = mergeSessionPage(
+                previous: sessions,
+                incoming: incoming,
+                keepIDs: nativeChatStore.activeLineageSessionIDs
+            )
+            cacheSessionsForActiveWorkspace(sessions)
+            scheduleRecentTranscriptPrefetch()
             sessionsLoadState = .loaded
         } catch {
             guard currentSessionsLoadID == requestID,
@@ -350,13 +360,22 @@ final class HermesPhoneStore: ObservableObject {
 
     func cachedTranscript(for sessionID: String) -> [SessionMessage]? {
         guard let connection = activeConnection else { return nil }
-        return transcriptCache[transcriptCacheKey(connection: connection, sessionID: sessionID)]
+        let cacheKey = transcriptCacheKey(connection: connection, sessionID: sessionID)
+        if let transcript = transcriptCache[cacheKey] {
+            return transcript
+        }
+        guard let snapshot = transcriptSnapshotCacheByWorkspace[connection.workspaceScopeFingerprint]?[sessionID] else {
+            return nil
+        }
+        transcriptCache[cacheKey] = snapshot
+        return snapshot
     }
 
     func transcript(for sessionID: String) async throws -> [SessionMessage] {
         guard let connection = activeConnection else { return [] }
         let transcript = try await sessionBrowserService.loadTranscript(connection: connection, sessionID: sessionID)
         transcriptCache[transcriptCacheKey(connection: connection, sessionID: sessionID)] = transcript
+        cacheTranscriptSnapshot(transcript, sessionID: sessionID, connection: connection)
         return transcript
     }
 
@@ -380,6 +399,10 @@ final class HermesPhoneStore: ObservableObject {
         if nativeChatStore.isActiveConversation(session), nativeChatStore.hasConversationContent {
             return
         }
+        guard !nativeChatStore.isWorking else {
+            alertMessage = "Hermes is still working in the current chat. Stop it before continuing another conversation."
+            return
+        }
         Task { @MainActor in
             await nativeChatStore.queueResumeSessionReplacingActiveConversation(session)
         }
@@ -388,9 +411,11 @@ final class HermesPhoneStore: ObservableObject {
     func openNewChat() {
         selectedRootTab = .chat
         chatNavigationPath = [.conversation]
-        Task { @MainActor in
-            await nativeChatStore.prepareNewChatReplacingActiveConversation()
+        guard !nativeChatStore.isWorking else {
+            alertMessage = "Hermes is still working in the current chat. Stop it before starting a new one."
+            return
         }
+        nativeChatStore.prepareInstantNewChat()
     }
 
     func reopenActiveConversation() {
@@ -434,7 +459,37 @@ final class HermesPhoneStore: ObservableObject {
 
     private func notificationSession(matching sessionID: String) -> SessionSummary? {
         sessions.first { session in
-            session.id == sessionID || session.parentSessionID == sessionID
+            session.matchesSessionIdentity(sessionID)
+        }
+    }
+
+    private func mergeSessionPage(
+        previous: [SessionSummary],
+        incoming: [SessionSummary],
+        keepIDs: Set<String>
+    ) -> [SessionSummary] {
+        guard !keepIDs.isEmpty else { return incoming }
+
+        let incomingIDs = Set(incoming.map(\.id))
+        let incomingLineageIDs = Set(incoming.map(\.lineageMatchID))
+        let survivors = previous.filter { session in
+            !incomingIDs.contains(session.id) &&
+                !incomingLineageIDs.contains(session.lineageMatchID) &&
+                (keepIDs.contains(session.id) ||
+                    keepIDs.contains(session.durableSessionID) ||
+                    keepIDs.contains(session.lineageMatchID))
+        }
+
+        return survivors.isEmpty ? incoming : survivors + incoming
+    }
+
+    private func deduplicatedSessionLineage(_ items: [SessionSummary]) -> [SessionSummary] {
+        var seen = Set<String>()
+        return items.filter { session in
+            let key = session.lineageMatchID
+            guard !seen.contains(key) else { return false }
+            seen.insert(key)
+            return true
         }
     }
 
@@ -737,7 +792,9 @@ final class HermesPhoneStore: ObservableObject {
                 activeProfileNameByHost: activeProfileNameByHost,
                 connections: connections,
                 terminalWorkspace: terminalWorkspace.snapshot(),
-                workspaceFileBookmarks: workspaceFileBookmarks
+                workspaceFileBookmarks: workspaceFileBookmarks,
+                sessionCacheByWorkspace: sessionCacheByWorkspace,
+                transcriptSnapshotCacheByWorkspace: transcriptSnapshotCacheByWorkspace
             )
             let data = try encoder.encode(envelope)
             let url = try persistenceURL()
@@ -769,16 +826,117 @@ final class HermesPhoneStore: ObservableObject {
             activeConnectionID = activeConnection?.id
             terminalWorkspace.restore(from: envelope.terminalWorkspace, availableConnections: connections)
             workspaceFileBookmarks = envelope.workspaceFileBookmarks
+            sessionCacheByWorkspace = envelope.sessionCacheByWorkspace
+            transcriptSnapshotCacheByWorkspace = envelope.transcriptSnapshotCacheByWorkspace
+            restoreCachedSessionsForActiveConnection()
         } catch {
             present(error)
         }
     }
 
     private func markSessionsPendingLoadIfNeeded() {
-        sessions = []
+        restoreCachedSessionsForActiveConnection()
         currentSessionsLoadID = nil
         isLoadingSessions = false
-        sessionsLoadState = activeConnection == nil ? .idle : .pending
+        guard activeConnection != nil else {
+            sessionsLoadState = .idle
+            return
+        }
+        sessionsLoadState = sessions.isEmpty ? .pending : .loaded
+    }
+
+    private func restoreCachedSessionsForActiveConnection() {
+        guard let key = activeWorkspaceScopeFingerprint else {
+            sessions = []
+            transcriptPrefetchTask?.cancel()
+            return
+        }
+        sessions = sessionCacheByWorkspace[key] ?? []
+        hydrateTranscriptSnapshotCacheForActiveConnection()
+        scheduleRecentTranscriptPrefetch()
+    }
+
+    private func cacheSessionsForActiveWorkspace(_ sessions: [SessionSummary]) {
+        guard let key = activeWorkspaceScopeFingerprint else { return }
+        sessionCacheByWorkspace[key] = Array(sessions.prefix(100))
+        persistConnections()
+    }
+
+    private func scheduleRecentTranscriptPrefetch() {
+        transcriptPrefetchTask?.cancel()
+        guard let connection = activeConnection else { return }
+        let candidates = sessions
+            .prefix(4)
+            .filter { session in
+                transcriptCache[transcriptCacheKey(connection: connection, sessionID: session.id)] == nil
+            }
+        guard !candidates.isEmpty else { return }
+
+        let workspaceFingerprint = connection.workspaceScopeFingerprint
+        transcriptPrefetchTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            for session in candidates {
+                guard !Task.isCancelled else { return }
+                await self?.prefetchTranscript(
+                    sessionID: session.id,
+                    workspaceFingerprint: workspaceFingerprint
+                )
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+        }
+    }
+
+    private func prefetchTranscript(sessionID: String, workspaceFingerprint: String) async {
+        guard let connection = activeConnection,
+              connection.workspaceScopeFingerprint == workspaceFingerprint else { return }
+        let key = transcriptCacheKey(connection: connection, sessionID: sessionID)
+        guard transcriptCache[key] == nil else { return }
+
+        do {
+            let transcript = try await sessionBrowserService.loadTranscript(connection: connection, sessionID: sessionID)
+            guard activeConnection?.workspaceScopeFingerprint == workspaceFingerprint else { return }
+            transcriptCache[key] = transcript
+            cacheTranscriptSnapshot(transcript, sessionID: sessionID, connection: connection)
+        } catch {
+            // Best-effort cache warm; foreground transcript loads still surface errors.
+        }
+    }
+
+    private func hydrateTranscriptSnapshotCacheForActiveConnection() {
+        guard let connection = activeConnection,
+              let workspaceCache = transcriptSnapshotCacheByWorkspace[connection.workspaceScopeFingerprint] else { return }
+        for (sessionID, transcript) in workspaceCache {
+            transcriptCache[transcriptCacheKey(connection: connection, sessionID: sessionID)] = transcript
+        }
+    }
+
+    private func cacheTranscriptSnapshot(
+        _ transcript: [SessionMessage],
+        sessionID: String,
+        connection: ConnectionProfile
+    ) {
+        guard !transcript.isEmpty else { return }
+        let workspaceFingerprint = connection.workspaceScopeFingerprint
+        var workspaceCache = transcriptSnapshotCacheByWorkspace[workspaceFingerprint] ?? [:]
+        workspaceCache[sessionID] = Array(transcript.suffix(120))
+
+        let preferredSessionIDs = Set(sessions.prefix(6).map(\.id)).union([sessionID])
+        if workspaceCache.count > 6 {
+            for cachedSessionID in workspaceCache.keys where !preferredSessionIDs.contains(cachedSessionID) {
+                workspaceCache[cachedSessionID] = nil
+            }
+        }
+        if workspaceCache.count > 6 {
+            let removableSessionIDs = workspaceCache.keys
+                .filter { $0 != sessionID }
+                .sorted()
+            for cachedSessionID in removableSessionIDs.prefix(workspaceCache.count - 6) {
+                workspaceCache[cachedSessionID] = nil
+            }
+        }
+
+        transcriptSnapshotCacheByWorkspace[workspaceFingerprint] = workspaceCache
+        persistConnections()
     }
 
     private func selectProfileConnection(_ connection: ConnectionProfile) {

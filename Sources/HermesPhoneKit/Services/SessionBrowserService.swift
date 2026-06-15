@@ -773,11 +773,37 @@ final class SessionBrowserService: @unchecked Sendable {
                 f"SELECT * FROM {quote_ident(context['session_table'])}"
             ).fetchall()
             message_stats = build_sqlite_message_stats(context)
+            records = [dict(zip(context["session_columns"], row)) for row in session_rows]
+            parent_by_id = {}
+            explicit_lineage_by_id = {}
+            for record in records:
+                session_id = stringify(record.get(context["session_id_column"]))
+                if not session_id:
+                    continue
+                parent = stringify(record.get(context["session_parent_column"]))
+                if parent:
+                    parent_by_id[session_id] = parent
+                lineage = stringify(record.get(context["session_lineage_column"]))
+                if lineage:
+                    explicit_lineage_by_id[session_id] = lineage
+
+            def lineage_root_for(session_id, seen=None):
+                if not session_id:
+                    return None
+                if session_id in explicit_lineage_by_id:
+                    return explicit_lineage_by_id[session_id]
+                if seen is None:
+                    seen = set()
+                if session_id in seen:
+                    return None
+                seen.add(session_id)
+                parent = parent_by_id.get(session_id)
+                if not parent or parent == session_id:
+                    return None
+                return lineage_root_for(parent, seen) or parent
 
             items = []
-            for row in session_rows:
-                record = dict(zip(context["session_columns"], row))
-
+            for record in records:
                 session_id = stringify(record.get(context["session_id_column"]))
                 if not session_id:
                     continue
@@ -810,6 +836,7 @@ final class SessionBrowserService: @unchecked Sendable {
                     "title": title,
                     "model": model,
                     "parent_session_id": normalize_json_value(record.get(context["session_parent_column"])),
+                    "_lineage_root_id": normalize_json_value(lineage_root_for(session_id)),
                     "started_at": normalize_json_value(record.get(context["session_started_column"])),
                     "last_active": normalize_json_value(last_active),
                     "message_count": message_count,
@@ -895,6 +922,7 @@ final class SessionBrowserService: @unchecked Sendable {
             session_message_count_column = choose_column(session_columns, ["message_count"])
             session_model_column = choose_column(session_columns, ["model"])
             session_parent_column = choose_column(session_columns, ["parent_session_id", "parent_id"])
+            session_lineage_column = choose_column(session_columns, ["_lineage_root_id", "lineage_root_id", "lineage_root", "root_session_id"])
 
             message_id_column = choose_column(message_columns, ["id", "message_id"])
             message_session_id_column = choose_column(message_columns, ["session_id", "conversation_id"])
@@ -934,6 +962,7 @@ final class SessionBrowserService: @unchecked Sendable {
                 "session_message_count_column": session_message_count_column,
                 "session_model_column": session_model_column,
                 "session_parent_column": session_parent_column,
+                "session_lineage_column": session_lineage_column,
                 "message_id_column": message_id_column,
                 "message_session_id_column": message_session_id_column,
                 "message_role_column": message_role_column,

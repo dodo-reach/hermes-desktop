@@ -67,6 +67,8 @@ struct PersistenceEnvelope: Codable {
     var connections: [ConnectionProfile]
     var terminalWorkspace: PersistedTerminalWorkspace?
     var workspaceFileBookmarks: [WorkspaceFileBookmark] = []
+    var sessionCacheByWorkspace: [String: [SessionSummary]] = [:]
+    var transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:]
 
     enum CodingKeys: String, CodingKey {
         case activeConnectionID
@@ -75,6 +77,8 @@ struct PersistenceEnvelope: Codable {
         case connections
         case terminalWorkspace
         case workspaceFileBookmarks
+        case sessionCacheByWorkspace
+        case transcriptSnapshotCacheByWorkspace
     }
 
     init(
@@ -83,7 +87,9 @@ struct PersistenceEnvelope: Codable {
         activeProfileNameByHost: [String: String] = [:],
         connections: [ConnectionProfile],
         terminalWorkspace: PersistedTerminalWorkspace?,
-        workspaceFileBookmarks: [WorkspaceFileBookmark] = []
+        workspaceFileBookmarks: [WorkspaceFileBookmark] = [],
+        sessionCacheByWorkspace: [String: [SessionSummary]] = [:],
+        transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:]
     ) {
         self.activeConnectionID = activeConnectionID
         self.activeHostFingerprint = activeHostFingerprint
@@ -91,6 +97,8 @@ struct PersistenceEnvelope: Codable {
         self.connections = connections
         self.terminalWorkspace = terminalWorkspace
         self.workspaceFileBookmarks = workspaceFileBookmarks
+        self.sessionCacheByWorkspace = sessionCacheByWorkspace
+        self.transcriptSnapshotCacheByWorkspace = transcriptSnapshotCacheByWorkspace
     }
 
     init(from decoder: Decoder) throws {
@@ -101,6 +109,8 @@ struct PersistenceEnvelope: Codable {
         connections = try container.decode([ConnectionProfile].self, forKey: .connections)
         terminalWorkspace = try container.decodeIfPresent(PersistedTerminalWorkspace.self, forKey: .terminalWorkspace)
         workspaceFileBookmarks = try container.decodeIfPresent([WorkspaceFileBookmark].self, forKey: .workspaceFileBookmarks) ?? []
+        sessionCacheByWorkspace = try container.decodeIfPresent([String: [SessionSummary]].self, forKey: .sessionCacheByWorkspace) ?? [:]
+        transcriptSnapshotCacheByWorkspace = try container.decodeIfPresent([String: [String: [SessionMessage]]].self, forKey: .transcriptSnapshotCacheByWorkspace) ?? [:]
     }
 }
 

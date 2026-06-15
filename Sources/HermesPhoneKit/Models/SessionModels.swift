@@ -17,6 +17,7 @@ struct SessionSummary: Codable, Identifiable, Hashable, Sendable, TitleIdentifia
     let title: String?
     let model: String?
     let parentSessionID: String?
+    let lineageRootID: String?
     let startedAt: SessionTimestamp?
     let lastActive: SessionTimestamp?
     let messageCount: Int?
@@ -28,6 +29,7 @@ struct SessionSummary: Codable, Identifiable, Hashable, Sendable, TitleIdentifia
         case title
         case model
         case parentSessionID = "parent_session_id"
+        case lineageRootID = "_lineage_root_id"
         case startedAt = "started_at"
         case lastActive = "last_active"
         case messageCount = "message_count"
@@ -40,6 +42,7 @@ struct SessionSummary: Codable, Identifiable, Hashable, Sendable, TitleIdentifia
         title: String?,
         model: String?,
         parentSessionID: String? = nil,
+        lineageRootID: String? = nil,
         startedAt: SessionTimestamp?,
         lastActive: SessionTimestamp?,
         messageCount: Int?,
@@ -50,11 +53,31 @@ struct SessionSummary: Codable, Identifiable, Hashable, Sendable, TitleIdentifia
         self.title = title
         self.model = model
         self.parentSessionID = parentSessionID
+        self.lineageRootID = lineageRootID
         self.startedAt = startedAt
         self.lastActive = lastActive
         self.messageCount = messageCount
         self.preview = preview
         self.searchMatch = searchMatch
+    }
+
+    var durableSessionID: String {
+        Self.nonEmpty(lineageRootID) ?? id
+    }
+
+    var lineageMatchID: String {
+        Self.nonEmpty(lineageRootID) ??
+            Self.nonEmpty(parentSessionID) ??
+            id
+    }
+
+    func matchesSessionIdentity(_ sessionID: String) -> Bool {
+        id == sessionID || parentSessionID == sessionID || lineageRootID == sessionID
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -112,6 +135,7 @@ struct PinnedSession: Codable, Identifiable, Hashable, Sendable {
             title: title,
             model: model,
             parentSessionID: parentSessionID,
+            lineageRootID: nil,
             startedAt: startedAt,
             lastActive: lastActive,
             messageCount: messageCount,

@@ -201,12 +201,17 @@ enum HermesSlashCommandCatalogParser {
                 collectEntries(from: item, inheritedCategory: inheritedCategory, into: &entries)
             }
         case .object(let object):
-            let category = string(in: object, keys: ["category", "section", "group", "title"]) ?? inheritedCategory
+            let category = string(in: object, keys: ["category", "section", "group", "title"]) ??
+                (object["pairs"] != nil ? string(in: object, keys: ["name", "label"]) : nil) ??
+                inheritedCategory
             if let entry = entry(from: object, inheritedCategory: category) {
                 entries.append(entry)
             }
+            if let pairs = object["pairs"]?.arrayValue {
+                entries.append(contentsOf: pairEntries(from: pairs, inheritedCategory: category))
+            }
 
-            for key in ["commands", "items", "entries", "children", "sections", "skills"] {
+            for key in ["commands", "items", "entries", "children", "sections", "categories", "skills", "canon", "sub"] {
                 if let nested = object[key] {
                     collectEntries(from: nested, inheritedCategory: category, into: &entries)
                 }
@@ -215,6 +220,32 @@ enum HermesSlashCommandCatalogParser {
             entries.append(contentsOf: parseTextCatalog(text, inheritedCategory: inheritedCategory))
         default:
             break
+        }
+    }
+
+    private static func pairEntries(
+        from pairs: [JSONValue],
+        inheritedCategory: String?
+    ) -> [HermesSlashCommandCatalogEntry] {
+        pairs.compactMap { pair -> HermesSlashCommandCatalogEntry? in
+            guard let values = pair.arrayValue,
+                  let rawCommand = values.first?.stringValue,
+                  let normalized = normalizedCommand(rawCommand) else {
+                return nil
+            }
+            let usage = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+                ? rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+                : normalized
+            let description = values.dropFirst().first?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            return HermesSlashCommandCatalogEntry(
+                name: normalized,
+                usage: usage,
+                description: description?.isEmpty == false ? description : nil,
+                category: inheritedCategory,
+                aliases: [],
+                isSkill: inheritedCategory?.localizedCaseInsensitiveContains("skill") == true
+            )
         }
     }
 

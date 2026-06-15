@@ -82,12 +82,15 @@ struct ChatInboxScreen: View {
                 } else {
                     Section(querySectionTitle) {
                         ForEach(displayedSessions) { session in
-                            NavigationLink(value: HermesPhoneChatRoute.transcript(session)) {
+                            Button {
+                                store.continueSessionInChat(session)
+                            } label: {
                                 ConversationRow(
                                     session: session,
                                     isActiveConversation: store.nativeChatStore.isActiveConversation(session)
                                 )
                             }
+                            .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button("Continue", systemImage: "bubble.left.and.bubble.right") {
                                     store.continueSessionInChat(session)
@@ -104,6 +107,12 @@ struct ChatInboxScreen: View {
                                     store.continueSessionInChat(session)
                                 } label: {
                                     Label("Continue in Chat", systemImage: "bubble.left.and.bubble.right")
+                                }
+
+                                Button {
+                                    store.chatNavigationPath.append(.transcript(session))
+                                } label: {
+                                    Label("View Transcript", systemImage: "text.bubble")
                                 }
 
                                 Button {
@@ -154,9 +163,14 @@ struct ChatInboxScreen: View {
             }
         }
         .task(id: store.activeWorkspaceScopeFingerprint) {
-            await loadChatInbox()
             await store.nativeChatStore.syncWithActiveConnection()
-            await store.nativeChatStore.refreshBootstrapStatus()
+            await store.loadSessions()
+            Task { await store.refreshOverview() }
+            Task { await store.nativeChatStore.refreshBootstrapStatus() }
+            Task {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                await store.nativeChatStore.warmGatewayIfUseful()
+            }
         }
         .refreshable {
             await loadChatInbox(query: query)
@@ -876,10 +890,17 @@ struct SessionTranscriptScreen: View {
     }
 
     private func loadTranscript() async {
-        loadState = .loading(sessionID: session.id)
+        if let cached = store.cachedTranscript(for: session.id), !cached.isEmpty {
+            loadState = .loaded(sessionID: session.id, cached)
+        } else {
+            loadState = .loading(sessionID: session.id)
+        }
         do {
             loadState = .loaded(sessionID: session.id, try await store.transcript(for: session.id))
         } catch {
+            if case .loaded = loadState {
+                return
+            }
             loadState = .failed(sessionID: session.id, error.localizedDescription)
         }
     }

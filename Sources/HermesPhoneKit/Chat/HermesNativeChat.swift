@@ -1,6 +1,10 @@
 #if canImport(UIKit)
+import AVFoundation
 import Foundation
+import PhotosUI
+import Speech
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 enum HermesChatMessageRole: String, Sendable {
@@ -66,6 +70,56 @@ struct HermesChatPromptCard: Identifiable, Hashable, Sendable {
     var payloadPreview: String?
 }
 
+enum HermesChatAttachmentKind: String, Sendable {
+    case image
+    case pdf
+    case file
+
+    var title: String {
+        switch self {
+        case .image:
+            return "Image"
+        case .pdf:
+            return "PDF"
+        case .file:
+            return "File"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .image:
+            return "photo"
+        case .pdf:
+            return "doc.richtext"
+        case .file:
+            return "paperclip"
+        }
+    }
+}
+
+struct HermesPendingAttachment: Identifiable, Hashable, Sendable {
+    let id: UUID
+    var kind: HermesChatAttachmentKind
+    var name: String
+    var promptText: String?
+    var detail: String?
+
+    init(
+        id: UUID = UUID(),
+        kind: HermesChatAttachmentKind,
+        name: String,
+        promptText: String?,
+        detail: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.promptText = promptText
+        self.detail = detail
+    }
+}
+
 struct CompactionNotice: Identifiable, Hashable, Sendable {
     let id = UUID()
     var message: String
@@ -93,45 +147,79 @@ struct HermesChatCommandSuggestion: Identifiable, Hashable, Sendable {
     let command: String
     let title: String
     let summary: String
+    let category: String?
     let acceptsDraftAsArgument: Bool
 
     var id: String { command }
 
     static let dailyFallbacks: [HermesChatCommandSuggestion] = [
-        HermesChatCommandSuggestion(command: "/stop", title: "Stop", summary: "Interrupt the running agent.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/help", title: "Help", summary: "Show Hermes command help.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/status", title: "Status", summary: "Show session, model, profile and working state.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/model", title: "Model", summary: "Show or change the current model.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/title", title: "Title", summary: "Set the current session title.", acceptsDraftAsArgument: true),
-        HermesChatCommandSuggestion(command: "/goal", title: "Goal", summary: "Set a standing goal Hermes works toward across turns.", acceptsDraftAsArgument: true),
-        HermesChatCommandSuggestion(command: "/goal status", title: "Goal Status", summary: "Check the active goal loop.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/goal pause", title: "Pause Goal", summary: "Pause goal auto-continuation.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/goal resume", title: "Resume Goal", summary: "Resume a paused goal loop.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/goal clear", title: "Clear Goal", summary: "Clear the active goal.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/retry", title: "Retry", summary: "Retry the last message.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/undo", title: "Undo", summary: "Remove the last user/assistant exchange.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/queue", title: "Queue", summary: "Queue a prompt for the next turn.", acceptsDraftAsArgument: true),
-        HermesChatCommandSuggestion(command: "/steer", title: "Steer", summary: "Inject guidance after the next tool call without interrupting.", acceptsDraftAsArgument: true),
-        HermesChatCommandSuggestion(command: "/compress", title: "Compress", summary: "Manually compress conversation context.", acceptsDraftAsArgument: true),
-        HermesChatCommandSuggestion(command: "/usage", title: "Usage", summary: "Show token usage, cost and quota details.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/tools", title: "Tools", summary: "List or manage available tools for this session.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/toolsets", title: "Toolsets", summary: "List available toolsets.", acceptsDraftAsArgument: false),
-        HermesChatCommandSuggestion(command: "/reload-skills", title: "Reload Skills", summary: "Re-scan installed skills on the host.", acceptsDraftAsArgument: false)
+        HermesChatCommandSuggestion(command: "/stop", title: "Stop", summary: "Interrupt the running agent.", category: "Session", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/status", title: "Status", summary: "Show session, model, profile and working state.", category: "Session", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/model", title: "Model", summary: "Show or change the current model.", category: "Model", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/title", title: "Title", summary: "Set the current session title.", category: "Session", acceptsDraftAsArgument: true),
+        HermesChatCommandSuggestion(command: "/goal", title: "Goal", summary: "Manage the standing goal for this session.", category: "Automation", acceptsDraftAsArgument: true),
+        HermesChatCommandSuggestion(command: "/background", title: "Background", summary: "Run a prompt in the background.", category: "Automation", acceptsDraftAsArgument: true),
+        HermesChatCommandSuggestion(command: "/queue", title: "Queue", summary: "Queue a prompt for the next turn.", category: "Session", acceptsDraftAsArgument: true),
+        HermesChatCommandSuggestion(command: "/steer", title: "Steer", summary: "Inject guidance after the next tool call without interrupting.", category: "Session", acceptsDraftAsArgument: true),
+        HermesChatCommandSuggestion(command: "/compress", title: "Compress", summary: "Compress this conversation context.", category: "Session", acceptsDraftAsArgument: true),
+        HermesChatCommandSuggestion(command: "/retry", title: "Retry", summary: "Retry the last user message.", category: "Session", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/undo", title: "Undo", summary: "Remove the last user/assistant exchange.", category: "Session", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/usage", title: "Usage", summary: "Show token usage, cost and quota details.", category: "Session", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/agents", title: "Agents", summary: "Show active sessions, subagents and running tasks.", category: "Activity", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/tasks", title: "Tasks", summary: "Alias for active agents and running tasks.", category: "Activity", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/tools", title: "Tools", summary: "List or manage available tools for this session.", category: "Tools", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/toolsets", title: "Toolsets", summary: "List available toolsets.", category: "Tools", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/personality", title: "Personality", summary: "Switch personality for this session.", category: "Model", acceptsDraftAsArgument: true),
+        HermesChatCommandSuggestion(command: "/rollback", title: "Rollback", summary: "List or restore filesystem checkpoints.", category: "Files", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/save", title: "Save", summary: "Save the current transcript to JSON.", category: "Session", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/debug", title: "Debug", summary: "Create a debug report.", category: "Diagnostics", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/version", title: "Version", summary: "Show Hermes Agent version.", category: "Diagnostics", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/help", title: "Help", summary: "Show Hermes command help.", category: "Session", acceptsDraftAsArgument: false),
+        HermesChatCommandSuggestion(command: "/reload-skills", title: "Reload Skills", summary: "Re-scan installed skills on the host.", category: "Skills", acceptsDraftAsArgument: false)
     ]
 
     static func dailySuggestions(catalog: [HermesSlashCommandCatalogEntry]) -> [HermesChatCommandSuggestion] {
         guard !catalog.isEmpty else { return dailyFallbacks }
         let catalogByName = Dictionary(uniqueKeysWithValues: catalog.map { ($0.name.lowercased(), $0) })
-        return dailyFallbacks.map { fallback in
+        let pinned = dailyFallbacks.map { fallback in
             let lookupName = fallback.command.split(separator: " ").first.map(String.init) ?? fallback.command
             guard let entry = catalogByName[lookupName.lowercased()] else { return fallback }
             return HermesChatCommandSuggestion(
                 command: fallback.command,
                 title: fallback.title,
                 summary: entry.description ?? fallback.summary,
+                category: entry.category ?? fallback.category,
                 acceptsDraftAsArgument: fallback.acceptsDraftAsArgument
             )
         }
+        var seen = Set(pinned.map { $0.command.lowercased() })
+        let catalogSuggestions = catalog.compactMap { entry -> HermesChatCommandSuggestion? in
+            guard !seen.contains(entry.name.lowercased()) else { return nil }
+            seen.insert(entry.name.lowercased())
+            return HermesChatCommandSuggestion(
+                command: entry.usage,
+                title: title(for: entry.name),
+                summary: entry.description ?? "Run \(entry.name)",
+                category: entry.category,
+                acceptsDraftAsArgument: acceptsDraftAsArgument(entry)
+            )
+        }
+        return pinned + catalogSuggestions
+    }
+
+    private static func title(for command: String) -> String {
+        command
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .split(separator: "-")
+            .map { part in part.prefix(1).uppercased() + part.dropFirst() }
+            .joined(separator: " ")
+    }
+
+    private static func acceptsDraftAsArgument(_ entry: HermesSlashCommandCatalogEntry) -> Bool {
+        let usage = entry.usage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard usage.contains(" ") else { return false }
+        let lowered = usage.lowercased()
+        return lowered.contains("<") || lowered.contains("[") || lowered.contains("...")
     }
 }
 
@@ -192,14 +280,137 @@ enum HermesGatewayPreviewBuilder {
 }
 
 @MainActor
+final class HermesVoiceDictationController: ObservableObject {
+    @Published var isRecording = false
+    @Published var partialTranscript = ""
+    @Published var errorMessage: String?
+
+    private let audioEngine = AVAudioEngine()
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private var baseDraft = ""
+
+    var composedText: String {
+        let partial = partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !partial.isEmpty else { return baseDraft }
+        let base = baseDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return partial }
+        return "\(base) \(partial)"
+    }
+
+    func toggle(baseDraft: String) async {
+        if isRecording {
+            stop()
+        } else {
+            await start(baseDraft: baseDraft)
+        }
+    }
+
+    func start(baseDraft: String) async {
+        guard !isRecording else { return }
+        errorMessage = nil
+        partialTranscript = ""
+        self.baseDraft = baseDraft
+
+        guard await requestSpeechAuthorization() else {
+            errorMessage = "Speech recognition permission is required for dictation."
+            return
+        }
+        guard await requestMicrophoneAuthorization() else {
+            errorMessage = "Microphone permission is required for dictation."
+            return
+        }
+        guard let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
+            errorMessage = "Speech recognition is not available right now."
+            return
+        }
+
+        do {
+            try configureAudioSession()
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            recognitionRequest = request
+
+            let inputNode = audioEngine.inputNode
+            let format = inputNode.outputFormat(forBus: 0)
+            inputNode.removeTap(onBus: 0)
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request] buffer, _ in
+                request?.append(buffer)
+            }
+
+            audioEngine.prepare()
+            try audioEngine.start()
+            isRecording = true
+
+            recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let result {
+                        self.partialTranscript = result.bestTranscription.formattedString
+                        if result.isFinal {
+                            self.stop()
+                        }
+                    }
+                    if let error {
+                        self.errorMessage = HermesGatewayTextSanitizer.sanitize(error.localizedDescription)
+                        self.stop()
+                    }
+                }
+            }
+        } catch {
+            errorMessage = HermesGatewayTextSanitizer.sanitize(error.localizedDescription)
+            stop()
+        }
+    }
+
+    func stop() {
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+        recognitionRequest?.endAudio()
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        isRecording = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func configureAudioSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+    }
+
+    private func requestSpeechAuthorization() async -> Bool {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    private func requestMicrophoneAuthorization() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+}
+
+@MainActor
 final class HermesNativeChatStore: ObservableObject {
     @Published var bootstrapStatus: HermesChatBootstrapStatus?
     @Published var connectionStatus = "Idle"
     @Published var sessionStatus = "No active chat session"
     @Published var currentSessionID: String?
+    @Published var currentStoredSessionID: String?
+    @Published var currentLineageRootID: String?
     @Published var messages: [HermesChatMessage] = []
     @Published var toolCards: [HermesChatToolCard] = []
     @Published var promptCards: [HermesChatPromptCard] = []
+    @Published var pendingAttachments: [HermesPendingAttachment] = []
     @Published var compactionNotice: CompactionNotice?
     @Published var continuation: HermesChatContinuation?
     @Published var diagnostics: [String] = []
@@ -215,6 +426,9 @@ final class HermesNativeChatStore: ObservableObject {
     @Published var isConnecting = false
     @Published var isPreparingSession = false
     @Published var isPerformingRequest = false
+    @Published var isTurnRunning = false
+    @Published var isCompacting = false
+    @Published var isAttachingFile = false
     @Published var isResumingSession = false
     @Published private(set) var pendingResumeTitle: String?
     @Published private(set) var pendingResumeRequestID: UUID?
@@ -244,7 +458,20 @@ final class HermesNativeChatStore: ObservableObject {
     }
 
     var hasConversationContent: Bool {
-        currentSessionID != nil || !messages.isEmpty || !toolCards.isEmpty || !promptCards.isEmpty
+        currentSessionID != nil ||
+            currentStoredSessionID != nil ||
+            !messages.isEmpty ||
+            !toolCards.isEmpty ||
+            !promptCards.isEmpty ||
+            !pendingAttachments.isEmpty
+    }
+
+    var hasVisibleConversationContent: Bool {
+        !messages.isEmpty ||
+            !toolCards.isEmpty ||
+            !promptCards.isEmpty ||
+            compactionNotice != nil ||
+            !pendingAttachments.isEmpty
     }
 
     var hasRestorableConversation: Bool {
@@ -288,10 +515,22 @@ final class HermesNativeChatStore: ObservableObject {
         if isPreparingSession {
             return "Preparing"
         }
-        if isPerformingRequest || messages.contains(where: \.isStreaming) || latestToolCard?.isRunning == true {
+        if isWorking {
             return "Working"
         }
         return "Open in background"
+    }
+
+    var isWorking: Bool {
+        isPerformingRequest ||
+            isTurnRunning ||
+            isCompacting ||
+            messages.contains(where: \.isStreaming) ||
+            latestToolCard?.isRunning == true
+    }
+
+    var notificationSessionID: String? {
+        currentStoredSessionID ?? currentLineageRootID ?? currentSessionID
     }
 
     var restorableConversationUpdatedAt: Date? {
@@ -316,6 +555,12 @@ final class HermesNativeChatStore: ObservableObject {
         if let currentSessionID {
             ids.insert(currentSessionID)
         }
+        if let currentStoredSessionID {
+            ids.insert(currentStoredSessionID)
+        }
+        if let currentLineageRootID {
+            ids.insert(currentLineageRootID)
+        }
         if let continuation {
             ids.insert(continuation.parentSessionID)
             ids.insert(continuation.currentSessionID)
@@ -324,11 +569,17 @@ final class HermesNativeChatStore: ObservableObject {
     }
 
     func isActiveConversation(_ summary: SessionSummary) -> Bool {
-        if activeLineageSessionIDs.contains(summary.id) {
+        if activeLineageSessionIDs.contains(summary.id) ||
+            activeLineageSessionIDs.contains(summary.durableSessionID) ||
+            activeLineageSessionIDs.contains(summary.lineageMatchID) {
             return true
         }
         if let parentSessionID = summary.parentSessionID,
            activeLineageSessionIDs.contains(parentSessionID) {
+            return true
+        }
+        if let lineageRootID = summary.lineageRootID,
+           activeLineageSessionIDs.contains(lineageRootID) {
             return true
         }
         return false
@@ -350,6 +601,32 @@ final class HermesNativeChatStore: ObservableObject {
         await prepareSessionForNewChat()
     }
 
+    func prepareInstantNewChat() {
+        closeCurrentRemoteSessionInBackground()
+        pendingResumeSession = nil
+        pendingResumeTitle = nil
+        pendingResumeRequestID = nil
+        isResumingSession = false
+        clearConversationState(keepDiagnostics: true)
+        sessionStatus = "Ready"
+        connectionStatus = phoneStore?.activeConnection == nil ? "No active SSH connection" : "Ready when you send"
+    }
+
+    func warmGatewayIfUseful() async {
+        guard phoneStore?.activeConnection != nil else { return }
+        guard !isWorking, !isResumingSession, !isCheckingBootstrap, !isConnecting else { return }
+        guard gatewaySession == nil else { return }
+        await ensureGatewaySession(reportsErrors: false)
+    }
+
+    func prepareSessionForDraftIfUseful() async {
+        let draft = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+        guard gatewaySession != nil else { return }
+        guard currentSessionID == nil, !isCreatingSession, !isPreparingSession, !isResumingSession else { return }
+        await ensureCurrentChatSession()
+    }
+
     func syncWithActiveConnection() async {
         let fingerprint = phoneStore?.activeWorkspaceScopeFingerprint
         guard fingerprint != activeConnectionFingerprint else { return }
@@ -360,9 +637,13 @@ final class HermesNativeChatStore: ObservableObject {
         slashCommandCatalog = []
         slashCommandCatalogError = nil
         currentSessionID = nil
+        currentStoredSessionID = nil
+        currentLineageRootID = nil
         pendingResumeSession = nil
         pendingResumeTitle = nil
         pendingResumeRequestID = nil
+        isTurnRunning = false
+        isCompacting = false
         isResumingSession = false
         activeConnectionFingerprint = fingerprint
         connectionStatus = fingerprint == nil ? "No active SSH connection" : "Idle"
@@ -441,7 +722,8 @@ final class HermesNativeChatStore: ObservableObject {
                 params: [
                     "client": .string("HermesPhone"),
                     "source": .string("ios"),
-                    "ui": .string("native")
+                    "ui": .string("native"),
+                    "close_on_disconnect": .bool(false)
                 ],
                 timeout: 60
             )
@@ -487,7 +769,10 @@ final class HermesNativeChatStore: ObservableObject {
             return false
         }
 
-        clearConversationState(keepDiagnostics: true)
+        let hasPrimedConversation = currentStoredSessionID == summary.id && !messages.isEmpty
+        if !hasPrimedConversation {
+            primeResumeSession(summary)
+        }
         sessionStatus = "Loading \(summary.resolvedTitle)..."
 
         do {
@@ -495,7 +780,8 @@ final class HermesNativeChatStore: ObservableObject {
                 method: "session.resume",
                 params: [
                     "session_id": .string(summary.id),
-                    "id": .string(summary.id)
+                    "id": .string(summary.id),
+                    "close_on_disconnect": .bool(false)
                 ],
                 timeout: 60
             )
@@ -516,11 +802,14 @@ final class HermesNativeChatStore: ObservableObject {
                 applyTranscript(cachedHistory)
             }
 
+            currentLineageRootID = summary.lineageRootID ?? summary.parentSessionID ?? currentLineageRootID
+            currentStoredSessionID = currentStoredSessionID ?? summary.id
+
             if let parentSessionID = summary.parentSessionID,
-               let currentSessionID {
+               let durableSessionID = currentStoredSessionID ?? currentSessionID {
                 registerContinuation(
                     parentSessionID: parentSessionID,
-                    currentSessionID: currentSessionID,
+                    currentSessionID: durableSessionID,
                     title: summary.title,
                     message: "Resumed the latest compacted continuation for this conversation."
                 )
@@ -538,7 +827,7 @@ final class HermesNativeChatStore: ObservableObject {
         pendingResumeSession = summary
         pendingResumeTitle = summary.resolvedTitle
         pendingResumeRequestID = UUID()
-        clearConversationState(keepDiagnostics: true)
+        primeResumeSession(summary)
         isResumingSession = true
         sessionStatus = "Preparing to resume \(summary.resolvedTitle)..."
     }
@@ -552,7 +841,7 @@ final class HermesNativeChatStore: ObservableObject {
             return
         }
 
-        await closeActiveConversationIfNeeded()
+        closeCurrentRemoteSessionInBackground()
         queueResumeSession(summary)
     }
 
@@ -562,12 +851,13 @@ final class HermesNativeChatStore: ObservableObject {
     }
 
     func sendCurrentDraft() async {
-        let message = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draft = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = messageForSubmission(draft)
         guard !message.isEmpty else { return }
         guard !isResumingSession else { return }
 
         draftMessage = ""
-        if message == "/stop" {
+        if draft == "/stop" {
             await interrupt()
             return
         }
@@ -586,18 +876,27 @@ final class HermesNativeChatStore: ObservableObject {
             if message.hasPrefix("/") {
                 try await submitSlashCommand(message, session: session, sessionID: currentSessionID)
             } else {
-                _ = try await session.request(
-                    method: "prompt.submit",
-                    params: [
-                        "session_id": .string(currentSessionID),
-                        "text": .string(message)
-                    ],
-                    timeout: 120
-                )
+                try await submitPrompt(message, session: session, sessionID: currentSessionID)
+            }
+            if !draft.hasPrefix("/") {
+                pendingAttachments = []
             }
         } catch {
+            isTurnRunning = false
             present(error)
         }
+    }
+
+    private func messageForSubmission(_ draft: String) -> String {
+        guard !pendingAttachments.isEmpty else { return draft }
+        let attachmentText = pendingAttachments
+            .compactMap { $0.promptText?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        guard !attachmentText.isEmpty else { return draft }
+        guard !draft.isEmpty else { return attachmentText }
+        guard !draft.hasPrefix("/") else { return draft }
+        return "\(attachmentText)\n\n\(draft)"
     }
 
     func runChatTest() async -> String {
@@ -643,6 +942,133 @@ final class HermesNativeChatStore: ObservableObject {
         }
     }
 
+    func attachImageData(_ data: Data, filename: String, mimeType: String?) async {
+        await attachData(
+            data,
+            filename: filename,
+            mimeType: mimeType ?? "image/jpeg",
+            kind: .image,
+            method: "image.attach_bytes",
+            dataParameter: "content_base64"
+        )
+    }
+
+    func attachFile(url: URL) async {
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let type = UTType(filenameExtension: url.pathExtension)
+            if type?.conforms(to: .image) == true {
+                await attachImageData(data, filename: url.lastPathComponent, mimeType: type?.preferredMIMEType)
+            } else if type?.conforms(to: .pdf) == true {
+                await attachData(
+                    data,
+                    filename: url.lastPathComponent,
+                    mimeType: "application/pdf",
+                    kind: .pdf,
+                    method: "pdf.attach",
+                    dataParameter: "content_base64"
+                )
+            } else {
+                await attachGenericFileData(data, filename: url.lastPathComponent, mimeType: type?.preferredMIMEType)
+            }
+        } catch {
+            present(error)
+        }
+    }
+
+    func removePendingAttachment(_ attachment: HermesPendingAttachment) {
+        pendingAttachments.removeAll { $0.id == attachment.id }
+    }
+
+    func reportAttachmentError(_ error: Error) {
+        present(error)
+    }
+
+    private func attachGenericFileData(_ data: Data, filename: String, mimeType: String?) async {
+        await attachData(
+            data,
+            filename: filename,
+            mimeType: mimeType ?? "application/octet-stream",
+            kind: .file,
+            method: "file.attach",
+            dataParameter: "data_url"
+        )
+    }
+
+    private func attachData(
+        _ data: Data,
+        filename: String,
+        mimeType: String,
+        kind: HermesChatAttachmentKind,
+        method: String,
+        dataParameter: String
+    ) async {
+        guard !data.isEmpty else { return }
+        isAttachingFile = true
+        defer { isAttachingFile = false }
+
+        await ensureCurrentChatSession()
+        guard let session = gatewaySession, let currentSessionID else { return }
+
+        do {
+            var params: [String: JSONValue] = [
+                "session_id": .string(currentSessionID),
+                "filename": .string(filename),
+                "name": .string(filename)
+            ]
+            if dataParameter == "data_url" {
+                params[dataParameter] = .string("data:\(mimeType);base64,\(data.base64EncodedString())")
+                params["path"] = .string(filename)
+            } else {
+                params[dataParameter] = .string(data.base64EncodedString())
+            }
+
+            let result = try await session.request(method: method, params: params, timeout: 120)
+            addPendingAttachment(
+                kind: kind,
+                filename: filename,
+                result: result,
+                fallbackSize: data.count
+            )
+            sessionStatus = "\(kind.title) attached"
+        } catch {
+            present(error)
+        }
+    }
+
+    private func addPendingAttachment(
+        kind: HermesChatAttachmentKind,
+        filename: String,
+        result: JSONValue?,
+        fallbackSize: Int
+    ) {
+        let object = result?.objectValue ?? [:]
+        let promptText = value(in: object, keys: ["ref_text", "text"])
+        let detail: String?
+        if let pageCount = object["pages_attached"]?.stringValue {
+            detail = "\(pageCount) page(s)"
+        } else if let bytes = object["bytes"]?.stringValue {
+            detail = "\(bytes) bytes"
+        } else {
+            detail = "\(fallbackSize) bytes"
+        }
+        pendingAttachments.append(
+            HermesPendingAttachment(
+                kind: kind,
+                name: value(in: object, keys: ["name", "filename"]) ?? filename,
+                promptText: promptText,
+                detail: detail
+            )
+        )
+    }
+
     func interrupt() async {
         await ensureGatewaySession()
         guard let session = gatewaySession, let currentSessionID else { return }
@@ -680,7 +1106,11 @@ final class HermesNativeChatStore: ObservableObject {
             clearConversationState(keepDiagnostics: true)
         } else {
             currentSessionID = nil
+            currentStoredSessionID = nil
+            currentLineageRootID = nil
             currentAssistantMessageID = nil
+            isTurnRunning = false
+            isCompacting = false
         }
         pendingResumeSession = nil
         pendingResumeTitle = nil
@@ -772,7 +1202,7 @@ final class HermesNativeChatStore: ObservableObject {
         }
     }
 
-    private func ensureGatewaySession(forceBootstrapRefresh: Bool = false) async {
+    private func ensureGatewaySession(forceBootstrapRefresh: Bool = false, reportsErrors: Bool = true) async {
         await syncWithActiveConnection()
 
         if isConnecting {
@@ -810,7 +1240,11 @@ final class HermesNativeChatStore: ObservableObject {
             connectionStatus = "Gateway connected"
             appendDiagnostic("TUI gateway started successfully.")
         } catch {
-            present(error)
+            if reportsErrors {
+                present(error)
+            } else {
+                appendDiagnostic("Background gateway warm-up failed: \(error.localizedDescription)")
+            }
             await disconnectFromGateway(resetMessages: false)
         }
     }
@@ -840,6 +1274,23 @@ final class HermesNativeChatStore: ObservableObject {
         _ = try await handleCommandResult(result, originalCommand: command, session: session, sessionID: sessionID)
     }
 
+    private func submitPrompt(
+        _ text: String,
+        session: HermesGatewaySSHSession,
+        sessionID: String
+    ) async throws {
+        isTurnRunning = true
+        sessionStatus = "Hermes is responding..."
+        _ = try await session.request(
+            method: "prompt.submit",
+            params: [
+                "session_id": .string(sessionID),
+                "text": .string(text)
+            ],
+            timeout: 120
+        )
+    }
+
     @discardableResult
     private func handleCommandResult(
         _ result: JSONValue?,
@@ -855,14 +1306,7 @@ final class HermesNativeChatStore: ObservableObject {
 
         switch commandResult.primaryAction {
         case .submit(let message):
-            _ = try await session.request(
-                method: "prompt.submit",
-                params: [
-                    "session_id": .string(sessionID),
-                    "text": .string(message)
-                ],
-                timeout: 120
-            )
+            try await submitPrompt(message, session: session, sessionID: sessionID)
             return true
         case .render(let output):
             if isBareSlashCommand(originalCommand, named: "model"), output == "(no output)" {
@@ -1060,19 +1504,62 @@ final class HermesNativeChatStore: ObservableObject {
         await closeChat()
     }
 
+    private func closeCurrentRemoteSessionInBackground() {
+        guard !isWorking, let session = gatewaySession, let sessionID = currentSessionID else { return }
+        Task {
+            do {
+                _ = try await session.request(
+                    method: "session.close",
+                    params: ["session_id": .string(sessionID)],
+                    timeout: 20
+                )
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.appendDiagnostic("background session.close failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     private func clearConversationState(keepDiagnostics: Bool) {
         conversationGeneration += 1
         currentSessionID = nil
+        currentStoredSessionID = nil
+        currentLineageRootID = nil
         currentAssistantMessageID = nil
         messages = []
         toolCards = []
         promptCards = []
+        pendingAttachments = []
         compactionNotice = nil
         continuation = nil
         rawEvents = []
         lastError = nil
+        isTurnRunning = false
+        isCompacting = false
         if !keepDiagnostics {
             diagnostics = []
+        }
+    }
+
+    private func primeResumeSession(_ summary: SessionSummary) {
+        clearConversationState(keepDiagnostics: true)
+        currentStoredSessionID = summary.id
+        currentLineageRootID = summary.lineageRootID ?? summary.parentSessionID
+
+        if let cachedHistory = phoneStore?.cachedTranscript(for: summary.id) {
+            applyTranscript(cachedHistory)
+        }
+
+        if messages.isEmpty,
+           let preview = summary.preview?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !preview.isEmpty {
+            messages = [
+                HermesChatMessage(
+                    role: .system,
+                    text: "Opening \(summary.resolvedTitle). Latest preview:\n\n\(preview)"
+                )
+            ]
         }
     }
 
@@ -1089,24 +1576,28 @@ final class HermesNativeChatStore: ObservableObject {
                 gatewayInfo["Skin"] = skin
             }
         case "session.info":
-            if let sessionID = event.sessionID ?? value(in: event.payload, keys: ["session_id", "id"]) {
-                currentSessionID = sessionID
-            }
-            if let model = value(in: event.payload, keys: ["model"]) {
-                gatewayInfo["Model"] = model
-            }
-            if let version = value(in: event.payload, keys: ["version", "gateway_version"]) {
-                gatewayInfo["Gateway"] = version
-            }
+            applySessionInfo(event)
         case "message.start":
+            isTurnRunning = true
+            isCompacting = false
             startAssistantMessage(with: event.payload)
         case "message.delta":
             appendAssistantDelta(from: event.payload)
         case "message.complete":
             completeAssistantMessage(from: event.payload)
+        case "reasoning.delta":
+            updateReasoningCard(from: event.payload, isComplete: false)
+        case "reasoning.available":
+            updateReasoningCard(from: event.payload, isComplete: true)
+        case "thinking.delta":
+            if let text = value(in: event.payload, keys: ["text", "status", "message"]) {
+                sessionStatus = text
+            }
         case "tool.start":
             updateToolCard(for: event.payload, defaultRunning: true)
         case "tool.progress":
+            updateToolCard(for: event.payload, defaultRunning: true)
+        case "tool.generating":
             updateToolCard(for: event.payload, defaultRunning: true)
         case "tool.complete":
             updateToolCard(for: event.payload, defaultRunning: false)
@@ -1119,11 +1610,19 @@ final class HermesNativeChatStore: ObservableObject {
         case "secret.request":
             upsertPromptCard(kind: .secret, payload: event.payload, fallbackSessionID: event.sessionID)
         case "status.update":
-            sessionStatus = value(in: event.payload, keys: ["text", "status", "message"]) ?? sessionStatus
+            applyStatusUpdate(event)
         case "session.compacted", "context.compacted", "compaction.complete":
             await applyCompactionNotice(from: event)
+        case "background.complete":
+            appendSystemNotice(value(in: event.payload, keys: ["message", "summary", "text"]) ?? "Background task completed.")
+        case "notification.show":
+            appendSystemNotice(value(in: event.payload, keys: ["message", "title", "text"]) ?? "Hermes notification")
+        case "notification.clear":
+            break
         case "error":
             let message = value(in: event.payload, keys: ["message", "error"]) ?? "Unknown gateway error"
+            isTurnRunning = false
+            isCompacting = false
             lastError = message
             messages.append(HermesChatMessage(role: .error, text: message))
         case "gateway.stderr":
@@ -1135,7 +1634,64 @@ final class HermesNativeChatStore: ObservableObject {
         default:
             if isCompactionEvent(event) {
                 await applyCompactionNotice(from: event)
+            } else if event.type.hasPrefix("subagent.") {
+                updateSubagentCard(from: event)
             }
+        }
+    }
+
+    private func applySessionInfo(_ event: HermesGatewayEvent) {
+        if let sessionID = event.sessionID ?? value(in: event.payload, keys: ["session_id", "id"]) {
+            currentSessionID = sessionID
+        }
+        if let storedSessionID = value(in: event.payload, keys: ["stored_session_id", "session_key", "resumed"]) {
+            currentStoredSessionID = storedSessionID
+        }
+        if let lineageRootID = value(in: event.payload, keys: ["_lineage_root_id", "lineage_root_id", "lineage_root"]) {
+            currentLineageRootID = lineageRootID
+        }
+        if let model = value(in: event.payload, keys: ["model"]) {
+            gatewayInfo["Model"] = model
+        }
+        if let provider = value(in: event.payload, keys: ["provider"]) {
+            gatewayInfo["Provider"] = provider
+        }
+        if let cwd = value(in: event.payload, keys: ["cwd"]) {
+            gatewayInfo["CWD"] = cwd
+        }
+        if let branch = value(in: event.payload, keys: ["branch"]) {
+            gatewayInfo["Branch"] = branch
+        }
+        if let version = value(in: event.payload, keys: ["version", "gateway_version"]) {
+            gatewayInfo["Gateway"] = version
+        }
+        if let running = event.payload["running"]?.boolValue {
+            isTurnRunning = running
+            if !running {
+                isCompacting = false
+                if messages.last?.isStreaming == true {
+                    currentAssistantMessageID = nil
+                    for index in messages.indices where messages[index].isStreaming {
+                        messages[index].isStreaming = false
+                    }
+                }
+                if sessionStatus == "Hermes is responding..." || sessionStatus == "Summarizing conversation..." {
+                    sessionStatus = "Response completed"
+                }
+            }
+        }
+    }
+
+    private func applyStatusUpdate(_ event: HermesGatewayEvent) {
+        let kind = value(in: event.payload, keys: ["kind", "type"])
+        let text = value(in: event.payload, keys: ["text", "status", "message"])
+        if kind == "compacting" {
+            isCompacting = true
+            sessionStatus = "Summarizing conversation..."
+            return
+        }
+        if let text {
+            sessionStatus = text
         }
     }
 
@@ -1146,8 +1702,9 @@ final class HermesNativeChatStore: ObservableObject {
     }
 
     private func applyCompactionNotice(from event: HermesGatewayEvent) async {
-        let oldSessionID = value(in: event.payload, keys: ["old_session_id", "parent_session_id"]) ?? currentSessionID
+        let oldSessionID = value(in: event.payload, keys: ["old_session_id", "parent_session_id"]) ?? currentStoredSessionID ?? currentSessionID
         let newSessionID = value(in: event.payload, keys: ["new_session_id", "child_session_id", "continuation_session_id", "session_id", "id"])
+        let newLiveSessionID = value(in: event.payload, keys: ["live_session_id", "runtime_session_id"])
         let message = value(in: event.payload, keys: ["message", "text", "summary"]) ??
             "This session was compacted and will continue in a new session."
         let title = value(in: event.payload, keys: ["title", "session_title", "name"])
@@ -1163,7 +1720,13 @@ final class HermesNativeChatStore: ObservableObject {
         if let oldSessionID,
            let newSessionID,
            newSessionID != oldSessionID {
-            currentSessionID = newSessionID
+            currentStoredSessionID = newSessionID
+            currentLineageRootID = currentLineageRootID ?? oldSessionID
+            if let newLiveSessionID {
+                currentSessionID = newLiveSessionID
+            } else if currentSessionID == nil {
+                currentSessionID = newSessionID
+            }
             registerContinuation(
                 parentSessionID: oldSessionID,
                 currentSessionID: newSessionID,
@@ -1178,7 +1741,7 @@ final class HermesNativeChatStore: ObservableObject {
         appendSystemNotice(message)
         if isCurrentSession {
             HermesPhoneNotificationService.shared.notifyContinuation(
-                sessionID: newSessionID,
+                sessionID: notificationSessionID ?? newSessionID,
                 workspaceFingerprint: phoneStore?.activeWorkspaceScopeFingerprint,
                 message: message
             )
@@ -1293,14 +1856,20 @@ final class HermesNativeChatStore: ObservableObject {
         if let completedMessage {
             HermesPhoneNotificationService.shared.notifyAssistantReply(
                 messageID: completedMessage.id,
-                sessionID: currentSessionID,
+                sessionID: notificationSessionID,
                 workspaceFingerprint: phoneStore?.activeWorkspaceScopeFingerprint,
                 text: completedMessage.text
             )
         }
 
         currentAssistantMessageID = nil
+        isTurnRunning = false
+        isCompacting = false
         sessionStatus = "Response completed"
+        Task { @MainActor [weak self] in
+            guard let phoneStore = self?.phoneStore else { return }
+            await phoneStore.loadSessions()
+        }
     }
 
     private func normalizedChatToolPayload(_ payload: [String: JSONValue]) -> [String: JSONValue] {
@@ -1362,6 +1931,38 @@ final class HermesNativeChatStore: ObservableObject {
         }
     }
 
+    private func updateReasoningCard(from payload: [String: JSONValue], isComplete: Bool) {
+        let text = value(in: payload, keys: ["text", "summary", "message"]) ?? "Reasoning available"
+        updateToolCard(
+            for: [
+                "tool_id": .string("reasoning-current"),
+                "title": .string("Reasoning"),
+                "summary": .string(text),
+                "status": .string(isComplete ? "Available" : "Thinking"),
+                "running": .bool(!isComplete)
+            ],
+            defaultRunning: !isComplete
+        )
+    }
+
+    private func updateSubagentCard(from event: HermesGatewayEvent) {
+        let subagentID = value(in: event.payload, keys: ["subagent_id", "child_session_id", "id"]) ?? "subagent"
+        let title = value(in: event.payload, keys: ["title", "goal", "tool_name", "name"]) ?? "Subagent"
+        let detail = value(in: event.payload, keys: ["summary", "text", "status", "tool_preview", "output_tail"])
+        let isComplete = event.type == "subagent.complete" || event.type == "subagent.error"
+        var payload: [String: JSONValue] = [
+            "tool_id": .string("subagent-\(subagentID)"),
+            "title": .string(title),
+            "type": .string("subagent"),
+            "status": .string(isComplete ? "Complete" : "Running"),
+            "running": .bool(!isComplete)
+        ]
+        if let detail {
+            payload["summary"] = .string(detail)
+        }
+        updateToolCard(for: payload, defaultRunning: !isComplete)
+    }
+
     private func fallbackToolTitle(from payload: [String: JSONValue]) -> String {
         let type = value(in: payload, keys: ["type"])
         if type == "function_call_output" {
@@ -1408,10 +2009,18 @@ final class HermesNativeChatStore: ObservableObject {
             HermesPhoneNotificationService.shared.notifyPendingRequest(
                 requestID: requestID,
                 kindTitle: notificationTitle(for: card),
-                sessionID: sessionID,
+                sessionID: notificationRouteSessionID(for: sessionID),
                 workspaceFingerprint: phoneStore?.activeWorkspaceScopeFingerprint
             )
         }
+    }
+
+    private func notificationRouteSessionID(for sessionID: String?) -> String? {
+        guard let sessionID else { return notificationSessionID }
+        if sessionID == currentSessionID || sessionID == currentStoredSessionID || sessionID == currentLineageRootID {
+            return notificationSessionID ?? sessionID
+        }
+        return sessionID
     }
 
     private func notificationTitle(for card: HermesChatPromptCard) -> String {
@@ -1431,20 +2040,31 @@ final class HermesNativeChatStore: ObservableObject {
         guard let object = result?.objectValue else {
             if let preferredSessionID {
                 currentSessionID = preferredSessionID
+                currentStoredSessionID = preferredSessionID
             }
             return
         }
 
         let previousSessionID = currentSessionID
         let resolvedSessionID = value(in: object, keys: ["session_id", "id"]) ?? preferredSessionID ?? currentSessionID
+        let resolvedStoredSessionID = value(in: object, keys: ["stored_session_id", "session_key", "resumed"]) ??
+            preferredSessionID ??
+            currentStoredSessionID ??
+            resolvedSessionID
+        let resolvedLineageRootID = value(in: object, keys: ["_lineage_root_id", "lineage_root_id", "lineage_root"])
         currentSessionID = resolvedSessionID
+        currentStoredSessionID = resolvedStoredSessionID
+        if let resolvedLineageRootID {
+            currentLineageRootID = resolvedLineageRootID
+        }
 
         if let parentSessionID = value(in: object, keys: ["parent_session_id", "parent_id"]),
-           let resolvedSessionID,
-           resolvedSessionID != parentSessionID {
+           let continuationID = resolvedStoredSessionID ?? resolvedSessionID,
+           continuationID != parentSessionID {
+            currentLineageRootID = currentLineageRootID ?? parentSessionID
             registerContinuation(
                 parentSessionID: parentSessionID,
-                currentSessionID: resolvedSessionID,
+                currentSessionID: continuationID,
                 title: value(in: object, keys: ["title", "name"]),
                 message: "Continuing compacted conversation."
             )
@@ -1457,6 +2077,17 @@ final class HermesNativeChatStore: ObservableObject {
 
         if let messagesValue = object["messages"] ?? object["history"] {
             applyHistoryResult(messagesValue)
+        }
+
+        if let info = object["info"]?.objectValue {
+            applySessionInfo(
+                HermesGatewayEvent(
+                    type: "session.info",
+                    sessionID: resolvedSessionID,
+                    payload: info,
+                    rawLine: nil
+                )
+            )
         }
 
         if let model = value(in: object, keys: ["model"]) {
@@ -1581,10 +2212,13 @@ struct NativeChatScreen: View {
                 scrollToBottomAfterContentChange(using: proxy)
             }
             .onChange(of: chatStore.currentSessionID) { _, newSessionID in
-                HermesPhoneNotificationService.shared.updateVisibleConversationSession(newSessionID)
+                HermesPhoneNotificationService.shared.updateVisibleConversationSession(chatStore.notificationSessionID ?? newSessionID)
                 dismissedLatestToolActivityID = nil
                 isToolTickerExpanded = false
                 scrollToBottom(using: proxy, animated: false)
+            }
+            .onChange(of: chatStore.notificationSessionID) { _, newSessionID in
+                HermesPhoneNotificationService.shared.updateVisibleConversationSession(newSessionID)
             }
             .onChange(of: keyboard.bottomInset) { _, newInset in
                 if newInset > 0 || !isAwayFromBottom {
@@ -1616,7 +2250,7 @@ struct NativeChatScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: visibleToolActivityID)
         .onAppear {
-            HermesPhoneNotificationService.shared.setConversationVisible(true, sessionID: chatStore.currentSessionID)
+            HermesPhoneNotificationService.shared.setConversationVisible(true, sessionID: chatStore.notificationSessionID)
         }
         .onDisappear {
             HermesPhoneNotificationService.shared.setConversationVisible(false, sessionID: nil)
@@ -1640,7 +2274,7 @@ struct NativeChatScreen: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("New Chat", systemImage: "square.and.pencil") {
-                        Task { await chatStore.prepareNewChatReplacingActiveConversation() }
+                        store.openNewChat()
                     }
                     Button("Open Terminal", systemImage: "terminal") {
                         chatStore.openTerminal()
@@ -1658,7 +2292,7 @@ struct NativeChatScreen: View {
         }
         .task(id: store.activeWorkspaceScopeFingerprint) {
             await chatStore.syncWithActiveConnection()
-            await chatStore.refreshBootstrapStatus()
+            await chatStore.warmGatewayIfUseful()
         }
         .task(id: chatStore.pendingResumeRequestID) {
             await chatStore.performPendingResumeIfNeeded()
@@ -1752,7 +2386,8 @@ struct NativeChatScreen: View {
             promptToken,
             noticeToken,
             diagnosticsToken,
-            "\(chatStore.isResumingSession)"
+            "\(chatStore.isResumingSession)",
+            "\(chatStore.isCompacting)"
         ].joined(separator: "|")
     }
 
@@ -1828,7 +2463,7 @@ private struct NativeChatContentView: View {
         } else if !chatStore.canUseNativeChat {
             NativeChatUnavailableView(chatStore: chatStore)
         } else {
-            if chatStore.isResumingSession {
+            if chatStore.isResumingSession && !chatStore.hasVisibleConversationContent {
                 ConversationResumeLoadingView(
                     title: chatStore.pendingResumeTitle,
                     sessionStatus: chatStore.sessionStatus,
@@ -1839,6 +2474,14 @@ private struct NativeChatContentView: View {
             }
 
             NativeChatMessagesView(chatStore: chatStore)
+
+            if chatStore.isResumingSession && chatStore.hasVisibleConversationContent {
+                ConversationResumeInlineStatusView(
+                    title: chatStore.pendingResumeTitle,
+                    sessionStatus: chatStore.sessionStatus,
+                    connectionStatus: chatStore.connectionStatus
+                )
+            }
         }
     }
 
@@ -2168,12 +2811,17 @@ private struct ChatStatusHeader: View {
             HStack(alignment: .top, spacing: 12) {
                 StatusPill(title: chatStore.connectionStatus, color: .blue)
 
-                if let currentSessionID = chatStore.currentSessionID, !currentSessionID.isEmpty {
-                    StatusPill(title: "Session \(currentSessionID.prefix(8))", color: .secondary)
+                if let displaySessionID = chatStore.currentStoredSessionID ?? chatStore.currentSessionID,
+                   !displaySessionID.isEmpty {
+                    StatusPill(title: "Session \(displaySessionID.prefix(8))", color: .secondary)
                 }
 
                 if chatStore.continuation != nil {
                     StatusPill(title: "Continuation", color: .orange)
+                }
+
+                if chatStore.isCompacting {
+                    StatusPill(title: "Summarizing", color: .purple)
                 }
             }
 
@@ -2322,16 +2970,69 @@ private struct ConversationResumeLoadingView: View {
     }
 }
 
+private struct ConversationResumeInlineStatusView: View {
+    let title: String?
+    let sessionStatus: String
+    let connectionStatus: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Finishing resume")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var message: String {
+        let liveStatus = [sessionStatus, connectionStatus]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { status in
+                !status.isEmpty &&
+                    status != "Idle" &&
+                    status != "No active chat session" &&
+                    status != "Ready for native chat" &&
+                    status != "Gateway connected"
+            }
+        if let liveStatus {
+            return liveStatus
+        }
+
+        guard let title, !title.isEmpty else {
+            return "You can keep reading and start drafting while Hermes reconnects."
+        }
+        return "Restoring \(title). You can start drafting now."
+    }
+}
+
 private struct ChatComposerView: View {
     @ObservedObject var chatStore: HermesNativeChatStore
     let skills: [SkillSummary]
     let isLoadingSkills: Bool
     let loadSkills: () async -> Void
     @State private var isPresentingInsertSheet = false
+    @State private var isPresentingFileImporter = false
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @StateObject private var voiceDictation = HermesVoiceDictationController()
     @FocusState private var isMessageFocused: Bool
 
     var body: some View {
         VStack(spacing: 8) {
+            if !chatStore.pendingAttachments.isEmpty {
+                pendingAttachmentStrip
+            }
+
             HStack(alignment: .bottom, spacing: 12) {
                 Button {
                     isPresentingInsertSheet = true
@@ -2341,8 +3042,32 @@ private struct ChatComposerView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
-                .disabled(!canEdit)
-                .opacity(canEdit ? 1 : 0.45)
+                .disabled(!canUseSessionTools)
+                .opacity(canUseSessionTools ? 1 : 0.45)
+
+                PhotosPicker(
+                    selection: $selectedPhotoItems,
+                    maxSelectionCount: 6,
+                    matching: .images
+                ) {
+                    Image(systemName: "photo.circle.fill")
+                        .font(.system(size: 30))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
+                .disabled(!canUseSessionTools || chatStore.isAttachingFile)
+                .opacity(canUseSessionTools && !chatStore.isAttachingFile ? 1 : 0.45)
+
+                Button {
+                    isPresentingFileImporter = true
+                } label: {
+                    Image(systemName: "paperclip.circle.fill")
+                        .font(.system(size: 30))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
+                .disabled(!canUseSessionTools || chatStore.isAttachingFile)
+                .opacity(canUseSessionTools && !chatStore.isAttachingFile ? 1 : 0.45)
 
                 TextField("Message Hermes", text: $chatStore.draftMessage, axis: .vertical)
                     .padding(.horizontal, 14)
@@ -2350,9 +3075,20 @@ private struct ChatComposerView: View {
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .lineLimit(1 ... 6)
                     .focused($isMessageFocused)
-                    .disabled(!canEdit)
+                    .disabled(!canType)
 
-                if chatStore.isPerformingRequest {
+                Button {
+                    Task { await toggleDictation() }
+                } label: {
+                    Image(systemName: voiceDictation.isRecording ? "mic.circle.fill" : "mic.circle")
+                        .font(.system(size: 32))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(voiceDictation.isRecording ? .red : Color(red: 0.18, green: 0.72, blue: 0.62))
+                .disabled(!canType || chatStore.isWorking)
+                .opacity(canType && !chatStore.isWorking ? 1 : 0.45)
+
+                if chatStore.isWorking {
                     Button {
                         Task { await chatStore.interrupt() }
                     } label: {
@@ -2383,11 +3119,13 @@ private struct ChatComposerView: View {
                     .stroke(Color.white.opacity(0.12))
             )
 
-            if statusLine != nil {
+            if composerStatusLine != nil {
                 HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(statusLine ?? "")
+                    if voiceDictation.isRecording || chatStore.isAttachingFile || chatStore.isCheckingBootstrap || chatStore.isConnecting || chatStore.isPreparingSession || chatStore.isResumingSession {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(composerStatusLine ?? "")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -2409,21 +3147,71 @@ private struct ChatComposerView: View {
             )
             .presentationDetents([.medium, .large])
         }
+        .fileImporter(
+            isPresented: $isPresentingFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            Task { await handleImportedFiles(result) }
+        }
+        .onChange(of: selectedPhotoItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task { await handleSelectedPhotos(items) }
+        }
+        .onChange(of: voiceDictation.composedText) { _, value in
+            guard voiceDictation.isRecording else { return }
+            chatStore.draftMessage = value
+        }
+        .task(id: chatStore.draftMessage) {
+            guard !chatStore.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            await chatStore.prepareSessionForDraftIfUseful()
+        }
+        .onDisappear {
+            voiceDictation.stop()
+        }
+    }
+
+    private var pendingAttachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(chatStore.pendingAttachments) { attachment in
+                    ChatAttachmentChip(
+                        attachment: attachment,
+                        onRemove: { chatStore.removePendingAttachment(attachment) }
+                    )
+                }
+            }
+            .padding(.horizontal, 14)
+        }
     }
 
     private var trimmedDraft: String {
         chatStore.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var canEdit: Bool {
-        !chatStore.isResumingSession && !chatStore.isCheckingBootstrap
+    private var canType: Bool {
+        !chatStore.isCheckingBootstrap
+    }
+
+    private var canUseSessionTools: Bool {
+        canType && !chatStore.isResumingSession
     }
 
     private var canSend: Bool {
-        canEdit && !trimmedDraft.isEmpty
+        canUseSessionTools && !chatStore.isAttachingFile && (!trimmedDraft.isEmpty || !chatStore.pendingAttachments.isEmpty)
     }
 
-    private var statusLine: String? {
+    private var composerStatusLine: String? {
+        if voiceDictation.isRecording {
+            return "Listening..."
+        }
+        if let error = voiceDictation.errorMessage, !error.isEmpty {
+            return error
+        }
+        if chatStore.isAttachingFile {
+            return "Attaching..."
+        }
         if chatStore.isCheckingBootstrap {
             return "Checking host…"
         }
@@ -2437,6 +3225,46 @@ private struct ChatComposerView: View {
             return "Loading conversation…"
         }
         return nil
+    }
+
+    private func toggleDictation() async {
+        if voiceDictation.isRecording {
+            voiceDictation.stop()
+            isMessageFocused = true
+        } else {
+            await voiceDictation.toggle(baseDraft: chatStore.draftMessage)
+        }
+    }
+
+    private func handleSelectedPhotos(_ items: [PhotosPickerItem]) async {
+        defer { selectedPhotoItems = [] }
+        for item in items {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+                let type = item.supportedContentTypes.first
+                let ext = type?.preferredFilenameExtension ?? "jpg"
+                await chatStore.attachImageData(
+                    data,
+                    filename: "photo.\(ext)",
+                    mimeType: type?.preferredMIMEType
+                )
+            } catch {
+                chatStore.reportAttachmentError(error)
+            }
+        }
+        isMessageFocused = true
+    }
+
+    private func handleImportedFiles(_ result: Result<[URL], Error>) async {
+        switch result {
+        case .success(let urls):
+            for url in urls {
+                await chatStore.attachFile(url: url)
+            }
+            isMessageFocused = true
+        case .failure(let error):
+            chatStore.reportAttachmentError(error)
+        }
     }
 
     private func insertCommand(_ command: HermesChatCommandSuggestion) {
@@ -2458,6 +3286,41 @@ private struct ChatComposerView: View {
         }
         isPresentingInsertSheet = false
         isMessageFocused = true
+    }
+}
+
+private struct ChatAttachmentChip: View {
+    let attachment: HermesPendingAttachment
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: attachment.kind.symbolName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(red: 0.18, green: 0.72, blue: 0.62))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.name)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                if let detail = attachment.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(.secondarySystemBackground), in: Capsule())
     }
 }
 
@@ -2628,6 +3491,12 @@ private struct ChatCommandRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+            if let category = command.category, !category.isEmpty {
+                Text(category)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+            }
         }
         .padding(.vertical, 3)
     }
