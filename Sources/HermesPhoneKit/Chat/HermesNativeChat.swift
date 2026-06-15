@@ -142,6 +142,22 @@ struct HermesChatContinuation: Identifiable, Hashable, Sendable {
     var message: String
 }
 
+private struct HermesChatConversationSnapshot {
+    var currentSessionID: String?
+    var currentStoredSessionID: String?
+    var currentLineageRootID: String?
+    var currentAssistantMessageID: UUID?
+    var messages: [HermesChatMessage]
+    var toolCards: [HermesChatToolCard]
+    var promptCards: [HermesChatPromptCard]
+    var pendingAttachments: [HermesPendingAttachment]
+    var compactionNotice: CompactionNotice?
+    var continuation: HermesChatContinuation?
+    var draftMessage: String
+    var sessionStatus: String
+    var lastError: String?
+}
+
 struct HermesGatewayPreview: Hashable, Sendable {
     var toolType: String?
     var actionSummary: String?
@@ -449,6 +465,8 @@ final class HermesNativeChatStore: ObservableObject {
     private var pendingResumeSession: SessionSummary?
     private var isCreatingSession = false
     private var conversationGeneration = 0
+    private var suppressedCachedRestoreFingerprint: String?
+    private var conversationSnapshotsByFingerprint: [String: HermesChatConversationSnapshot] = [:]
 
     init(phoneStore: HermesPhoneStore, sshTransport: SSHTransport) {
         self.phoneStore = phoneStore
@@ -457,6 +475,10 @@ final class HermesNativeChatStore: ObservableObject {
 
     var canUseNativeChat: Bool {
         bootstrapStatus?.canUseNativeChat == true
+    }
+
+    var hasActiveConnection: Bool {
+        phoneStore?.activeConnection != nil
     }
 
     var fallbackReason: String? {
@@ -597,31 +619,30 @@ final class HermesNativeChatStore: ObservableObject {
         return false
     }
 
-    func prepareNewChat() {
-        pendingResumeSession = nil
-        pendingResumeTitle = nil
-        pendingResumeRequestID = nil
-        isResumingSession = false
-        clearConversationState(keepDiagnostics: true)
-        sessionStatus = "Ready to start a new chat"
-        connectionStatus = phoneStore?.activeConnection == nil ? "No active SSH connection" : "Ready for native chat"
-    }
-
-    func prepareNewChatReplacingActiveConversation() async {
-        await closeActiveConversationIfNeeded()
-        prepareNewChat()
-        await prepareSessionForNewChat()
-    }
-
     func prepareInstantNewChat() {
         closeCurrentRemoteSessionInBackground()
+        suppressedCachedRestoreFingerprint = phoneStore?.activeWorkspaceScopeFingerprint
         pendingResumeSession = nil
         pendingResumeTitle = nil
         pendingResumeRequestID = nil
         isResumingSession = false
         clearConversationState(keepDiagnostics: true)
+        draftMessage = ""
+        if let fingerprint = activeConnectionFingerprint {
+            conversationSnapshotsByFingerprint[fingerprint] = nil
+        }
         sessionStatus = "Ready"
         connectionStatus = phoneStore?.activeConnection == nil ? "No active SSH connection" : "Ready when you send"
+    }
+
+    func restoreCachedConversationIfUseful(_ summary: SessionSummary?) {
+        guard let summary else { return }
+        guard !hasConversationContent, !isWorking, !isResumingSession else { return }
+        let fingerprint = phoneStore?.activeWorkspaceScopeFingerprint
+        guard suppressedCachedRestoreFingerprint != fingerprint else { return }
+        primeResumeSession(summary)
+        sessionStatus = "Ready to continue"
+        connectionStatus = fingerprint == nil ? "No active SSH connection" : "Ready when you send"
     }
 
     func warmGatewayIfUseful() async {
@@ -631,26 +652,23 @@ final class HermesNativeChatStore: ObservableObject {
         await ensureGatewaySession(reportsErrors: false)
     }
 
-    func prepareSessionForDraftIfUseful() async {
+    func warmGatewayForDraftIfUseful() async {
         let draft = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else { return }
-        guard gatewaySession != nil else { return }
         guard currentSessionID == nil, !isCreatingSession, !isPreparingSession, !isResumingSession else { return }
-        await ensureCurrentChatSession()
+        await warmGatewayIfUseful()
     }
 
     func syncWithActiveConnection() async {
         let fingerprint = phoneStore?.activeWorkspaceScopeFingerprint
         guard fingerprint != activeConnectionFingerprint else { return }
 
-        await disconnectFromGateway(resetMessages: true)
+        snapshotActiveConversationIfUseful()
+        await disconnectFromGateway(resetMessages: false)
         bootstrapStatus = nil
         gatewayInfo = [:]
         slashCommandCatalog = []
         slashCommandCatalogError = nil
-        currentSessionID = nil
-        currentStoredSessionID = nil
-        currentLineageRootID = nil
         pendingResumeSession = nil
         pendingResumeTitle = nil
         pendingResumeRequestID = nil
@@ -658,9 +676,15 @@ final class HermesNativeChatStore: ObservableObject {
         isCompacting = false
         isResumingSession = false
         activeConnectionFingerprint = fingerprint
-        connectionStatus = fingerprint == nil ? "No active SSH connection" : "Idle"
-        sessionStatus = "No active chat session"
-        lastError = nil
+        if restoreConversationSnapshot(for: fingerprint) {
+            connectionStatus = fingerprint == nil ? "No active SSH connection" : "Ready when you send"
+        } else {
+            clearConversationState(keepDiagnostics: false)
+            draftMessage = ""
+            connectionStatus = fingerprint == nil ? "No active SSH connection" : "Idle"
+            sessionStatus = "No active chat session"
+            lastError = nil
+        }
     }
 
     func refreshBootstrapStatus(force: Bool = false) async {
@@ -754,11 +778,6 @@ final class HermesNativeChatStore: ObservableObject {
 
         await createSession()
         return currentSessionID != nil
-    }
-
-    private func prepareSessionForNewChat() async {
-        guard !isResumingSession else { return }
-        await ensureCurrentChatSession()
     }
 
     @discardableResult
@@ -868,8 +887,8 @@ final class HermesNativeChatStore: ObservableObject {
         guard !message.isEmpty else { return }
         guard !isResumingSession else { return }
 
-        draftMessage = ""
         if draft == "/stop" {
+            draftMessage = ""
             await interrupt()
             return
         }
@@ -878,9 +897,13 @@ final class HermesNativeChatStore: ObservableObject {
         isPerformingRequest = true
         defer { isPerformingRequest = false }
 
-        await ensureCurrentChatSession()
-        guard let session = gatewaySession,
-              let currentSessionID else { return }
+        guard await ensureCurrentChatSession(),
+              let session = gatewaySession,
+              let currentSessionID else {
+            sessionStatus = sessionPreparationFailureMessage
+            return
+        }
+        draftMessage = ""
         messages.append(HermesChatMessage(role: .user, text: message))
         sessionStatus = "Sending prompt..."
 
@@ -893,6 +916,38 @@ final class HermesNativeChatStore: ObservableObject {
             if !draft.hasPrefix("/") {
                 pendingAttachments = []
             }
+        } catch {
+            isTurnRunning = false
+            present(error)
+        }
+    }
+
+    func sendSlashCommandAction(_ command: String) async {
+        let normalizedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizedCommand.hasPrefix("/") else { return }
+        guard !isResumingSession else { return }
+
+        if normalizedCommand == "/stop" {
+            await interrupt()
+            return
+        }
+
+        guard !isWorking else { return }
+        sessionStatus = currentSessionID == nil ? "Preparing chat session..." : "Sending command..."
+        isPerformingRequest = true
+        defer { isPerformingRequest = false }
+
+        guard await ensureCurrentChatSession(),
+              let session = gatewaySession,
+              let currentSessionID else {
+            sessionStatus = sessionPreparationFailureMessage
+            return
+        }
+        messages.append(HermesChatMessage(role: .user, text: normalizedCommand))
+        sessionStatus = "Sending command..."
+
+        do {
+            try await submitSlashCommand(normalizedCommand, session: session, sessionID: currentSessionID)
         } catch {
             isTurnRunning = false
             present(error)
@@ -1531,6 +1586,61 @@ final class HermesNativeChatStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private var sessionPreparationFailureMessage: String {
+        fallbackReason ?? lastError ?? connectionStatus
+    }
+
+    private func snapshotActiveConversationIfUseful() {
+        guard let fingerprint = activeConnectionFingerprint else { return }
+        let hasDraft = !draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasConversationContent || hasDraft else {
+            conversationSnapshotsByFingerprint[fingerprint] = nil
+            return
+        }
+
+        conversationSnapshotsByFingerprint[fingerprint] = HermesChatConversationSnapshot(
+            currentSessionID: currentSessionID,
+            currentStoredSessionID: currentStoredSessionID,
+            currentLineageRootID: currentLineageRootID,
+            currentAssistantMessageID: currentAssistantMessageID,
+            messages: messages,
+            toolCards: toolCards,
+            promptCards: promptCards,
+            pendingAttachments: pendingAttachments,
+            compactionNotice: compactionNotice,
+            continuation: continuation,
+            draftMessage: draftMessage,
+            sessionStatus: sessionStatus,
+            lastError: lastError
+        )
+    }
+
+    @discardableResult
+    private func restoreConversationSnapshot(for fingerprint: String?) -> Bool {
+        guard let fingerprint, let snapshot = conversationSnapshotsByFingerprint[fingerprint] else {
+            return false
+        }
+
+        conversationGeneration += 1
+        currentSessionID = snapshot.currentSessionID
+        currentStoredSessionID = snapshot.currentStoredSessionID
+        currentLineageRootID = snapshot.currentLineageRootID
+        currentAssistantMessageID = snapshot.currentAssistantMessageID
+        messages = snapshot.messages
+        toolCards = snapshot.toolCards
+        promptCards = snapshot.promptCards
+        pendingAttachments = snapshot.pendingAttachments
+        compactionNotice = snapshot.compactionNotice
+        continuation = snapshot.continuation
+        draftMessage = snapshot.draftMessage
+        rawEvents = []
+        isTurnRunning = false
+        isCompacting = false
+        lastError = snapshot.lastError
+        sessionStatus = snapshot.sessionStatus
+        return true
     }
 
     private func clearConversationState(keepDiagnostics: Bool) {
@@ -2191,6 +2301,20 @@ final class HermesNativeChatStore: ObservableObject {
     }
 }
 
+private enum NativeChatSheet: Identifiable {
+    case profiles
+    case history
+
+    var id: String {
+        switch self {
+        case .profiles:
+            return "profiles"
+        case .history:
+            return "history"
+        }
+    }
+}
+
 struct NativeChatScreen: View {
     @EnvironmentObject private var store: HermesPhoneStore
     @ObservedObject var chatStore: HermesNativeChatStore
@@ -2200,6 +2324,7 @@ struct NativeChatScreen: View {
     @State private var isAwayFromBottom = false
     @State private var scrollMetrics = NativeChatScrollMetrics()
     @State private var bottomControlsHeight: CGFloat = 0
+    @State private var presentedSheet: NativeChatSheet?
     private let bottomAnchorID = "native-chat-bottom-anchor"
     private let bottomDistanceThreshold: CGFloat = 72
     private let scrollToBottomButtonSize: CGFloat = 38
@@ -2267,7 +2392,7 @@ struct NativeChatScreen: View {
                 await autoDismissVisibleToolTickerIfNeeded()
             }
         }
-        .navigationTitle(chatStore.isResumingSession ? "Continuing" : (chatStore.currentSessionID == nil ? "New Chat" : "Conversation"))
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: visibleToolActivityID)
         .onAppear {
@@ -2283,6 +2408,15 @@ struct NativeChatScreen: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    presentedSheet = .profiles
+                } label: {
+                    Label("Profiles", systemImage: "person.crop.circle")
+                }
+                .disabled(store.activeHostConnections.isEmpty)
+            }
+
             if keyboard.isVisible {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -2293,10 +2427,39 @@ struct NativeChatScreen: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    presentedSheet = .history
+                } label: {
+                    Label("History", systemImage: "clock.arrow.circlepath")
+                }
+                .disabled(store.activeConnection == nil)
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    store.openNewChat()
+                    dismissKeyboard()
+                } label: {
+                    Label("New Chat", systemImage: "square.and.pencil")
+                }
+                .disabled(store.activeConnection == nil)
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("New Chat", systemImage: "square.and.pencil") {
-                        store.openNewChat()
+                    Button("Status", systemImage: "info.circle") {
+                        insertCommand("/status")
                     }
+                    Button("Model", systemImage: "cpu") {
+                        insertCommand("/model")
+                    }
+                    Button("Compact", systemImage: "rectangle.compress.vertical") {
+                        insertCommand("/compress")
+                    }
+                    Button("Stop", systemImage: "stop.fill") {
+                        Task { await chatStore.interrupt() }
+                    }
+                    .disabled(!chatStore.isWorking)
                     Button("Open Terminal", systemImage: "terminal") {
                         chatStore.openTerminal()
                     }
@@ -2311,13 +2474,49 @@ struct NativeChatScreen: View {
                 }
             }
         }
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .profiles:
+                ProfileSwitcherSheet(
+                    chatStore: chatStore,
+                    onSelectProfile: { profileName in
+                        presentedSheet = nil
+                        Task { await store.switchHermesProfile(to: profileName) }
+                    }
+                )
+                .environmentObject(store)
+                .presentationDetents([.medium, .large])
+            case .history:
+                ChatHistorySheet(
+                    onOpenSession: {
+                        presentedSheet = nil
+                    }
+                )
+                .environmentObject(store)
+                .presentationDetents([.large])
+            }
+        }
         .task(id: store.activeWorkspaceScopeFingerprint) {
             await chatStore.syncWithActiveConnection()
+            chatStore.restoreCachedConversationIfUseful(store.sessions.first)
             await chatStore.warmGatewayIfUseful()
+            Task { await store.loadSessions() }
+            Task { await store.refreshOverview() }
         }
         .task(id: chatStore.pendingResumeRequestID) {
             await chatStore.performPendingResumeIfNeeded()
         }
+    }
+
+    private var navigationTitle: String {
+        if chatStore.isResumingSession {
+            return "Continuing"
+        }
+        return store.activeConnection?.resolvedHermesProfileName ?? "Hermes"
+    }
+
+    private func insertCommand(_ command: String) {
+        Task { await chatStore.sendSlashCommandAction(command) }
     }
 
     private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool = true) {
@@ -2455,6 +2654,287 @@ struct NativeChatScreen: View {
     }
 }
 
+private struct ProfileSwitcherSheet: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var chatStore: HermesNativeChatStore
+    let onSelectProfile: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if store.availableProfiles.isEmpty {
+                    ContentUnavailableView(
+                        "No Profiles",
+                        systemImage: "person.crop.circle.badge.questionmark",
+                        description: Text("Saved Hermes profiles for this host will appear here.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                } else {
+                    Section {
+                        ForEach(store.availableProfiles) { profile in
+                            Button {
+                                onSelectProfile(profile.name)
+                            } label: {
+                                ProfileSwitcherRow(
+                                    profile: profile,
+                                    host: store.activeConnection?.label,
+                                    isActive: profile.name == store.activeConnection?.resolvedHermesProfileName,
+                                    activePreview: chatStore.restorableConversationPreview,
+                                    activeStatus: chatStore.restorableConversationStatus
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Profiles")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ProfileSwitcherRow: View {
+    let profile: RemoteHermesProfile
+    let host: String?
+    let isActive: Bool
+    let activePreview: String
+    let activeStatus: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: isActive ? "bubble.left.and.bubble.right.fill" : "person.crop.circle")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(isActive ? Color(red: 0.18, green: 0.72, blue: 0.62) : .secondary)
+                .frame(width: 32, height: 32)
+                .background(Color(.tertiarySystemFill), in: Circle())
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(profile.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if isActive {
+                        DetailBadge(title: activeStatus, tint: chatStoreBadgeTint)
+                    }
+                }
+
+                Text(host ?? profile.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(isActive ? activePreview : "Open this profile's active chat.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var chatStoreBadgeTint: Color {
+        switch activeStatus {
+        case "Needs input":
+            return .orange
+        case "Working", "Preparing":
+            return .blue
+        default:
+            return Color(red: 0.18, green: 0.72, blue: 0.62)
+        }
+    }
+}
+
+private struct ChatHistorySheet: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    let onOpenSession: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if shouldShowLoadingState {
+                    HStack {
+                        Spacer()
+                        ProgressView("Loading history...")
+                        Spacer()
+                    }
+                } else if shouldShowLoadFailure {
+                    ContentUnavailableView(
+                        "Couldn't Load History",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text("Check the connection and try again.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+
+                    Button("Retry", systemImage: "arrow.clockwise") {
+                        Task { await store.loadSessions(query: query) }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .disabled(store.isLoadingSessions)
+                } else if displayedSessions.isEmpty {
+                    ContentUnavailableView(
+                        emptyTitle,
+                        systemImage: "clock.arrow.circlepath",
+                        description: Text(emptyDescription)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                } else {
+                    Section(sectionTitle) {
+                        ForEach(displayedSessions) { session in
+                            VStack(alignment: .leading, spacing: 10) {
+                                ConversationRow(
+                                    session: session,
+                                    isActiveConversation: store.nativeChatStore.isActiveConversation(session)
+                                )
+
+                                HStack(spacing: 10) {
+                                    Button {
+                                        open(session)
+                                    } label: {
+                                        Label("Continue", systemImage: "bubble.left.and.bubble.right")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+
+                                    NavigationLink {
+                                        SessionTranscriptScreen(session: session)
+                                    } label: {
+                                        Label("Transcript", systemImage: "text.bubble")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button("Continue", systemImage: "bubble.left.and.bubble.right") {
+                                    open(session)
+                                }
+                                .tint(.blue)
+
+                                Button("Terminal", systemImage: "terminal") {
+                                    store.resumeSessionInTerminal(session)
+                                    dismiss()
+                                }
+                                .tint(.green)
+                            }
+                            .contextMenu {
+                                Button {
+                                    open(session)
+                                } label: {
+                                    Label("Continue in Chat", systemImage: "bubble.left.and.bubble.right")
+                                }
+
+                                Button {
+                                    store.resumeSessionInTerminal(session)
+                                    dismiss()
+                                } label: {
+                                    Label("Resume in Terminal", systemImage: "terminal")
+                                }
+                            }
+                        }
+
+                        if store.hasMoreSessions {
+                            Button {
+                                Task { await store.loadMoreSessions() }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    if store.isLoadingSessions {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                    Text(store.isLoadingSessions ? "Loading More..." : "Load More")
+                                    Spacer()
+                                }
+                            }
+                            .disabled(store.isLoadingSessions)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("History")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(
+                text: $query,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search past chats"
+            )
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .onSubmit(of: .search) {
+                Task { await store.loadSessions(query: query) }
+            }
+            .onChange(of: query) { _, newValue in
+                if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Task { await store.loadSessions() }
+                }
+            }
+            .task(id: store.activeWorkspaceScopeFingerprint) {
+                await store.loadSessions(query: query)
+            }
+            .refreshable {
+                await store.loadSessions(query: query)
+            }
+        }
+    }
+
+    private var displayedSessions: [SessionSummary] {
+        store.sessions
+    }
+
+    private var shouldShowLoadingState: Bool {
+        displayedSessions.isEmpty &&
+            (store.isLoadingSessions ||
+             store.sessionsLoadState == .pending ||
+             store.sessionsLoadState == .loading)
+    }
+
+    private var shouldShowLoadFailure: Bool {
+        displayedSessions.isEmpty && store.sessionsLoadState == .failed
+    }
+
+    private var sectionTitle: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Recent" : "Search Results"
+    }
+
+    private var emptyTitle: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No History" : "No Search Results"
+    }
+
+    private var emptyDescription: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Past conversations for this profile will appear here."
+            : "Try another search or clear the query to return to recent conversations."
+    }
+
+    private func open(_ session: SessionSummary) {
+        store.continueSessionInChat(session)
+        onOpenSession()
+        dismiss()
+    }
+}
+
 private struct NativeChatContentView: View {
     @ObservedObject var chatStore: HermesNativeChatStore
     let connection: ConnectionProfile?
@@ -2476,14 +2956,24 @@ private struct NativeChatContentView: View {
 
     @ViewBuilder
     private var chatBody: some View {
-        if chatStore.isCheckingBootstrap || chatStore.bootstrapStatus == nil {
+        if !chatStore.hasActiveConnection {
+            NativeChatNoConnectionView()
+        } else if (chatStore.isCheckingBootstrap || chatStore.bootstrapStatus == nil) && !chatStore.hasVisibleConversationContent {
             ChatProgressStateView(
                 title: "Checking Hermes",
                 message: "Verifying SSH, python3, Hermes CLI, and the TUI Gateway on this host."
             )
-        } else if !chatStore.canUseNativeChat {
+        } else if !chatStore.canUseNativeChat && chatStore.bootstrapStatus != nil {
             NativeChatUnavailableView(chatStore: chatStore)
         } else {
+            if chatStore.isCheckingBootstrap || chatStore.bootstrapStatus == nil {
+                ConversationResumeInlineStatusView(
+                    title: nil,
+                    sessionStatus: "Checking Hermes",
+                    connectionStatus: chatStore.connectionStatus
+                )
+            }
+
             if chatStore.isResumingSession && !chatStore.hasVisibleConversationContent {
                 ConversationResumeLoadingView(
                     title: chatStore.pendingResumeTitle,
@@ -2854,6 +3344,9 @@ private struct ChatStatusHeader: View {
     }
 
     private var availabilityTitle: String {
+        if !chatStore.hasActiveConnection {
+            return "No Profile"
+        }
         if chatStore.isCheckingBootstrap || chatStore.bootstrapStatus == nil {
             return "Checking"
         }
@@ -2861,10 +3354,25 @@ private struct ChatStatusHeader: View {
     }
 
     private var availabilityColor: Color {
+        if !chatStore.hasActiveConnection {
+            return .orange
+        }
         if chatStore.isCheckingBootstrap || chatStore.bootstrapStatus == nil {
             return .secondary
         }
         return chatStore.canUseNativeChat ? .green : .orange
+    }
+}
+
+private struct NativeChatNoConnectionView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "No Active Connection",
+            systemImage: "server.rack",
+            description: Text("Choose a saved SSH connection in More to start chatting with Hermes.")
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
     }
 }
 
@@ -3173,7 +3681,7 @@ private struct ChatComposerView: View {
         .task(id: chatStore.draftMessage) {
             guard !chatStore.draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             try? await Task.sleep(nanoseconds: 650_000_000)
-            await chatStore.prepareSessionForDraftIfUseful()
+            await chatStore.warmGatewayForDraftIfUseful()
         }
         .onDisappear {
             voiceDictation.stop()
@@ -3199,7 +3707,7 @@ private struct ChatComposerView: View {
     }
 
     private var canType: Bool {
-        !chatStore.isCheckingBootstrap
+        chatStore.hasActiveConnection
     }
 
     private var canUseSessionTools: Bool {
@@ -3722,10 +4230,7 @@ private struct ChatBubble: View {
                 Text(label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(message.text + (message.isStreaming ? "▍" : ""))
-                    .font(.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                messageBody
             }
             .padding(14)
             .background(backgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -3743,6 +4248,21 @@ private struct ChatBubble: View {
             if message.role != .user {
                 Spacer(minLength: 36)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var messageBody: some View {
+        if message.role == .assistant || message.role == .system {
+            HermesChatMarkdownView(text: message.text, isStreaming: message.isStreaming)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+        } else {
+            Text(message.text + (message.isStreaming ? "▍" : ""))
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         }
     }
 

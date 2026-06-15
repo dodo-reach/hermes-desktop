@@ -261,6 +261,14 @@ final class HermesPhoneStore: ObservableObject {
             present(SSHTransportError.invalidConnection("Close the open file before switching Hermes profiles."))
             return
         }
+        guard !nativeChatStore.isWorking,
+              !nativeChatStore.isPreparingSession,
+              !nativeChatStore.isResumingSession,
+              !nativeChatStore.isAttachingFile,
+              nativeChatStore.promptCards.isEmpty else {
+            alertMessage = "Hermes is still working in the current chat. Stop it before switching profiles."
+            return
+        }
 
         guard let profileConnection = profileConnection(forHost: activeHostFingerprint, profileName: profileName) else {
             present(SSHTransportError.invalidConnection("Choose a saved host before switching profiles."))
@@ -423,7 +431,7 @@ final class HermesPhoneStore: ObservableObject {
 
     func continueSessionInChat(_ session: SessionSummary) {
         selectedRootTab = .chat
-        chatNavigationPath = [.conversation]
+        chatNavigationPath = []
         if nativeChatStore.isActiveConversation(session), nativeChatStore.hasConversationContent {
             return
         }
@@ -438,7 +446,7 @@ final class HermesPhoneStore: ObservableObject {
 
     func openNewChat() {
         selectedRootTab = .chat
-        chatNavigationPath = [.conversation]
+        chatNavigationPath = []
         guard !nativeChatStore.isWorking else {
             alertMessage = "Hermes is still working in the current chat. Stop it before starting a new one."
             return
@@ -448,7 +456,7 @@ final class HermesPhoneStore: ObservableObject {
 
     func reopenActiveConversation() {
         selectedRootTab = .chat
-        chatNavigationPath = [.conversation]
+        chatNavigationPath = []
     }
 
     func openNotificationRoute(_ route: HermesPhoneNotificationRoute) {
@@ -462,12 +470,12 @@ final class HermesPhoneStore: ObservableObject {
         }
 
         if nativeChatStore.hasRestorableConversation {
-            chatNavigationPath = [.conversation]
+            chatNavigationPath = []
             return
         }
 
         guard let sessionID = route.sessionID else {
-            chatNavigationPath = [.conversation]
+            chatNavigationPath = []
             return
         }
 
@@ -519,10 +527,6 @@ final class HermesPhoneStore: ObservableObject {
             seen.insert(key)
             return true
         }
-    }
-
-    func openNativeChat() {
-        openNewChat()
     }
 
     func ensureTerminalConnected() {

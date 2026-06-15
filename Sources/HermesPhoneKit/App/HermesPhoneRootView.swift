@@ -18,13 +18,11 @@ public struct HermesPhoneRootView: View {
     public var body: some View {
         TabView(selection: $store.selectedRootTab) {
             NavigationStack(path: $store.chatNavigationPath) {
-                ChatInboxScreen()
+                NativeChatScreen(chatStore: store.nativeChatStore)
                     .navigationDestination(for: HermesPhoneChatRoute.self) { route in
                         switch route {
                         case .transcript(let session):
                             SessionTranscriptScreen(session: session)
-                        case .conversation:
-                            NativeChatScreen(chatStore: store.nativeChatStore)
                         }
                     }
             }

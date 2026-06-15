@@ -132,7 +132,6 @@ enum SessionListLoadState: Equatable {
 
 enum HermesPhoneChatRoute: Hashable {
     case transcript(SessionSummary)
-    case conversation
 }
 
 enum CronOperationKind: String, Sendable {
