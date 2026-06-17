@@ -1,0 +1,25 @@
+version = 1
+name = "hermes-ui"
+
+[setup]
+script = ""
+
+[[actions]]
+name = "Test"
+icon = "run"
+command = "./scripts/run-tests.sh"
+
+[[actions]]
+name = "Build Mac App"
+icon = "run"
+command = "./scripts/build-macos-app.sh"
+
+[[actions]]
+name = "Verify Release"
+icon = "run"
+command = "./scripts/verify-release.sh"
+
+[[actions]]
+name = "Build Phone Kit"
+icon = "run"
+command = "swift build --target HermesPhoneKit"
