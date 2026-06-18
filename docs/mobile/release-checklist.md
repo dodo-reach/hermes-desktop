@@ -61,18 +61,18 @@ Run this on a simulator and, before submission, a real device:
 - add a private-key SSH connection if supported by the release.
 - accept an unknown host key.
 - reject or handle a changed host key.
-- open Terminal.
-- run a simple remote command.
-- open native chat.
-- create or resume a chat session.
-- respond to an approval prompt.
-- inspect session list and transcript.
+- inspect the Sessions list, search, pagination, cached resume, and selectable transcript.
+- confirm whole-message copy and reasoning/tool separation.
+- confirm there is no chat composer, chat warmup process, or chat notification route.
+- open Kanban and verify foreground polling stops after leaving the tab.
+- verify Gateway, Profiles, Config, and Environment under Manage.
+- open Terminal as a secondary utility and run a simple remote command.
 - browse canonical files.
 - browse and pin a remote directory.
 - view skills.
 - view cron jobs.
 - pause/resume/run a cron job if a safe test job exists.
-- background and foreground the app during terminal/chat usage.
+- background and foreground the app during Kanban and terminal usage.
 - relaunch and confirm persisted connections, bookmarks, and session state behave as expected.
 
 ## Vendor Check

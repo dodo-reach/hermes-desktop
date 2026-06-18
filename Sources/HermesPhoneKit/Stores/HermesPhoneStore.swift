@@ -4,14 +4,23 @@ import Crypto
 import Foundation
 import NIOCore
 @preconcurrency import NIOSSH
+import OSLog
 import Security
 import SwiftUI
 import UIKit
 
 @MainActor
 final class HermesPhoneStore: ObservableObject {
-    @Published var selectedRootTab: HermesPhoneRootTab = .chat
-    @Published var chatNavigationPath: [HermesPhoneChatRoute] = []
+    enum CompanionScope: Hashable {
+        case gateway
+        case profiles
+        case kanban
+        case config
+        case environment
+    }
+
+    @Published var selectedRootTab: HermesPhoneRootTab = .sessions
+    @Published var sessionNavigationPath: [HermesPhoneSessionRoute] = []
     @Published var connections: [ConnectionProfile] = []
     @Published var activeConnectionID: UUID?
     @Published var activeHostFingerprint: String?
@@ -38,10 +47,15 @@ final class HermesPhoneStore: ObservableObject {
     @Published var alertMessage: String?
     @Published var hostKeyPrompt: HostKeyTrustPrompt?
     @Published var fileEditor: RemoteFileDraft?
+    @Published var gatewaySnapshot: GatewaySnapshot?
+    @Published var profileSnapshot: ProfileManagementSnapshot?
+    @Published var kanbanSnapshot: KanbanMobileSnapshot?
+    @Published var configSnapshot: ConfigSnapshot?
+    @Published var environmentSnapshot: EnvironmentSnapshot?
+    @Published private(set) var loadingCompanionScopes: Set<CompanionScope> = []
     @Published private(set) var workspaceFileBookmarks: [WorkspaceFileBookmark] = []
 
     let terminalWorkspace = HermesTerminalWorkspaceStore()
-    lazy var nativeChatStore = HermesNativeChatStore(phoneStore: self, sshTransport: sshTransport)
 
     private let secretsStore = ConnectionSecretsStore()
     private let sshTransport = SSHTransport()
@@ -50,6 +64,7 @@ final class HermesPhoneStore: ObservableObject {
     private lazy var cronBrowserService = CronBrowserService(sshTransport: sshTransport)
     private lazy var fileEditorService = FileEditorService(sshTransport: sshTransport)
     private lazy var skillBrowserService = SkillBrowserService(sshTransport: sshTransport)
+    private lazy var mobileCompanionService = MobileCompanionService(sshTransport: sshTransport)
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let sessionPageSize = 20
@@ -57,9 +72,15 @@ final class HermesPhoneStore: ObservableObject {
     private var sessionOffset = 0
     private var sessionSearchQuery = ""
     private var transcriptCache: [String: [SessionMessage]] = [:]
+    private var transcriptRequests: [String: (id: UUID, task: Task<[SessionMessage], Error>)] = [:]
     private var sessionCacheByWorkspace: [String: [SessionSummary]] = [:]
     private var transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:]
     private var transcriptPrefetchTask: Task<Void, Never>?
+    private var hiddenProfilesByHost: [String: Set<String>] = [:]
+    private var selectedKanbanBoardByWorkspace: [String: String] = [:]
+    private var companionRequestIDs: [CompanionScope: UUID] = [:]
+    private var overviewLoadingWorkspaceFingerprint: String?
+    private var skillsLoadingWorkspaceFingerprint: String?
 
     init() {
         terminalWorkspace.onChange = { [weak self] in
@@ -88,6 +109,10 @@ final class HermesPhoneStore: ObservableObject {
         activeConnection?.updated()
     }
 
+    func isLoadingCompanion(_ scope: CompanionScope) -> Bool {
+        loadingCompanionScopes.contains(scope)
+    }
+
     var activeTerminalHostFingerprint: String? {
         terminalConnection?.hostConnectionFingerprint
     }
@@ -108,12 +133,24 @@ final class HermesPhoneStore: ObservableObject {
             profiles.append(localProfile)
         }
 
-        return profiles.sorted { lhs, rhs in
+        let hidden = activeHostFingerprint.flatMap { hiddenProfilesByHost[$0] } ?? []
+        return profiles.filter { !hidden.contains($0.name) }.sorted { lhs, rhs in
             if lhs.isDefault != rhs.isDefault {
                 return lhs.isDefault
             }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
+    }
+
+    var untrackedProfiles: [RemoteHermesProfile] {
+        guard let host = activeHostFingerprint else { return [] }
+        let hidden = hiddenProfilesByHost[host] ?? []
+        return (overview?.availableProfiles ?? []).filter { hidden.contains($0.name) }
+    }
+
+    var selectedKanbanBoard: String {
+        guard let workspace = activeWorkspaceScopeFingerprint else { return "default" }
+        return selectedKanbanBoardByWorkspace[workspace] ?? "default"
     }
 
     private var connectionsForActiveHost: [ConnectionProfile] {
@@ -202,6 +239,7 @@ final class HermesPhoneStore: ObservableObject {
         terminalWorkspace.closeSessions(forConnectionID: profile.id)
         if activeConnectionID == profile.id || activeHostFingerprint == profile.hostConnectionFingerprint {
             overview = nil
+            resetCompanionState()
             markSessionsPendingLoadIfNeeded()
             cronJobs = []
             skills = []
@@ -241,6 +279,7 @@ final class HermesPhoneStore: ObservableObject {
         fileEditor = nil
         activeDirectoryPath = profile.remoteHermesHomePath
         overview = nil
+        resetCompanionState()
         persistConnections()
     }
 
@@ -261,15 +300,6 @@ final class HermesPhoneStore: ObservableObject {
             present(SSHTransportError.invalidConnection("Close the open file before switching Hermes profiles."))
             return
         }
-        guard !nativeChatStore.isWorking,
-              !nativeChatStore.isPreparingSession,
-              !nativeChatStore.isResumingSession,
-              !nativeChatStore.isAttachingFile,
-              nativeChatStore.promptCards.isEmpty else {
-            alertMessage = "Hermes is still working in the current chat. Stop it before switching profiles."
-            return
-        }
-
         guard let profileConnection = profileConnection(forHost: activeHostFingerprint, profileName: profileName) else {
             present(SSHTransportError.invalidConnection("Choose a saved host before switching profiles."))
             return
@@ -286,9 +316,9 @@ final class HermesPhoneStore: ObservableObject {
             fileEditor = nil
             activeDirectoryPath = profileConnection.remoteHermesHomePath
             overview = nil
+            resetCompanionState()
             persistConnections()
         }
-        await nativeChatStore.syncWithActiveConnection()
         await refreshOverview()
     }
 
@@ -302,6 +332,8 @@ final class HermesPhoneStore: ObservableObject {
                 activeDirectoryPath = discovery.hermesHome
             }
             return "Connected to \(profile.displayDestination)."
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return nil
         } catch {
             present(error)
             return error.localizedDescription
@@ -311,17 +343,28 @@ final class HermesPhoneStore: ObservableObject {
     func refreshOverview() async {
         guard let connection = activeConnection else { return }
         let requestedFingerprint = connection.workspaceScopeFingerprint
+        guard overviewLoadingWorkspaceFingerprint != requestedFingerprint else { return }
+        overviewLoadingWorkspaceFingerprint = requestedFingerprint
         isLoadingOverview = true
-        defer { isLoadingOverview = false }
+        defer {
+            if overviewLoadingWorkspaceFingerprint == requestedFingerprint {
+                overviewLoadingWorkspaceFingerprint = nil
+                isLoadingOverview = false
+            }
+        }
 
         do {
             let discovery = try await remoteHermesService.discover(connection: connection)
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             overview = discovery
             activeDirectoryPath = overview?.hermesHome ?? connection.remoteHermesHomePath
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
-            present(error)
+            if overview == nil {
+                present(error)
+            }
         }
     }
 
@@ -374,7 +417,7 @@ final class HermesPhoneStore: ObservableObject {
                 sessions = mergeSessionPage(
                     previous: sessions,
                     incoming: incoming,
-                    keepIDs: nativeChatStore.activeLineageSessionIDs
+                    keepIDs: []
                 )
                 sessionOffset = page.items.count
             } else {
@@ -386,6 +429,10 @@ final class HermesPhoneStore: ObservableObject {
             cacheSessionsForActiveWorkspace(sessions)
             scheduleRecentTranscriptPrefetch()
             sessionsLoadState = .loaded
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            guard currentSessionsLoadID == requestID,
+                  activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
+            sessionsLoadState = sessions.isEmpty ? .pending : .loaded
         } catch {
             guard currentSessionsLoadID == requestID,
                   activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
@@ -409,93 +456,33 @@ final class HermesPhoneStore: ObservableObject {
 
     func transcript(for sessionID: String) async throws -> [SessionMessage] {
         guard let connection = activeConnection else { return [] }
-        let transcript = try await sessionBrowserService.loadTranscript(connection: connection, sessionID: sessionID)
-        transcriptCache[transcriptCacheKey(connection: connection, sessionID: sessionID)] = transcript
-        cacheTranscriptSnapshot(transcript, sessionID: sessionID, connection: connection)
-        return transcript
-    }
-
-    func resumeSessionInTerminal(_ session: SessionSummary) {
-        guard let connection = activeConnection else {
-            present(HermesPhoneStoreError.missingTerminalConnection)
-            return
-        }
-        let invocation = HermesSessionResumeInvocation(sessionID: session.id, connection: connection)
-        terminalWorkspace.replaceWithSingleSession(
-            for: connection,
-            startupCommandLine: invocation.startupCommandLine,
-            titleHint: session.resolvedTitle
-        )
-        selectedRootTab = .terminal
-    }
-
-    func continueSessionInChat(_ session: SessionSummary) {
-        selectedRootTab = .chat
-        chatNavigationPath = []
-        if nativeChatStore.isActiveConversation(session), nativeChatStore.hasConversationContent {
-            return
-        }
-        guard !nativeChatStore.isWorking else {
-            alertMessage = "Hermes is still working in the current chat. Stop it before continuing another conversation."
-            return
-        }
-        Task { @MainActor in
-            await nativeChatStore.queueResumeSessionReplacingActiveConversation(session)
-        }
-    }
-
-    func openNewChat() {
-        selectedRootTab = .chat
-        chatNavigationPath = []
-        guard !nativeChatStore.isWorking else {
-            alertMessage = "Hermes is still working in the current chat. Stop it before starting a new one."
-            return
-        }
-        nativeChatStore.prepareInstantNewChat()
-    }
-
-    func reopenActiveConversation() {
-        selectedRootTab = .chat
-        chatNavigationPath = []
-    }
-
-    func openNotificationRoute(_ route: HermesPhoneNotificationRoute) {
-        selectedRootTab = .chat
-
-        if let routeWorkspace = route.workspaceFingerprint,
-           routeWorkspace != activeWorkspaceScopeFingerprint {
-            chatNavigationPath = []
-            alertMessage = "This notification belongs to a different Hermes profile. Switch to that profile to reopen the chat."
-            return
+        let cacheKey = transcriptCacheKey(connection: connection, sessionID: sessionID)
+        if let request = transcriptRequests[cacheKey] {
+            return try await request.task.value
         }
 
-        if nativeChatStore.hasRestorableConversation {
-            chatNavigationPath = []
-            return
+        let requestID = UUID()
+        let request = Task {
+            try await sessionBrowserService.loadTranscript(
+                connection: connection,
+                sessionID: sessionID
+            )
         }
+        transcriptRequests[cacheKey] = (requestID, request)
 
-        guard let sessionID = route.sessionID else {
-            chatNavigationPath = []
-            return
-        }
-
-        if let session = notificationSession(matching: sessionID) {
-            continueSessionInChat(session)
-            return
-        }
-
-        chatNavigationPath = []
-        Task { @MainActor in
-            await loadSessions()
-            if let session = notificationSession(matching: sessionID) {
-                continueSessionInChat(session)
+        do {
+            let transcript = try await request.value
+            if transcriptRequests[cacheKey]?.id == requestID {
+                transcriptRequests[cacheKey] = nil
             }
-        }
-    }
-
-    private func notificationSession(matching sessionID: String) -> SessionSummary? {
-        sessions.first { session in
-            session.matchesSessionIdentity(sessionID)
+            transcriptCache[cacheKey] = transcript
+            cacheTranscriptSnapshot(transcript, sessionID: sessionID, connection: connection)
+            return transcript
+        } catch {
+            if transcriptRequests[cacheKey]?.id == requestID {
+                transcriptRequests[cacheKey] = nil
+            }
+            throw error
         }
     }
 
@@ -552,6 +539,8 @@ final class HermesPhoneStore: ObservableObject {
 
         do {
             cronJobs = try await cronBrowserService.listJobs(connection: connection)
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
             present(error)
         }
@@ -560,18 +549,26 @@ final class HermesPhoneStore: ObservableObject {
     func loadSkills() async {
         guard let connection = activeConnection else { return }
         let requestedFingerprint = connection.workspaceScopeFingerprint
+        guard skillsLoadingWorkspaceFingerprint != requestedFingerprint else { return }
+        skillsLoadingWorkspaceFingerprint = requestedFingerprint
         isLoadingSkills = true
         skillsError = nil
-        defer { isLoadingSkills = false }
+        defer {
+            if skillsLoadingWorkspaceFingerprint == requestedFingerprint {
+                skillsLoadingWorkspaceFingerprint = nil
+                isLoadingSkills = false
+            }
+        }
 
         do {
             let loadedSkills = try await skillBrowserService.listSkills(connection: connection)
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             skills = loadedSkills
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             skillsError = error.localizedDescription
-            present(error)
         }
     }
 
@@ -589,10 +586,11 @@ final class HermesPhoneStore: ObservableObject {
             )
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             selectedSkillDetail = detail
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             skillsError = error.localizedDescription
-            present(error)
         }
     }
 
@@ -613,6 +611,8 @@ final class HermesPhoneStore: ObservableObject {
         do {
             try await operation(cronBrowserService, connection, job.id)
             cronJobs = try await cronBrowserService.listJobs(connection: connection)
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
             present(error)
         }
@@ -637,6 +637,8 @@ final class HermesPhoneStore: ObservableObject {
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             directoryListing = listing
             activeDirectoryPath = listing.displayPath
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             present(error)
@@ -746,6 +748,8 @@ final class HermesPhoneStore: ObservableObject {
                 content: snapshot.content,
                 contentHash: snapshot.contentHash
             )
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
             guard activeConnection?.workspaceScopeFingerprint == requestedFingerprint else { return }
             present(error)
@@ -771,10 +775,206 @@ final class HermesPhoneStore: ObservableObject {
                 contentHash: saveResult.contentHash
             )
             return true
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return false
         } catch {
             present(error)
             return false
         }
+    }
+
+    func refreshGateway() async {
+        if let value: GatewaySnapshot = await performCompanionLoad(scope: .gateway, { service, connection in
+            try await service.gatewaySnapshot(connection: connection)
+        }) {
+            gatewaySnapshot = value
+        }
+    }
+
+    func performGatewayAction(_ action: GatewayLifecycleAction) async {
+        if let value: GatewaySnapshot = await performCompanionLoad(scope: .gateway, { service, connection in
+            try await service.gatewayAction(action, connection: connection)
+        }) {
+            gatewaySnapshot = value
+        }
+    }
+
+    func refreshProfiles() async {
+        if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
+            try await service.profileSnapshot(connection: connection)
+        }) {
+            profileSnapshot = value
+        }
+    }
+
+    func refreshConfig() async {
+        if let value: ConfigSnapshot = await performCompanionLoad(scope: .config, { service, connection in
+            try await service.configSnapshot(connection: connection)
+        }) {
+            configSnapshot = value
+        }
+    }
+
+    func refreshEnvironment() async {
+        if let value: EnvironmentSnapshot = await performCompanionLoad(scope: .environment, { service, connection in
+            try await service.environmentSnapshot(connection: connection)
+        }) {
+            environmentSnapshot = value
+        }
+    }
+
+    func refreshKanban() async {
+        let board = selectedKanbanBoard
+        if let value: KanbanMobileSnapshot = await performCompanionLoad(scope: .kanban, { service, connection in
+            try await service.kanbanSnapshot(board: board, connection: connection)
+        }) {
+            kanbanSnapshot = value
+        }
+    }
+
+    func selectKanbanBoard(_ slug: String) async {
+        guard let workspace = activeWorkspaceScopeFingerprint else { return }
+        selectedKanbanBoardByWorkspace[workspace] = slug
+        persistConnections()
+        await refreshKanban()
+    }
+
+    func updateKanbanTask(
+        _ task: KanbanMobileTask,
+        status: String? = nil,
+        assignee: String? = nil,
+        comment: String? = nil
+    ) async {
+        let board = selectedKanbanBoard
+        if let value: KanbanMobileSnapshot = await performCompanionLoad(scope: .kanban, { service, connection in
+            try await service.updateKanbanTask(
+                id: task.id,
+                status: status,
+                assignee: assignee,
+                priority: nil,
+                comment: comment,
+                board: board,
+                connection: connection
+            )
+        }) {
+            kanbanSnapshot = value
+        }
+    }
+
+    func stopTrackingProfile(_ name: String) {
+        guard let host = activeHostFingerprint,
+              name != activeConnection?.resolvedHermesProfileName else { return }
+        hiddenProfilesByHost[host, default: []].insert(name)
+        persistConnections()
+        objectWillChange.send()
+    }
+
+    func restoreTrackingProfile(_ name: String) {
+        guard let host = activeHostFingerprint else { return }
+        hiddenProfilesByHost[host]?.remove(name)
+        persistConnections()
+        objectWillChange.send()
+    }
+
+    func deleteRemoteProfile(named name: String) async {
+        guard let connection = activeConnection,
+              name != "default",
+              name != connection.resolvedHermesProfileName,
+              let flag = profileSnapshot?.noninteractiveDeleteFlag else {
+            present(MobileCompanionError.unsafeOperation("Switch away from the named profile and verify that the installed Hermes CLI exposes a noninteractive deletion flag."))
+            return
+        }
+        if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
+            try await service.deleteProfile(named: name, confirmationFlag: flag, connection: connection)
+        }) {
+            profileSnapshot = value
+            hiddenProfilesByHost[connection.hostConnectionFingerprint]?.remove(name)
+            await refreshOverview()
+            persistConnections()
+        }
+    }
+
+    func saveConfig(_ fields: [ConfigField]) async -> Bool {
+        guard let snapshot = configSnapshot else { return false }
+        var succeeded = false
+        if let value: ConfigSnapshot = await performCompanionLoad(scope: .config, { service, connection in
+            try await service.saveConfig(fields: fields, expectedHash: snapshot.contentHash, connection: connection)
+        }) {
+            configSnapshot = value
+            succeeded = true
+        }
+        return succeeded
+    }
+
+    func updateEnvironment(name: String, value: String?, clear: Bool) async -> Bool {
+        var succeeded = false
+        if let snapshot: EnvironmentSnapshot = await performCompanionLoad(scope: .environment, { service, connection in
+            try await service.updateEnvironment(name: name, value: value, clear: clear, connection: connection)
+        }) {
+            environmentSnapshot = snapshot
+            succeeded = true
+        }
+        return succeeded
+    }
+
+    private func beginCompanionRequest(scope: CompanionScope) -> UUID {
+        let id = UUID()
+        companionRequestIDs[scope] = id
+        loadingCompanionScopes.insert(scope)
+        return id
+    }
+
+    private func acceptsCompanionResponse(
+        requestID: UUID,
+        companionScope: CompanionScope,
+        workspaceScope: String
+    ) -> Bool {
+        companionRequestIDs[companionScope] == requestID &&
+            activeWorkspaceScopeFingerprint == workspaceScope
+    }
+
+    private func performCompanionLoad<Response>(
+        scope companionScope: CompanionScope,
+        _ operation: (MobileCompanionService, ConnectionProfile) async throws -> Response
+    ) async -> Response? {
+        guard let connection = activeConnection else { return nil }
+        let requestID = beginCompanionRequest(scope: companionScope)
+        let workspaceScope = connection.workspaceScopeFingerprint
+        defer {
+            if companionRequestIDs[companionScope] == requestID {
+                companionRequestIDs[companionScope] = nil
+                loadingCompanionScopes.remove(companionScope)
+            }
+        }
+        do {
+            let response = try await operation(mobileCompanionService, connection)
+            guard acceptsCompanionResponse(
+                requestID: requestID,
+                companionScope: companionScope,
+                workspaceScope: workspaceScope
+            ) else { return nil }
+            return response
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return nil
+        } catch {
+            guard acceptsCompanionResponse(
+                requestID: requestID,
+                companionScope: companionScope,
+                workspaceScope: workspaceScope
+            ) else { return nil }
+            present(error)
+            return nil
+        }
+    }
+
+    private func resetCompanionState() {
+        companionRequestIDs.removeAll()
+        loadingCompanionScopes.removeAll()
+        gatewaySnapshot = nil
+        profileSnapshot = nil
+        kanbanSnapshot = nil
+        configSnapshot = nil
+        environmentSnapshot = nil
     }
 
     func dismissAlert() {
@@ -826,7 +1026,9 @@ final class HermesPhoneStore: ObservableObject {
                 terminalWorkspace: terminalWorkspace.snapshot(),
                 workspaceFileBookmarks: workspaceFileBookmarks,
                 sessionCacheByWorkspace: sessionCacheByWorkspace,
-                transcriptSnapshotCacheByWorkspace: transcriptSnapshotCacheByWorkspace
+                transcriptSnapshotCacheByWorkspace: transcriptSnapshotCacheByWorkspace,
+                hiddenProfilesByHost: hiddenProfilesByHost.mapValues { Array($0).sorted() },
+                selectedKanbanBoardByWorkspace: selectedKanbanBoardByWorkspace
             )
             let data = try encoder.encode(envelope)
             let url = try persistenceURL()
@@ -860,6 +1062,8 @@ final class HermesPhoneStore: ObservableObject {
             workspaceFileBookmarks = envelope.workspaceFileBookmarks
             sessionCacheByWorkspace = envelope.sessionCacheByWorkspace
             transcriptSnapshotCacheByWorkspace = envelope.transcriptSnapshotCacheByWorkspace
+            hiddenProfilesByHost = envelope.hiddenProfilesByHost.mapValues(Set.init)
+            selectedKanbanBoardByWorkspace = envelope.selectedKanbanBoardByWorkspace
             restoreCachedSessionsForActiveConnection()
         } catch {
             present(error)
@@ -936,10 +1140,9 @@ final class HermesPhoneStore: ObservableObject {
         guard transcriptCache[key] == nil else { return }
 
         do {
-            let transcript = try await sessionBrowserService.loadTranscript(connection: connection, sessionID: sessionID)
+            let transcript = try await transcript(for: sessionID)
             guard activeConnection?.workspaceScopeFingerprint == workspaceFingerprint else { return }
             transcriptCache[key] = transcript
-            cacheTranscriptSnapshot(transcript, sessionID: sessionID, connection: connection)
         } catch {
             // Best-effort cache warm; foreground transcript loads still surface errors.
         }
@@ -983,9 +1186,14 @@ final class HermesPhoneStore: ObservableObject {
     }
 
     private func selectProfileConnection(_ connection: ConnectionProfile) {
+        let previousWorkspaceScope = activeWorkspaceScopeFingerprint
         activeHostFingerprint = connection.hostConnectionFingerprint
         activeProfileNameByHost[connection.hostConnectionFingerprint] = connection.resolvedHermesProfileName
         activeConnectionID = connection.id
+        if let previousWorkspaceScope,
+           previousWorkspaceScope != connection.workspaceScopeFingerprint {
+            resetCompanionState()
+        }
     }
 
     private func transcriptCacheKey(connection: ConnectionProfile, sessionID: String) -> String {
@@ -1045,6 +1253,8 @@ final class HermesPhoneStore: ObservableObject {
     }
 
     private func present(_ error: Error) {
+        guard !AsyncOperationErrorPolicy.isCancellation(error) else { return }
+
         if let hostKeyError = error as? HostKeyValidationError {
             alertMessage = nil
             switch hostKeyError {
@@ -1073,56 +1283,99 @@ struct RemoteFileDraft: Identifiable, Equatable {
 }
 
 final class SSHTransport: @unchecked Sendable {
+    private static let logger = Logger(subsystem: "HermesPhoneKit", category: "SSHTransport")
+
+    private struct CollectedCommandOutput {
+        var stdout = ByteBuffer()
+        var stderr = ByteBuffer()
+        var failure: Error?
+    }
+
+    private final class CommandOutputCapture: @unchecked Sendable {
+        var value: CollectedCommandOutput?
+    }
+
     func execute(
         on connection: ConnectionProfile,
         remoteCommand: String,
         standardInput: Data? = nil,
         allocateTTY: Bool
     ) async throws -> SSHCommandResult {
+        let operationID = String(UUID().uuidString.prefix(8))
         let credentialStore = ConnectionSecretsStore()
         guard let credential = try credentialStore.load(for: connection.id) else {
             throw HermesPhoneStoreError.missingCredential
         }
 
+        Self.logger.info("SSH operation \(operationID, privacy: .public) connecting")
         let client = try await makeClient(connection: connection, credential: credential)
+        Self.logger.info("SSH operation \(operationID, privacy: .public) authenticated")
         defer {
             Task {
                 try? await client.close()
             }
         }
 
+        let completionToken = RemoteCommandCompletion.makeToken()
         let wrapped = makeWrappedCommand(
             for: connection,
             remoteCommand: remoteCommand,
-            standardInput: standardInput
+            standardInputByteCount: standardInput?.count,
+            completionToken: completionToken
         )
 
-        var stdout = ByteBuffer()
-        var stderr = ByteBuffer()
-        var exitCode: Int32 = 0
+        let collected: CollectedCommandOutput
 
         do {
-            let streams = try await client.executeCommandPair(wrapped)
-            async let stdoutResult = collectBuffer(from: streams.stdout)
-            async let stderrResult = collectBuffer(from: streams.stderr)
-            let (collectedStdout, collectedStderr) = await (stdoutResult, stderrResult)
-            stdout = collectedStdout.buffer
-            stderr = collectedStderr.buffer
-            exitCode = collectedStdout.exitCode ?? collectedStderr.exitCode ?? 0
-
-            if let failure = collectedStdout.failure ?? collectedStderr.failure {
-                throw failure
+            collected = try await withTaskCancellationHandler {
+                if let standardInput {
+                    return try await executeWithStandardInput(
+                        client: client,
+                        command: wrapped,
+                        standardInput: standardInput
+                    )
+                }
+                return try await executeWithoutStandardInput(
+                    client: client,
+                    command: wrapped
+                )
+            } onCancel: {
+                Task { try? await client.close() }
             }
-        } catch let failure as SSHClient.CommandFailed {
-            exitCode = Int32(failure.exitCode)
+        } catch is CancellationError {
+            Self.logger.info("SSH operation \(operationID, privacy: .public) cancelled")
+            throw CancellationError()
         } catch {
+            if Task.isCancelled {
+                Self.logger.info("SSH operation \(operationID, privacy: .public) closed while cancelling")
+                throw CancellationError()
+            }
+            Self.logger.error("SSH operation \(operationID, privacy: .public) failed before completion: \(SSHCommandStreamTermination.diagnosticName(for: error), privacy: .public)")
             throw mapConnectionError(error, connection: connection)
         }
 
+        let stdout = String(buffer: collected.stdout)
+        let rawStderr = String(buffer: collected.stderr)
+        guard let completion = RemoteCommandCompletion.parse(
+            stderr: rawStderr,
+            token: completionToken
+        ) else {
+            if let failure = collected.failure {
+                Self.logger.error("SSH operation \(operationID, privacy: .public) ended without its completion marker: \(SSHCommandStreamTermination.diagnosticName(for: failure), privacy: .public)")
+                throw mapConnectionError(failure, connection: connection)
+            }
+            Self.logger.error("SSH operation \(operationID, privacy: .public) ended without its completion marker or an underlying error")
+            throw SSHTransportError.remoteFailure(
+                "The SSH command on \(connection.displayDestination) ended before confirming completion. The remote connection may have closed or the command may have been interrupted."
+            )
+        }
+
+        Self.logger.info("SSH operation \(operationID, privacy: .public) completed with exit code \(completion.exitCode)")
+
         return SSHCommandResult(
-            stdout: String(buffer: stdout),
-            stderr: String(buffer: stderr),
-            exitCode: exitCode
+            stdout: stdout,
+            stderr: completion.stderr,
+            exitCode: completion.exitCode
         )
     }
 
@@ -1153,83 +1406,31 @@ final class SSHTransport: @unchecked Sendable {
         responseType: Response.Type,
         onLine: @escaping @Sendable (Response) async throws -> Void
     ) async throws {
-        let credentialStore = ConnectionSecretsStore()
-        guard let credential = try credentialStore.load(for: connection.id) else {
-            throw HermesPhoneStoreError.missingCredential
-        }
-
-        let client = try await makeClient(connection: connection, credential: credential)
-        defer {
-            Task { try? await client.close() }
-        }
-
-        let wrapped = makeWrappedCommand(
-            for: connection,
+        let result = try await execute(
+            on: connection,
             remoteCommand: "python3 -",
-            standardInput: Data(pythonScript.utf8)
+            standardInput: Data(pythonScript.utf8),
+            allocateTTY: false
         )
+        try validateSuccessfulExit(result, for: connection)
+
         let decoder = JSONDecoder()
-        var stdoutRemainder = ""
-        var stderr = ByteBuffer()
-        var exitCode: Int32 = 0
-
-        func consumeStdout(_ chunk: ByteBuffer) async throws {
-            guard let text = chunk.getString(at: chunk.readerIndex, length: chunk.readableBytes), !text.isEmpty else {
-                return
+        for rawLine in result.stdout.split(whereSeparator: \.isNewline) {
+            let line = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            guard let data = line.data(using: .utf8) else {
+                throw SSHTransportError.invalidResponse("Remote stream line was not valid UTF-8.")
             }
-            stdoutRemainder.append(text)
-            while let newlineRange = stdoutRemainder.range(of: "\n") {
-                let line = String(stdoutRemainder[..<newlineRange.lowerBound])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                stdoutRemainder.removeSubrange(stdoutRemainder.startIndex ... newlineRange.lowerBound)
-                guard !line.isEmpty else { continue }
-                guard let data = line.data(using: .utf8) else {
-                    throw SSHTransportError.invalidResponse("Remote stream line was not valid UTF-8.")
-                }
-                do {
-                    try await onLine(decoder.decode(Response.self, from: data))
-                } catch let transportError as SSHTransportError {
-                    throw transportError
-                } catch {
-                    throw SSHTransportError.invalidResponse("Failed to decode remote JSON stream line: \(error.localizedDescription)\n\nline:\n\(shortenedOutputPreview(line, limit: 2000))")
-                }
-            }
-        }
-
-        do {
-            let streams = try await client.executeCommandPair(wrapped)
-            async let stderrResult = collectBuffer(from: streams.stderr)
             do {
-                for try await chunk in streams.stdout {
-                    try await consumeStdout(chunk)
-                }
-                let line = stdoutRemainder.trimmingCharacters(in: .whitespacesAndNewlines)
-                stdoutRemainder.removeAll(keepingCapacity: false)
-                if !line.isEmpty {
-                    guard let data = line.data(using: .utf8) else {
-                        throw SSHTransportError.invalidResponse("Remote stream line was not valid UTF-8.")
-                    }
-                    try await onLine(try decoder.decode(Response.self, from: data))
-                }
-            } catch let failure as SSHClient.CommandFailed {
-                exitCode = Int32(failure.exitCode)
+                try await onLine(decoder.decode(Response.self, from: data))
+            } catch let transportError as SSHTransportError {
+                throw transportError
+            } catch {
+                throw SSHTransportError.invalidResponse(
+                    "Failed to decode remote JSON stream line: \(error.localizedDescription)\n\nline:\n\(shortenedOutputPreview(line, limit: 2000))"
+                )
             }
-            let collectedStderr = await stderrResult
-            stderr = collectedStderr.buffer
-            exitCode = exitCode == 0 ? (collectedStderr.exitCode ?? 0) : exitCode
-            if let failure = collectedStderr.failure {
-                throw failure
-            }
-        } catch let failure as SSHClient.CommandFailed {
-            exitCode = Int32(failure.exitCode)
-        } catch {
-            throw mapConnectionError(error, connection: connection)
         }
-
-        try validateSuccessfulExit(
-            SSHCommandResult(stdout: "", stderr: String(buffer: stderr), exitCode: exitCode),
-            for: connection
-        )
     }
 
     private func formattedInvalidJSONResponse(
@@ -1363,19 +1564,21 @@ final class SSHTransport: @unchecked Sendable {
     func makeWrappedCommand(
         for connection: ConnectionProfile,
         remoteCommand: String,
-        standardInput: Data?
+        standardInputByteCount: Int?,
+        completionToken: String
     ) -> String {
-        var commandBody = remoteCommand
-        if let standardInput, let inputText = String(data: standardInput, encoding: .utf8) {
-            let marker = "__HERMES_STDIN__"
-            commandBody = "\(remoteCommand) <<'\(marker)'\n\(inputText)\n\(marker)"
-        }
-
-        let fullBody = "\(connection.remoteServiceEnvironmentExports); \(commandBody)"
-        return "/bin/sh -lc \(fullBody.shellQuotedForTerminalCommand)"
+        RemoteCommandCompletion.wrappedCommand(
+            environmentExports: connection.remoteServiceEnvironmentExports,
+            remoteCommand: remoteCommand,
+            standardInputByteCount: standardInputByteCount,
+            token: completionToken
+        )
     }
 
     private func mapConnectionError(_ error: Error, connection: ConnectionProfile) -> Error {
+        if error is CancellationError {
+            return CancellationError()
+        }
         if let hostKeyError = error as? HostKeyValidationError {
             return hostKeyError
         }
@@ -1384,11 +1587,11 @@ final class SSHTransport: @unchecked Sendable {
             switch channelError {
             case .inputClosed, .eof, .alreadyClosed:
                 return SSHTransportError.remoteFailure(
-                    "The SSH connection to \(connection.displayDestination) was closed by the remote host."
+                    "The SSH command channel on \(connection.displayDestination) closed before Hermes could confirm the result. Retry the operation."
                 )
             case .ioOnClosedChannel, .outputClosed:
                 return SSHTransportError.remoteFailure(
-                    "The SSH connection to \(connection.displayDestination) closed unexpectedly."
+                    "The SSH command channel on \(connection.displayDestination) became unavailable before Hermes could confirm the result. Retry the operation."
                 )
             default:
                 break
@@ -1409,6 +1612,27 @@ final class SSHTransport: @unchecked Sendable {
                 )
             case .unsupportedHostBasedAuthentication, .channelCreationFailed:
                 break
+            }
+        }
+
+        if let sshProtocolError = error as? NIOSSHError {
+            switch sshProtocolError.type {
+            case .tcpShutdown, .creatingChannelAfterClosure:
+                return SSHTransportError.remoteFailure(
+                    "The SSH connection to \(connection.displayDestination) closed while preparing the command. Retry the operation."
+                )
+            case .channelSetupRejected:
+                return SSHTransportError.remoteFailure(
+                    "The SSH server on \(connection.displayDestination) rejected the command channel. Retry the operation."
+                )
+            case .keyExchangeNegotiationFailure:
+                return SSHTransportError.invalidConnection(
+                    "Hermes and \(connection.displayDestination) could not agree on secure SSH algorithms."
+                )
+            default:
+                return SSHTransportError.launchFailure(
+                    "SSH protocol error on \(connection.displayDestination): \(String(describing: sshProtocolError))"
+                )
             }
         }
 
@@ -1442,37 +1666,102 @@ final class SSHTransport: @unchecked Sendable {
         }
     }
 
+    private func executeWithoutStandardInput(
+        client: SSHClient,
+        command: String
+    ) async throws -> CollectedCommandOutput {
+        let streams = try await client.executeCommandPair(command)
+        async let stdoutResult = collectBuffer(from: streams.stdout)
+        async let stderrResult = collectBuffer(from: streams.stderr)
+        let (collectedStdout, collectedStderr) = await (stdoutResult, stderrResult)
+
+        return CollectedCommandOutput(
+            stdout: collectedStdout.buffer,
+            stderr: collectedStderr.buffer,
+            failure: collectedStdout.failure ?? collectedStderr.failure
+        )
+    }
+
+    private func executeWithStandardInput(
+        client: SSHClient,
+        command: String,
+        standardInput: Data
+    ) async throws -> CollectedCommandOutput {
+        let capture = CommandOutputCapture()
+
+        do {
+            try await client.withExec(command) { [self] inbound, writer in
+                let outputTask = Task { await collectOutput(from: inbound) }
+                var input = ByteBuffer()
+                input.writeBytes(standardInput)
+                do {
+                    try await writer.write(input)
+                    capture.value = await outputTask.value
+                } catch {
+                    var output = await outputTask.value
+                    if output.failure == nil {
+                        output.failure = error
+                    }
+                    capture.value = output
+                    throw error
+                }
+            }
+        } catch {
+            guard var output = capture.value else {
+                throw error
+            }
+            if output.failure == nil {
+                output.failure = error
+            }
+            capture.value = output
+        }
+
+        guard let output = capture.value else {
+            throw SSHTransportError.remoteFailure(
+                "The SSH command channel closed before its output could be collected."
+            )
+        }
+        return output
+    }
+
+    private func collectOutput(from stream: TTYOutput) async -> CollectedCommandOutput {
+        var output = CollectedCommandOutput()
+        do {
+            for try await chunk in stream {
+                switch chunk {
+                case .stdout(let buffer):
+                    output.stdout.writeImmutableBuffer(buffer)
+                case .stderr(let buffer):
+                    output.stderr.writeImmutableBuffer(buffer)
+                }
+            }
+        } catch let failure as SSHClient.CommandFailed {
+            output.failure = failure
+        } catch {
+            if !SSHCommandStreamTermination.isExpectedAfterRemoteCompletion(error) {
+                output.failure = error
+            }
+        }
+        return output
+    }
+
     private func collectBuffer(
         from stream: AsyncThrowingStream<ByteBuffer, Error>
-    ) async -> (buffer: ByteBuffer, exitCode: Int32?, failure: Error?) {
+    ) async -> (buffer: ByteBuffer, failure: Error?) {
         var buffer = ByteBuffer()
         do {
             for try await chunk in stream {
                 buffer.writeImmutableBuffer(chunk)
             }
-            return (buffer, nil, nil)
+            return (buffer, nil)
         } catch let failure as SSHClient.CommandFailed {
-            return (buffer, Int32(failure.exitCode), nil)
+            return (buffer, failure)
         } catch {
-            if isExpectedCommandStreamTermination(error) {
-                return (buffer, nil, nil)
-            }
-            return (buffer, nil, error)
+            return (
+                buffer,
+                SSHCommandStreamTermination.isExpectedAfterRemoteCompletion(error) ? nil : error
+            )
         }
-    }
-
-    private func isExpectedCommandStreamTermination(_ error: Error) -> Bool {
-        if let channelError = error as? ChannelError {
-            switch channelError {
-            case .inputClosed, .eof, .alreadyClosed, .ioOnClosedChannel:
-                return true
-            default:
-                return false
-            }
-        }
-
-        let reflectedType = String(reflecting: type(of: error))
-        return reflectedType.contains("ClientHandshakeHandler.Disconnected")
     }
 }
 

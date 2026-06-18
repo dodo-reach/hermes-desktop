@@ -45,6 +45,7 @@ struct FileEditorSheet: View {
                 }
             }
         }
+        .hermesKeyboardDismissal()
     }
 }
 

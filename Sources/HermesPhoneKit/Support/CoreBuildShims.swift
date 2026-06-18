@@ -97,6 +97,16 @@ final class ConnectionSecretsStore {
 }
 
 final class SSHTransport: @unchecked Sendable {
+    private struct CollectedCommandOutput {
+        var stdout = ByteBuffer()
+        var stderr = ByteBuffer()
+        var failure: Error?
+    }
+
+    private final class CommandOutputCapture: @unchecked Sendable {
+        var value: CollectedCommandOutput?
+    }
+
     func execute(
         on connection: ConnectionProfile,
         remoteCommand: String,
@@ -115,32 +125,84 @@ final class SSHTransport: @unchecked Sendable {
             }
         }
 
-        let wrapped = makeWrappedCommand(
-            for: connection,
-            remoteCommand: remoteCommand,
-            standardInput: standardInput
-        )
+        let completionToken = RemoteCommandCompletion.makeToken()
+        let wrapped: String
+        let streamedInput: Data?
+        if let standardInput {
+            if #available(macOS 15.0, *) {
+                wrapped = makeWrappedCommand(
+                    for: connection,
+                    remoteCommand: remoteCommand,
+                    standardInputByteCount: standardInput.count,
+                    completionToken: completionToken
+                )
+                streamedInput = standardInput
+            } else {
+                wrapped = try makeLegacyWrappedCommand(
+                    for: connection,
+                    remoteCommand: remoteCommand,
+                    standardInput: standardInput,
+                    completionToken: completionToken
+                )
+                streamedInput = nil
+            }
+        } else {
+            wrapped = makeWrappedCommand(
+                for: connection,
+                remoteCommand: remoteCommand,
+                standardInputByteCount: nil,
+                completionToken: completionToken
+            )
+            streamedInput = nil
+        }
 
-        var stdout = ByteBuffer()
-        var stderr = ByteBuffer()
-        var exitCode: Int32 = 0
+        let collected: CollectedCommandOutput
 
         do {
-            let streams = try await client.executeCommandPair(wrapped)
-            async let stdoutResult = collectBuffer(from: streams.stdout)
-            async let stderrResult = collectBuffer(from: streams.stderr)
-            let (collectedStdout, collectedStderr) = await (stdoutResult, stderrResult)
-            stdout = collectedStdout.buffer
-            stderr = collectedStderr.buffer
-            exitCode = collectedStdout.exitCode ?? collectedStderr.exitCode ?? 0
+            collected = try await withTaskCancellationHandler {
+                if let streamedInput {
+                    if #available(macOS 15.0, *) {
+                        return try await executeWithStandardInput(
+                            client: client,
+                            command: wrapped,
+                            standardInput: streamedInput
+                        )
+                    }
+                }
+                return try await executeWithoutStandardInput(
+                    client: client,
+                    command: wrapped
+                )
+            } onCancel: {
+                Task { try? await client.close() }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
             throw mapConnectionError(error, connection: connection)
         }
 
+        let stdout = String(buffer: collected.stdout)
+        let rawStderr = String(buffer: collected.stderr)
+        guard let completion = RemoteCommandCompletion.parse(
+            stderr: rawStderr,
+            token: completionToken
+        ) else {
+            if let failure = collected.failure {
+                throw mapConnectionError(failure, connection: connection)
+            }
+            throw SSHTransportError.remoteFailure(
+                "The SSH command on \(connection.displayDestination) ended before confirming completion. The remote connection may have closed or the command may have been interrupted."
+            )
+        }
+
         return SSHCommandResult(
-            stdout: String(buffer: stdout),
-            stderr: String(buffer: stderr),
-            exitCode: exitCode
+            stdout: stdout,
+            stderr: completion.stderr,
+            exitCode: completion.exitCode
         )
     }
 
@@ -171,78 +233,31 @@ final class SSHTransport: @unchecked Sendable {
         responseType _: Response.Type,
         onLine: @escaping @Sendable (Response) async throws -> Void
     ) async throws {
-        let credentialStore = ConnectionSecretsStore()
-        guard let credential = try credentialStore.load(for: connection.id) else {
-            throw HermesPhoneStoreError.missingCredential
-        }
-
-        let client = try await makeClient(connection: connection, credential: credential)
-        defer { Task { try? await client.close() } }
-
-        let wrapped = makeWrappedCommand(
-            for: connection,
+        let result = try await execute(
+            on: connection,
             remoteCommand: "python3 -",
-            standardInput: Data(pythonScript.utf8)
+            standardInput: Data(pythonScript.utf8),
+            allocateTTY: false
         )
+        try validateSuccessfulExit(result, for: connection)
+
         let decoder = JSONDecoder()
-        var stdoutRemainder = ""
-        var stderr = ByteBuffer()
-        var exitCode: Int32 = 0
-
-        func consumeStdout(_ chunk: ByteBuffer) async throws {
-            guard let text = chunk.getString(at: chunk.readerIndex, length: chunk.readableBytes), !text.isEmpty else {
-                return
+        for rawLine in result.stdout.split(whereSeparator: \.isNewline) {
+            let line = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            guard let data = line.data(using: .utf8) else {
+                throw SSHTransportError.invalidResponse("Remote stream line was not valid UTF-8.")
             }
-            stdoutRemainder.append(text)
-            while let newlineRange = stdoutRemainder.range(of: "\n") {
-                let line = String(stdoutRemainder[..<newlineRange.lowerBound])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                stdoutRemainder.removeSubrange(stdoutRemainder.startIndex ... newlineRange.lowerBound)
-                guard !line.isEmpty else { continue }
-                guard let data = line.data(using: .utf8) else {
-                    throw SSHTransportError.invalidResponse("Remote stream line was not valid UTF-8.")
-                }
-                do {
-                    try await onLine(decoder.decode(Response.self, from: data))
-                } catch let transportError as SSHTransportError {
-                    throw transportError
-                } catch {
-                    throw SSHTransportError.invalidResponse("Failed to decode remote JSON stream line: \(error.localizedDescription)\n\nline:\n\(shortenedOutputPreview(line, limit: 2000))")
-                }
-            }
-        }
-
-        do {
-            let streams = try await client.executeCommandPair(wrapped)
-            async let stderrResult = collectBuffer(from: streams.stderr)
             do {
-                for try await chunk in streams.stdout {
-                    try await consumeStdout(chunk)
-                }
-                let line = stdoutRemainder.trimmingCharacters(in: .whitespacesAndNewlines)
-                stdoutRemainder.removeAll(keepingCapacity: false)
-                if !line.isEmpty {
-                    guard let data = line.data(using: .utf8) else {
-                        throw SSHTransportError.invalidResponse("Remote stream line was not valid UTF-8.")
-                    }
-                    try await onLine(try decoder.decode(Response.self, from: data))
-                }
-            } catch let failure as SSHClient.CommandFailed {
-                exitCode = Int32(failure.exitCode)
+                try await onLine(decoder.decode(Response.self, from: data))
+            } catch let transportError as SSHTransportError {
+                throw transportError
+            } catch {
+                throw SSHTransportError.invalidResponse(
+                    "Failed to decode remote JSON stream line: \(error.localizedDescription)\n\nline:\n\(shortenedOutputPreview(line, limit: 2000))"
+                )
             }
-            let collectedStderr = await stderrResult
-            stderr = collectedStderr.buffer
-            exitCode = exitCode == 0 ? (collectedStderr.exitCode ?? 0) : exitCode
-        } catch let failure as SSHClient.CommandFailed {
-            exitCode = Int32(failure.exitCode)
-        } catch {
-            throw mapConnectionError(error, connection: connection)
         }
-
-        try validateSuccessfulExit(
-            SSHCommandResult(stdout: "", stderr: String(buffer: stderr), exitCode: exitCode),
-            for: connection
-        )
     }
 
     private func formattedInvalidJSONResponse(
@@ -369,19 +384,42 @@ final class SSHTransport: @unchecked Sendable {
     func makeWrappedCommand(
         for connection: ConnectionProfile,
         remoteCommand: String,
-        standardInput: Data?
+        standardInputByteCount: Int?,
+        completionToken: String
     ) -> String {
-        var commandBody = remoteCommand
-        if let standardInput, let inputText = String(data: standardInput, encoding: .utf8) {
-            let marker = "__HERMES_STDIN__"
-            commandBody = "\(remoteCommand) <<'\(marker)'\n\(inputText)\n\(marker)"
-        }
+        RemoteCommandCompletion.wrappedCommand(
+            environmentExports: connection.remoteServiceEnvironmentExports,
+            remoteCommand: remoteCommand,
+            standardInputByteCount: standardInputByteCount,
+            token: completionToken
+        )
+    }
 
-        let fullBody = "\(connection.remoteServiceEnvironmentExports); \(commandBody)"
-        return "/bin/sh -lc \(fullBody.shellQuotedForTerminalCommand)"
+    private func makeLegacyWrappedCommand(
+        for connection: ConnectionProfile,
+        remoteCommand: String,
+        standardInput: Data,
+        completionToken: String
+    ) throws -> String {
+        guard let inputText = String(data: standardInput, encoding: .utf8) else {
+            throw SSHTransportError.launchFailure(
+                "Remote command input requires UTF-8 on macOS 14."
+            )
+        }
+        let marker = "__HERMES_STDIN_\(completionToken)__"
+        let command = "\(remoteCommand) <<'\(marker)'\n\(inputText)\n\(marker)"
+        return RemoteCommandCompletion.wrappedCommand(
+            environmentExports: connection.remoteServiceEnvironmentExports,
+            remoteCommand: command,
+            standardInputByteCount: nil,
+            token: completionToken
+        )
     }
 
     private func mapConnectionError(_ error: Error, connection: ConnectionProfile) -> Error {
+        if error is CancellationError {
+            return CancellationError()
+        }
         if let hostKeyError = error as? HostKeyValidationError {
             return hostKeyError
         }
@@ -399,9 +437,90 @@ final class SSHTransport: @unchecked Sendable {
         return SSHTransportError.launchFailure(message)
     }
 
+    private func executeWithoutStandardInput(
+        client: SSHClient,
+        command: String
+    ) async throws -> CollectedCommandOutput {
+        let streams = try await client.executeCommandPair(command)
+        async let stdoutResult = collectBuffer(from: streams.stdout)
+        async let stderrResult = collectBuffer(from: streams.stderr)
+        let (collectedStdout, collectedStderr) = await (stdoutResult, stderrResult)
+
+        return CollectedCommandOutput(
+            stdout: collectedStdout.buffer,
+            stderr: collectedStderr.buffer,
+            failure: collectedStdout.failure ?? collectedStderr.failure
+        )
+    }
+
+    @available(macOS 15.0, *)
+    private func executeWithStandardInput(
+        client: SSHClient,
+        command: String,
+        standardInput: Data
+    ) async throws -> CollectedCommandOutput {
+        let capture = CommandOutputCapture()
+
+        do {
+            try await client.withExec(command) { [self] inbound, writer in
+                let outputTask = Task { await collectOutput(from: inbound) }
+                var input = ByteBuffer()
+                input.writeBytes(standardInput)
+                do {
+                    try await writer.write(input)
+                    capture.value = await outputTask.value
+                } catch {
+                    var output = await outputTask.value
+                    if output.failure == nil {
+                        output.failure = error
+                    }
+                    capture.value = output
+                    throw error
+                }
+            }
+        } catch {
+            guard var output = capture.value else {
+                throw error
+            }
+            if output.failure == nil {
+                output.failure = error
+            }
+            capture.value = output
+        }
+
+        guard let output = capture.value else {
+            throw SSHTransportError.remoteFailure(
+                "The SSH command channel closed before its output could be collected."
+            )
+        }
+        return output
+    }
+
+    @available(macOS 15.0, *)
+    private func collectOutput(from stream: TTYOutput) async -> CollectedCommandOutput {
+        var output = CollectedCommandOutput()
+        do {
+            for try await chunk in stream {
+                switch chunk {
+                case .stdout(let buffer):
+                    output.stdout.writeImmutableBuffer(buffer)
+                case .stderr(let buffer):
+                    output.stderr.writeImmutableBuffer(buffer)
+                }
+            }
+        } catch let failure as SSHClient.CommandFailed {
+            output.failure = failure
+        } catch {
+            if !SSHCommandStreamTermination.isExpectedAfterRemoteCompletion(error) {
+                output.failure = error
+            }
+        }
+        return output
+    }
+
     private func collectBuffer(
         from stream: AsyncThrowingStream<ByteBuffer, Error>
-    ) async -> (buffer: ByteBuffer, exitCode: Int32?) {
+    ) async -> (buffer: ByteBuffer, failure: Error?) {
         var buffer = ByteBuffer()
         do {
             for try await chunk in stream {
@@ -409,9 +528,12 @@ final class SSHTransport: @unchecked Sendable {
             }
             return (buffer, nil)
         } catch let failure as SSHClient.CommandFailed {
-            return (buffer, Int32(failure.exitCode))
+            return (buffer, failure)
         } catch {
-            return (buffer, nil)
+            return (
+                buffer,
+                SSHCommandStreamTermination.isExpectedAfterRemoteCompletion(error) ? nil : error
+            )
         }
     }
 }

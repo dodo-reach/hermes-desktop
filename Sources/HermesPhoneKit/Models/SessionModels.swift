@@ -632,6 +632,22 @@ enum JSONValue: Codable, Hashable, Sendable {
         }
     }
 
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else { return nil }
+        return value
+    }
+
+    var numberValue: Double? {
+        switch self {
+        case .number(let value):
+            value
+        case .int(let value):
+            Double(value)
+        default:
+            nil
+        }
+    }
+
     var dateValue: Date? {
         switch self {
         case .number(let value):

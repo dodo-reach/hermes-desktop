@@ -9,34 +9,41 @@ import SwiftUI
 import UIKit
 
 public struct HermesPhoneRootView: View {
-    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = HermesPhoneStore()
-    @StateObject private var notifications = HermesPhoneNotificationService.shared
+    @State private var isPresentingSettings = false
 
     public init() {}
 
     public var body: some View {
         TabView(selection: $store.selectedRootTab) {
-            NavigationStack(path: $store.chatNavigationPath) {
-                NativeChatScreen(chatStore: store.nativeChatStore)
-                    .navigationDestination(for: HermesPhoneChatRoute.self) { route in
+            NavigationStack(path: $store.sessionNavigationPath) {
+                SessionsScreen()
+                    .navigationDestination(for: HermesPhoneSessionRoute.self) { route in
                         switch route {
                         case .transcript(let session):
                             SessionTranscriptScreen(session: session)
                         }
                     }
             }
-            .tag(HermesPhoneRootTab.chat)
+            .tag(HermesPhoneRootTab.sessions)
             .tabItem {
-                Label("Chats", systemImage: "bubble.left.and.bubble.right")
+                Label("Sessions", systemImage: "text.bubble")
             }
 
             NavigationStack {
-                TerminalScreen(workspace: store.terminalWorkspace)
+                KanbanScreen()
             }
-            .tag(HermesPhoneRootTab.terminal)
+            .tag(HermesPhoneRootTab.kanban)
             .tabItem {
-                Label("Terminal", systemImage: "terminal")
+                Label("Kanban", systemImage: "rectangle.3.group")
+            }
+
+            NavigationStack {
+                CronJobsScreen()
+            }
+            .tag(HermesPhoneRootTab.cron)
+            .tabItem {
+                Label("Cron", systemImage: "calendar.badge.clock")
             }
 
             NavigationStack {
@@ -44,19 +51,54 @@ public struct HermesPhoneRootView: View {
             }
             .tag(HermesPhoneRootTab.files)
             .tabItem {
-                Label("Files", systemImage: "doc.text")
+                Label("Files", systemImage: "folder")
             }
 
             NavigationStack {
-                MoreScreen()
+                SkillsScreen()
             }
-            .tag(HermesPhoneRootTab.more)
+            .tag(HermesPhoneRootTab.skills)
             .tabItem {
-                Label("More", systemImage: "ellipsis.circle")
+                Label("Skills", systemImage: "book.closed")
+            }
+
+            NavigationStack {
+                TerminalScreen(
+                    workspace: store.terminalWorkspace,
+                    onOpenSettings: { isPresentingSettings = true }
+                )
+            }
+            .tag(HermesPhoneRootTab.terminal)
+            .tabItem {
+                Label("Terminal", systemImage: "terminal")
+            }
+        }
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HermesQuickAccessBar(selection: $store.selectedRootTab)
+        }
+        .overlay {
+            if store.selectedRootTab != .terminal {
+                GeometryReader { geometry in
+                    Button {
+                        isPresentingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(width: 38, height: 38)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Hermes settings")
+                    .position(
+                        x: geometry.size.width - 30,
+                        y: geometry.safeAreaInsets.top + 27
+                    )
+                }
             }
         }
         .environmentObject(store)
         .tint(Color(red: 0.18, green: 0.72, blue: 0.62))
+        .hermesKeyboardDismissal()
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .alert("HermesPhone", isPresented: Binding(
             get: { store.alertMessage != nil },
@@ -98,28 +140,69 @@ public struct HermesPhoneRootView: View {
             FileEditorSheet(draft: draft)
                 .environmentObject(store)
         }
-        .task {
-            notifications.configure()
-            notifications.updateScenePhase(scenePhase)
-            await store.nativeChatStore.warmGatewayIfUseful()
+        .sheet(isPresented: $isPresentingSettings) {
+            NavigationStack {
+                HermesSettingsScreen()
+            }
+            .environmentObject(store)
+            .hermesKeyboardDismissal()
         }
-        .task(id: store.activeWorkspaceScopeFingerprint) {
-            guard scenePhase == .active else { return }
-            await store.nativeChatStore.warmGatewayIfUseful()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            notifications.updateScenePhase(newPhase)
-            guard newPhase == .active else { return }
-            Task { @MainActor in
-                await store.nativeChatStore.warmGatewayIfUseful()
-                await store.nativeChatStore.refreshCurrentConversationFromRemote()
+    }
+}
+
+private struct HermesQuickAccessBar: View {
+    @Binding var selection: HermesPhoneRootTab
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(HermesPhoneRootTab.allCases) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 18, weight: selection == tab ? .semibold : .regular))
+                            .symbolVariant(selection == tab ? .fill : .none)
+                        Text(tab.title)
+                            .font(.system(size: 10, weight: selection == tab ? .semibold : .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    .foregroundStyle(selection == tab ? Color.accentColor : Color.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
         }
-        .onChange(of: notifications.pendingRoute) { _, route in
-            guard let route else { return }
-            store.openNotificationRoute(route)
-            notifications.consumePendingRoute(route)
+        .padding(.horizontal, 6)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Divider()
         }
+    }
+}
+
+extension View {
+    func hermesKeyboardDismissal() -> some View {
+        scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
+                    }
+                    .accessibilityLabel("Hide keyboard")
+                }
+            }
     }
 }
 

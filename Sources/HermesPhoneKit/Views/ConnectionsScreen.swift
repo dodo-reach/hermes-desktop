@@ -13,10 +13,7 @@ struct ConnectionsScreen: View {
     @State private var draft = ConnectionDraft()
     @State private var isPresentingEditor = false
     @State private var editingConnectionID: UUID?
-    @State private var chatTestResult: String?
-    @State private var isTestingChat = false
     @State private var showsConnectionGuide = false
-    @State private var showsGatewayDiagnostics = false
 
     var body: some View {
         List {
@@ -27,7 +24,6 @@ struct ConnectionsScreen: View {
             }
 
             savedHostsSection
-            nativeChatSection
             connectionGuideSection
         }
         .navigationTitle("Connections")
@@ -45,10 +41,10 @@ struct ConnectionsScreen: View {
                 ConnectionEditorView(draft: $draft, editingConnectionID: editingConnectionID)
                     .environmentObject(store)
             }
+            .hermesKeyboardDismissal()
         }
         .task(id: store.activeWorkspaceScopeFingerprint) {
             await store.refreshOverview()
-            await store.nativeChatStore.refreshBootstrapStatus()
         }
     }
 
@@ -83,7 +79,7 @@ struct ConnectionsScreen: View {
                     if let overview = store.overview {
                         VStack(alignment: .leading, spacing: 8) {
                             workspaceMetric(label: "Hermes Home", value: overview.hermesHome)
-                            workspaceMetric(label: "Chat", value: "TUI Gateway over SSH")
+                            workspaceMetric(label: "Mode", value: "SSH-first read-only companion")
                             workspaceMetric(label: "Session Store", value: overview.sessionStore?.path ?? "Not found")
                         }
                     } else {
@@ -98,7 +94,7 @@ struct ConnectionsScreen: View {
                 ContentUnavailableView(
                     "No Active Host",
                     systemImage: "server.rack",
-                    description: Text("Add one SSH host to use Chat, Terminal, Sessions, and Files. Profiles will appear automatically after discovery.")
+                    description: Text("Add one SSH host to inspect Sessions, Kanban, gateway state, profiles, and configuration.")
                 )
             }
         }
@@ -172,7 +168,7 @@ struct ConnectionsScreen: View {
                     Text(group.title)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text(group.isActive ? "Profiles are available above and in Chat." : "Use this host to discover its Hermes profiles.")
+                    Text(group.isActive ? "Profiles are available above and throughout the app." : "Use this host to discover its Hermes profiles.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -227,9 +223,9 @@ struct ConnectionsScreen: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ConnectionsGuideStep(title: "1. Add the SSH host", detail: "Host, port, user, and credentials are the only setup the app needs.")
                     ConnectionsGuideStep(title: "2. Let discovery run", detail: "Default and named Hermes profiles under ~/.hermes are found automatically.")
-                    ConnectionsGuideStep(title: "3. Pick a profile", detail: "Use the profile chips in Chat, Terminal, or this page. No per-profile connection setup is required.")
+                    ConnectionsGuideStep(title: "3. Pick a profile", detail: "Use the profile chips here. All remote state remains scoped to that host and profile.")
 
-                    Text("Chat uses the Hermes TUI Gateway over SSH. No API server or exposed port is required.")
+                    Text("HermesPhone uses direct SSH. No mobile backend, dashboard process, or exposed gateway port is required.")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -237,80 +233,6 @@ struct ConnectionsScreen: View {
             } label: {
                 Label("How profile discovery works", systemImage: "questionmark.circle")
                     .font(.subheadline.weight(.semibold))
-            }
-        }
-    }
-
-    private var nativeChatSection: some View {
-        Section("Chat Readiness") {
-            if let bootstrap = store.nativeChatStore.bootstrapStatus {
-                DetailRow(label: "SSH", value: bootstrap.sshConnected ? "Connected" : "Unavailable")
-                DetailRow(label: "Hermes CLI", value: bootstrap.hermesCLIAvailable ? "Available" : "Unavailable")
-                DetailRow(label: "TUI Gateway", value: bootstrap.tuiGatewayAvailable ? "Available" : "Unavailable")
-                if let fallbackReason = bootstrap.fallbackReason {
-                    DetailRow(label: "What to check", value: fallbackReason)
-                }
-            } else if store.activeConnection == nil {
-                Text("Add a host to check chat readiness.")
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Checking chat runtime...")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Button {
-                Task {
-                    await store.nativeChatStore.refreshBootstrapStatus(force: true)
-                }
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .disabled(store.activeConnection == nil)
-
-            Button {
-                Task {
-                    isTestingChat = true
-                    chatTestResult = await store.nativeChatStore.runChatTest()
-                    isTestingChat = false
-                }
-            } label: {
-                HStack {
-                    if isTestingChat {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                    Text(isTestingChat ? "Testing chat..." : "Test chat")
-                }
-            }
-            .disabled(isTestingChat || !store.nativeChatStore.canUseNativeChat)
-
-            if let chatTestResult {
-                Text(chatTestResult)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            DisclosureGroup("Diagnostics", isExpanded: $showsGatewayDiagnostics) {
-                if store.nativeChatStore.rawEvents.isEmpty {
-                    Text("No gateway events captured yet.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(store.nativeChatStore.rawEvents.suffix(12).reversed())) { event in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(event.type)
-                                .font(.caption.weight(.semibold))
-                            Text(event.rawLine ?? JSONValue.object(event.payload).displayString)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(4)
-                        }
-                    }
-                }
             }
         }
     }

@@ -10,7 +10,6 @@ import UIKit
 
 struct ConversationRow: View {
     let session: SessionSummary
-    let isActiveConversation: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -34,10 +33,6 @@ struct ConversationRow: View {
                 .lineLimit(2)
 
             HStack(spacing: 8) {
-                if isActiveConversation {
-                    DetailBadge(title: "Live", tint: Color(red: 0.18, green: 0.72, blue: 0.62))
-                }
-
                 if let model = session.displayModel {
                     DetailBadge(title: model, tint: .blue)
                 }
@@ -61,7 +56,7 @@ struct ConversationRow: View {
             return preview
         }
 
-        return "Open this chat to review the transcript or continue it."
+        return "Open this session to inspect its transcript."
     }
 
     private var timestampText: String {
@@ -74,8 +69,6 @@ struct ConversationRow: View {
 
 struct SessionSummaryCard: View {
     let session: SessionSummary
-    let onContinueInChat: () -> Void
-    let onResumeInTerminal: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -105,27 +98,9 @@ struct SessionSummaryCard: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Button(action: onContinueInChat) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                        Text("Continue in Chat")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button(action: onResumeInTerminal) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "terminal")
-                        Text("Resume in Terminal")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
+            Text("Read-only remote transcript")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
         .padding(18)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -161,8 +136,9 @@ struct TranscriptMessageRow: View {
 
             if isPrimaryConversationTurn {
                 if let content = message.content, !content.isEmpty {
-                    Text(content)
+                    Text(renderedMarkdown(content))
                         .font(.body)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -184,6 +160,15 @@ struct TranscriptMessageRow: View {
         }
         .padding(14)
         .background(roleBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contextMenu {
+            if let content = message.content, !content.isEmpty {
+                Button {
+                    UIPasteboard.general.string = content
+                } label: {
+                    Label("Copy Message", systemImage: "doc.on.doc")
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -405,6 +390,10 @@ struct TranscriptMessageRow: View {
             return message.role.isToolRole ? Color.orange.opacity(0.10) : Color.red.opacity(0.10)
         }
     }
+
+    private func renderedMarkdown(_ content: String) -> AttributedString {
+        (try? AttributedString(markdown: content)) ?? AttributedString(content)
+    }
 }
 
 struct TranscriptMetadataBlock: View {
@@ -455,11 +444,7 @@ struct SessionTranscriptScreen: View {
     var body: some View {
         List {
             Section {
-                SessionSummaryCard(
-                    session: session,
-                    onContinueInChat: { store.continueSessionInChat(session) },
-                    onResumeInTerminal: { store.resumeSessionInTerminal(session) }
-                )
+                SessionSummaryCard(session: session)
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
             }
@@ -479,7 +464,7 @@ struct SessionTranscriptScreen: View {
                     ContentUnavailableView(
                         "No Transcript Available",
                         systemImage: "text.bubble",
-                        description: Text("Hermes did not expose transcript lines for this session yet. You can still continue it in chat or reopen it in the terminal.")
+                        description: Text("Hermes did not expose transcript lines for this session yet.")
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -506,15 +491,6 @@ struct SessionTranscriptScreen: View {
         .listStyle(.insetGrouped)
         .navigationTitle(session.resolvedTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            Button("Chat") {
-                store.continueSessionInChat(session)
-            }
-
-            Button("Resume") {
-                store.resumeSessionInTerminal(session)
-            }
-        }
         .task(id: session.id) {
             await loadTranscript()
         }
@@ -531,7 +507,13 @@ struct SessionTranscriptScreen: View {
         }
         do {
             loadState = .loaded(sessionID: session.id, try await store.transcript(for: session.id))
+        } catch where AsyncOperationErrorPolicy.isCancellation(error) {
+            return
         } catch {
+            if let cached = store.cachedTranscript(for: session.id), !cached.isEmpty {
+                loadState = .loaded(sessionID: session.id, cached)
+                return
+            }
             if case .loaded = loadState {
                 return
             }
@@ -544,6 +526,79 @@ struct SessionTranscriptScreen: View {
             return .loading(sessionID: session.id)
         }
         return loadState
+    }
+}
+
+struct SessionsScreen: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @State private var query = ""
+
+    var body: some View {
+        List {
+            Section {
+                ActiveWorkspaceStrip(compact: true)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+            }
+
+            if store.sessions.isEmpty && store.isLoadingSessions {
+                Section {
+                    HStack {
+                        Spacer()
+                        ProgressView("Loading sessions…")
+                        Spacer()
+                    }
+                }
+            } else if store.sessions.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "No Sessions",
+                        systemImage: "text.bubble",
+                        description: Text("Remote Hermes sessions for the selected host and profile will appear here.")
+                    )
+                }
+            } else {
+                Section("Remote Sessions") {
+                    ForEach(store.sessions) { session in
+                        NavigationLink(value: HermesPhoneSessionRoute.transcript(session)) {
+                            ConversationRow(session: session)
+                        }
+                    }
+
+                    if store.hasMoreSessions {
+                        Button {
+                            Task { await store.loadMoreSessions() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                if store.isLoadingSessions {
+                                    ProgressView()
+                                } else {
+                                    Text("Load More")
+                                }
+                                Spacer()
+                            }
+                        }
+                        .disabled(store.isLoadingSessions)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Sessions")
+        .searchable(text: $query, prompt: "Search transcripts")
+        .task(id: store.activeWorkspaceScopeFingerprint) {
+            await store.refreshOverview()
+        }
+        .task(id: "\(store.activeWorkspaceScopeFingerprint ?? "")|\(query)") {
+            if !query.isEmpty {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            guard !Task.isCancelled else { return }
+            await store.loadSessions(query: query)
+        }
+        .refreshable {
+            await store.loadSessions(query: query)
+        }
     }
 }
 

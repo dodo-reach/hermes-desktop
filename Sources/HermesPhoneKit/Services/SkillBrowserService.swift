@@ -13,15 +13,12 @@ final class SkillBrowserService: @unchecked Sendable {
             body: skillListBody
         )
 
-        async let discoveredResponse = sshTransport.executeJSON(
+        let response = try await sshTransport.executeJSON(
             on: connection,
             pythonScript: script,
             responseType: SkillListResponse.self
         )
-        async let launchableRecords = loadLaunchableSkillRecords(connection: connection)
-
-        let response = try await discoveredResponse
-        let launchableSkillRecords = try await launchableRecords
+        let launchableSkillRecords = try await loadLaunchableSkillRecords(connection: connection)
 
         return LaunchableSkillInventoryParser.filterDiscoveredSkills(
             response.items,

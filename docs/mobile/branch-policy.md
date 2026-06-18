@@ -47,7 +47,6 @@ These files are currently safe to compare or port manually when remote Hermes be
 These files are intentionally divergent and must not be synchronized blindly:
 
 - `ConnectionProfile.swift`
-- `HermesChatModels.swift`
 - `SessionModels.swift`
 - `WorkspaceFileModels.swift`
 - `CronBrowserService.swift`
@@ -55,7 +54,8 @@ These files are intentionally divergent and must not be synchronized blindly:
 - desktop `SSHTransport.swift`
 - mobile `CoreBuildShims.swift`
 - desktop `HermesGatewayChatService.swift`
-- mobile `HermesGatewayCore.swift`
+- mobile management stays request/response over the existing SSH transport; do
+  not restore the removed native chat gateway runtime.
 
 ## Change Workflow
 

@@ -15,9 +15,14 @@ struct TerminalScreen: View {
     @AppStorage("hermesPhone.terminal.backgroundHex") private var terminalBackgroundHex = TerminalAppearance.default.backgroundHex
     @AppStorage("hermesPhone.terminal.foregroundHex") private var terminalForegroundHex = TerminalAppearance.default.foregroundHex
     @State private var isPresentingAppearanceSheet = false
+    private let onOpenSettings: () -> Void
 
-    init(workspace: HermesTerminalWorkspaceStore) {
+    init(
+        workspace: HermesTerminalWorkspaceStore,
+        onOpenSettings: @escaping () -> Void = {}
+    ) {
         _workspace = ObservedObject(wrappedValue: workspace)
+        self.onOpenSettings = onOpenSettings
     }
 
     var body: some View {
@@ -146,6 +151,12 @@ struct TerminalScreen: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close terminal")
+
+                Button(action: onOpenSettings) {
+                    terminalIcon("gearshape")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hermes settings")
             }
             .padding(.horizontal, 10)
             .padding(.top, 4)

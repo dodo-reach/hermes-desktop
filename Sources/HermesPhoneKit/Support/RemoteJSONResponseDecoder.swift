@@ -121,6 +121,14 @@ enum RemoteJSONResponseDecoder {
         let trimmedStdout = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedStderr = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        if trimmedStdout.isEmpty {
+            var message = "The remote command finished without returning its JSON response."
+            if !trimmedStderr.isEmpty {
+                message += "\n\nstderr:\n\(shortenedOutputPreview(trimmedStderr, limit: 2000))"
+            }
+            return message
+        }
+
         if looksLikeNonJSONShellOutput(trimmedStdout) {
             let guidance = "Remote command returned non-JSON output. This usually means a shell startup file or Hermes startup command printed text during a non-interactive SSH command. Keep startup files quiet for non-interactive SSH sessions and retry."
             let preview = shortenedOutputPreview(trimmedStdout)

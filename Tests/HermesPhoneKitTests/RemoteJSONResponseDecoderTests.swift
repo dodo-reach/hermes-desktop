@@ -46,6 +46,25 @@ struct RemoteJSONResponseDecoderTests {
             #expect(message.contains("Last login"))
         }
     }
+
+    @Test
+    func explainsEmptySuccessfulOutputWithoutCallingItMalformedJSON() throws {
+        do {
+            let _: ProbeResponse = try RemoteJSONResponseDecoder.decode(
+                ProbeResponse.self,
+                stdout: "",
+                stderr: ""
+            )
+            Issue.record("Expected invalid response")
+        } catch let error as SSHTransportError {
+            guard case .invalidResponse(let message) = error else {
+                Issue.record("Expected invalidResponse, got \(error)")
+                return
+            }
+            #expect(message.contains("without returning its JSON response"))
+            #expect(!message.contains("correct format"))
+        }
+    }
 }
 
 private struct ProbeResponse: Decodable {

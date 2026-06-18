@@ -69,6 +69,8 @@ struct PersistenceEnvelope: Codable {
     var workspaceFileBookmarks: [WorkspaceFileBookmark] = []
     var sessionCacheByWorkspace: [String: [SessionSummary]] = [:]
     var transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:]
+    var hiddenProfilesByHost: [String: [String]] = [:]
+    var selectedKanbanBoardByWorkspace: [String: String] = [:]
 
     enum CodingKeys: String, CodingKey {
         case activeConnectionID
@@ -79,6 +81,8 @@ struct PersistenceEnvelope: Codable {
         case workspaceFileBookmarks
         case sessionCacheByWorkspace
         case transcriptSnapshotCacheByWorkspace
+        case hiddenProfilesByHost
+        case selectedKanbanBoardByWorkspace
     }
 
     init(
@@ -89,7 +93,9 @@ struct PersistenceEnvelope: Codable {
         terminalWorkspace: PersistedTerminalWorkspace?,
         workspaceFileBookmarks: [WorkspaceFileBookmark] = [],
         sessionCacheByWorkspace: [String: [SessionSummary]] = [:],
-        transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:]
+        transcriptSnapshotCacheByWorkspace: [String: [String: [SessionMessage]]] = [:],
+        hiddenProfilesByHost: [String: [String]] = [:],
+        selectedKanbanBoardByWorkspace: [String: String] = [:]
     ) {
         self.activeConnectionID = activeConnectionID
         self.activeHostFingerprint = activeHostFingerprint
@@ -99,6 +105,8 @@ struct PersistenceEnvelope: Codable {
         self.workspaceFileBookmarks = workspaceFileBookmarks
         self.sessionCacheByWorkspace = sessionCacheByWorkspace
         self.transcriptSnapshotCacheByWorkspace = transcriptSnapshotCacheByWorkspace
+        self.hiddenProfilesByHost = hiddenProfilesByHost
+        self.selectedKanbanBoardByWorkspace = selectedKanbanBoardByWorkspace
     }
 
     init(from decoder: Decoder) throws {
@@ -111,15 +119,42 @@ struct PersistenceEnvelope: Codable {
         workspaceFileBookmarks = try container.decodeIfPresent([WorkspaceFileBookmark].self, forKey: .workspaceFileBookmarks) ?? []
         sessionCacheByWorkspace = try container.decodeIfPresent([String: [SessionSummary]].self, forKey: .sessionCacheByWorkspace) ?? [:]
         transcriptSnapshotCacheByWorkspace = try container.decodeIfPresent([String: [String: [SessionMessage]]].self, forKey: .transcriptSnapshotCacheByWorkspace) ?? [:]
+        hiddenProfilesByHost = try container.decodeIfPresent([String: [String]].self, forKey: .hiddenProfilesByHost) ?? [:]
+        selectedKanbanBoardByWorkspace = try container.decodeIfPresent([String: String].self, forKey: .selectedKanbanBoardByWorkspace) ?? [:]
     }
 }
 
-enum HermesPhoneRootTab: Hashable {
-    case chat
-    case terminal
+enum HermesPhoneRootTab: String, CaseIterable, Identifiable, Hashable {
     case sessions
+    case kanban
+    case cron
     case files
-    case more
+    case skills
+    case terminal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .sessions: "Sessions"
+        case .kanban: "Kanban"
+        case .cron: "Cron"
+        case .files: "Files"
+        case .skills: "Skills"
+        case .terminal: "Terminal"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .sessions: "text.bubble"
+        case .kanban: "rectangle.3.group"
+        case .cron: "calendar.badge.clock"
+        case .files: "folder"
+        case .skills: "book.closed"
+        case .terminal: "terminal"
+        }
+    }
 }
 
 enum SessionListLoadState: Equatable {
@@ -130,7 +165,7 @@ enum SessionListLoadState: Equatable {
     case failed
 }
 
-enum HermesPhoneChatRoute: Hashable {
+enum HermesPhoneSessionRoute: Hashable {
     case transcript(SessionSummary)
 }
 
