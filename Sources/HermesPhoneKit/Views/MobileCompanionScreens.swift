@@ -217,14 +217,28 @@ struct HermesSettingsScreen: View {
                 } label: {
                     Label("Hosts", systemImage: "network")
                 }
+            }
+
+            Section("Agents") {
                 NavigationLink {
-                    ProfileManagerScreen()
+                    AgentManagementScreen()
                 } label: {
-                    Label("Profiles", systemImage: "person.2")
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Manage Agents")
+                            Text("\(store.agentSummaries.count) on this host")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "person.2")
+                    }
                 }
             }
 
-            Section("Hermes") {
+            Section("Current Agent") {
+                ManagedAgentSummaryRow()
+
                 NavigationLink {
                     GatewayManagerScreen()
                 } label: {
@@ -251,8 +265,55 @@ struct HermesSettingsScreen: View {
         }
         .task(id: store.activeWorkspaceScopeFingerprint) {
             await store.refreshOverview()
+            await store.refreshProfiles()
+            await store.refreshGateway()
         }
-        .refreshable { await store.refreshOverview() }
+        .refreshable {
+            await store.refreshOverview()
+            await store.refreshProfiles()
+            await store.refreshGateway()
+        }
+    }
+}
+
+private struct ManagedAgentSummaryRow: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "brain.head.profile")
+                .font(.title3)
+                .foregroundStyle(.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(agent?.name ?? store.activeConnection?.resolvedHermesProfileName ?? "No agent")
+                    .font(.headline)
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let agent {
+                Circle()
+                    .fill(agent.gatewayRunning ? Color.green : Color.secondary.opacity(0.45))
+                    .frame(width: 9, height: 9)
+                    .accessibilityLabel(agent.gatewayRunning ? "Gateway running" : "Gateway stopped")
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var agent: HermesAgentSummary? {
+        let name = store.activeConnection?.resolvedHermesProfileName
+        return store.agentSummaries.first { $0.name == name }
+    }
+
+    private var summary: String {
+        guard let agent else { return "Select a host and agent" }
+        if let model = agent.model, !model.isEmpty {
+            return agent.provider.map { "\(model) · \($0)" } ?? model
+        }
+        return agent.description?.nilIfBlank ?? "Ready to configure"
     }
 }
 
@@ -265,7 +326,10 @@ private struct GatewayManagerScreen: View {
             if let snapshot = store.gatewaySnapshot {
                 Section("Gateway") {
                     LabeledContent("Profile", value: snapshot.profileName)
-                    LabeledContent("State", value: snapshot.running.map { $0 ? "Running" : "Stopped" } ?? "Unknown")
+                    LabeledContent("State", value: gatewayState(snapshot))
+                    if let processID = snapshot.processID {
+                        LabeledContent("Process", value: "\(processID)")
+                    }
                     LabeledContent("Manager", value: snapshot.manager ?? "Not detected")
                     if let status = snapshot.serviceStatus { Text(status).font(.caption.monospaced()).textSelection(.enabled) }
                     if let error = snapshot.lastError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
@@ -290,7 +354,11 @@ private struct GatewayManagerScreen: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(snapshot.channels) { channel in
-                        GatewayChannelRow(channel: channel)
+                        NavigationLink {
+                            GatewayChannelDetailScreen(channelID: channel.id)
+                        } label: {
+                            GatewayChannelRow(channel: channel)
+                        }
                     }
                 }
             } else {
@@ -317,6 +385,174 @@ private struct GatewayManagerScreen: View {
             Text("Hermes CLI will perform the profile-scoped action. The phone never calls the host supervisor directly.")
         }
     }
+
+    private func gatewayState(_ snapshot: GatewaySnapshot) -> String {
+        if let state = snapshot.state?.replacingOccurrences(of: "_", with: " "), !state.isEmpty {
+            return state.capitalized
+        }
+        return snapshot.running.map { $0 ? "Running" : "Stopped" } ?? "Unknown"
+    }
+}
+
+private struct GatewayChannelDetailScreen: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    let channelID: String
+    @State private var values: [String: String] = [:]
+    @State private var clearKeys: Set<String> = []
+    @State private var enabled = false
+    @State private var showsAdvanced = false
+    @State private var restartPrompt = false
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Enabled", isOn: $enabled)
+                if let description = channel.description?.nilIfBlank {
+                    Text(description)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Status", value: channelStateTitle)
+            }
+
+            Section("Credentials") {
+                ForEach(visibleCredentials) { credential in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Text(credential.prompt)
+                                .font(.subheadline.weight(.semibold))
+                            if credential.required {
+                                Text("Required")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
+                            Spacer()
+                            if credential.isSet && !clearKeys.contains(credential.key) {
+                                Label("Set", systemImage: "checkmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                        if credential.isPassword {
+                            SecureField(
+                                credential.isSet ? "New value (keeps current if blank)" : "Value",
+                                text: valueBinding(for: credential.key)
+                            )
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        } else {
+                            TextField(
+                                credential.isSet ? "New value (keeps current if blank)" : "Value",
+                                text: valueBinding(for: credential.key)
+                            )
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        }
+                        if let description = credential.description?.nilIfBlank {
+                            Text(description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if credential.isSet {
+                            Button(
+                                clearKeys.contains(credential.key) ? "Keep Existing Value" : "Clear Existing Value",
+                                role: clearKeys.contains(credential.key) ? nil : .destructive
+                            ) {
+                                if clearKeys.contains(credential.key) {
+                                    clearKeys.remove(credential.key)
+                                } else {
+                                    clearKeys.insert(credential.key)
+                                    values[credential.key] = ""
+                                }
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                if channel.credentials.contains(where: \.isAdvanced) {
+                    Toggle("Show advanced fields", isOn: $showsAdvanced)
+                }
+                if channel.credentials.isEmpty {
+                    Text("This channel has no editable credential metadata in the installed Hermes version.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                Button("Save Channel") {
+                    Task {
+                        let submittedValues = values.filter {
+                            !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                                !clearKeys.contains($0.key)
+                        }
+                        if await store.updateGatewayChannel(
+                            id: channel.id,
+                            enabled: enabled,
+                            values: submittedValues,
+                            clearKeys: Array(clearKeys)
+                        ) {
+                            values = [:]
+                            clearKeys = []
+                            restartPrompt = true
+                        }
+                    }
+                }
+                .disabled(store.isLoadingCompanion(.gateway))
+            } footer: {
+                Text("Secret values are sent directly over SSH and written to this agent’s .env. They are never read back, cached, or displayed by HermesPhone.")
+            }
+        }
+        .navigationTitle(channel.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: channelID) {
+            enabled = channel.enabled
+        }
+        .alert("Channel saved", isPresented: $restartPrompt) {
+            Button("Restart gateway now") {
+                Task { await store.performGatewayAction(.restart) }
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("The running gateway must restart before channel changes take effect.")
+        }
+    }
+
+    private var channel: GatewayChannel {
+        store.gatewaySnapshot?.channels.first { $0.id == channelID } ??
+            GatewayChannel(
+                id: channelID,
+                name: channelID.replacingOccurrences(of: "_", with: " ").capitalized,
+                description: nil,
+                enabled: false,
+                configured: false,
+                state: "unknown",
+                errorMessage: nil,
+                updatedAt: nil,
+                credentials: []
+            )
+    }
+
+    private var visibleCredentials: [GatewayChannelCredential] {
+        channel.credentials.filter { showsAdvanced || !$0.isAdvanced || $0.isSet }
+    }
+
+    private var channelStateTitle: String {
+        channel.state.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private func valueBinding(for key: String) -> Binding<String> {
+        Binding(
+            get: { values[key] ?? "" },
+            set: {
+                values[key] = $0
+                if !$0.isEmpty {
+                    clearKeys.remove(key)
+                }
+            }
+        )
+    }
 }
 
 private struct GatewayChannelRow: View {
@@ -326,9 +562,15 @@ private struct GatewayChannelRow: View {
         HStack {
             VStack(alignment: .leading) {
                 Text(channel.name)
-                Text(configurationText)
+                Text(statusText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(channel.errorMessage == nil ? .secondary : Color.red)
+                if let error = channel.errorMessage?.nilIfBlank {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
             }
             Spacer()
             Image(systemName: statusIconName)
@@ -336,87 +578,527 @@ private struct GatewayChannelRow: View {
         }
     }
 
-    private var configurationText: String {
-        channel.configured ? "Configured" : "Not configured"
+    private var statusText: String {
+        switch channel.state {
+        case "connected": "Connected"
+        case "pending_restart": "Configured · restart required"
+        case "gateway_stopped": "Configured · gateway stopped"
+        case "startup_failed": "Startup failed"
+        case "not_configured": "Setup required"
+        case "disabled": "Disabled"
+        default:
+            channel.configured ? channel.state.replacingOccurrences(of: "_", with: " ").capitalized : "Setup required"
+        }
     }
 
     private var statusIconName: String {
-        channel.enabled == false ? "pause.circle" : "checkmark.circle"
+        switch channel.state {
+        case "connected": "checkmark.circle.fill"
+        case "startup_failed": "exclamationmark.triangle.fill"
+        case "pending_restart": "arrow.clockwise.circle"
+        case "gateway_stopped": "stop.circle"
+        case "disabled": "pause.circle"
+        default: channel.configured ? "checkmark.circle" : "plus.circle"
+        }
     }
 
     private var statusColor: Color {
-        channel.enabled == false ? .secondary : .green
+        switch channel.state {
+        case "connected": .green
+        case "startup_failed": .red
+        case "pending_restart": .orange
+        default: .secondary
+        }
     }
 }
 
-private struct ProfileManagerScreen: View {
+private enum AgentManagementSheet: Identifiable {
+    case create
+    case rename(HermesAgentSummary)
+    case describe(HermesAgentSummary)
+    case soul(HermesAgentSummary)
+    case delete(HermesAgentSummary)
+
+    var id: String {
+        switch self {
+        case .create: "create"
+        case .rename(let agent): "rename:\(agent.name)"
+        case .describe(let agent): "describe:\(agent.name)"
+        case .soul(let agent): "soul:\(agent.name)"
+        case .delete(let agent): "delete:\(agent.name)"
+        }
+    }
+}
+
+private struct AgentManagementScreen: View {
     @EnvironmentObject private var store: HermesPhoneStore
-    @State private var deleteCandidate: RemoteHermesProfile?
-    @State private var confirmation = ""
+    @State private var presentedSheet: AgentManagementSheet?
 
     var body: some View {
         List {
-            Section("Tracked") {
-                ForEach(store.availableProfiles) { profile in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(profile.name)
-                            Spacer()
-                            if profile.name == store.activeConnection?.resolvedHermesProfileName { Text("Active").font(.caption).foregroundStyle(.green) }
-                        }
-                        if !profile.isDefault && profile.name != store.activeConnection?.resolvedHermesProfileName {
-                            HStack {
-                                Button("Stop tracking") { store.stopTrackingProfile(profile.name) }
-                                Button("Delete from host", role: .destructive) {
-                                    confirmation = ""
-                                    deleteCandidate = profile
-                                }
+            Section {
+                Text("Agents are isolated Hermes profiles. Each has its own model, identity, keys, skills, conversations, channels, and gateway.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("On This Host") {
+                ForEach(store.agentSummaries) { agent in
+                    NavigationLink {
+                        AgentDetailScreen(agentName: agent.name)
+                    } label: {
+                        AgentSummaryRow(agent: agent)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if !agent.isDefault && !agent.isActive && store.profileSnapshot?.canDelete != false {
+                            Button("Delete", role: .destructive) {
+                                presentedSheet = .delete(agent)
                             }
-                            .buttonStyle(.borderless)
+                        }
+                    }
+                    .contextMenu {
+                        Button("Edit Description") { presentedSheet = .describe(agent) }
+                        if !agent.isDefault && store.profileSnapshot?.canRename != false {
+                            Button("Rename") { presentedSheet = .rename(agent) }
+                        }
+                        if !agent.isActive {
+                            Button("Use Agent") {
+                                Task { await store.switchHermesProfile(to: agent.name) }
+                            }
                         }
                     }
                 }
             }
 
-            if !store.untrackedProfiles.isEmpty {
-                Section("Untracked") {
-                    ForEach(store.untrackedProfiles) { profile in
-                        HStack {
-                            Text(profile.name)
-                            Spacer()
-                            Button("Restore") { store.restoreTrackingProfile(profile.name) }
-                        }
-                    }
+            Section {
+                Button {
+                    presentedSheet = .create
+                } label: {
+                    Label("Create Agent", systemImage: "plus")
                 }
+                .disabled(store.profileSnapshot?.canCreate == false)
             }
         }
-        .navigationTitle("Profiles")
+        .navigationTitle("Agents")
         .task(id: store.activeWorkspaceScopeFingerprint) {
             await store.refreshProfiles()
         }
         .refreshable { await store.refreshProfiles() }
-        .sheet(item: $deleteCandidate) { profile in
-            NavigationStack {
-                Form {
-                    Section {
-                        Text("Type \(profile.name) to delete this profile from the host. Hermes CLI will also remove its managed gateway service.")
-                        TextField("Exact profile name", text: $confirmation)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                    Section {
-                        Button("Delete \(profile.name)", role: .destructive) {
-                            deleteCandidate = nil
-                            Task { await store.deleteRemoteProfile(named: profile.name) }
-                        }
-                        .disabled(confirmation != profile.name)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    presentedSheet = .create
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .disabled(store.activeConnection == nil || store.profileSnapshot?.canCreate == false)
+            }
+        }
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .create:
+                AgentCreateSheet()
+                    .environmentObject(store)
+            case .rename(let agent):
+                AgentRenameSheet(agent: agent)
+                    .environmentObject(store)
+            case .describe(let agent):
+                AgentDescriptionSheet(agent: agent)
+                    .environmentObject(store)
+            case .soul(let agent):
+                AgentSoulSheet(agent: agent)
+                    .environmentObject(store)
+            case .delete(let agent):
+                AgentDeleteSheet(agent: agent)
+                    .environmentObject(store)
+            }
+        }
+    }
+}
+
+private struct AgentSummaryRow: View {
+    let agent: HermesAgentSummary
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: agent.isDefault ? "brain" : "brain.head.profile")
+                .foregroundStyle(agent.isActive ? Color.accentColor : Color.secondary)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Text(agent.name)
+                        .font(.headline)
+                    if agent.isActive {
+                        Text("Current")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
                     }
                 }
-                .navigationTitle("Delete Profile")
-                .toolbar { Button("Cancel") { deleteCandidate = nil } }
+                if let description = agent.description?.nilIfBlank {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                HStack(spacing: 8) {
+                    if let model = agent.model?.nilIfBlank {
+                        Label(model, systemImage: "sparkles")
+                    }
+                    Label("\(agent.skillCount)", systemImage: "puzzlepiece.extension")
+                    Label(
+                        agent.gatewayRunning ? "On" : "Off",
+                        systemImage: agent.gatewayRunning ? "antenna.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right.slash"
+                    )
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
-            .hermesKeyboardDismissal()
         }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct AgentDetailScreen: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @State private var managedAgentName: String
+    @State private var presentedSheet: AgentManagementSheet?
+
+    init(agentName: String) {
+        _managedAgentName = State(initialValue: agentName)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                AgentSummaryRow(agent: agent)
+                if !agent.isActive {
+                    ProgressView("Switching to \(agent.name)…")
+                }
+            }
+
+            Section("Identity") {
+                Button("Edit Description") { presentedSheet = .describe(agent) }
+                Button("Edit SOUL.md") { presentedSheet = .soul(agent) }
+                    .disabled(!agent.isActive)
+                if !agent.isDefault && store.profileSnapshot?.canRename != false {
+                    Button("Rename Agent") { presentedSheet = .rename(agent) }
+                }
+            }
+
+            Section("Configuration") {
+                NavigationLink {
+                    ConfigEditorScreen()
+                } label: {
+                    Label("Behavior & Model", systemImage: "switch.2")
+                }
+                .disabled(!agent.isActive)
+                NavigationLink {
+                    EnvironmentEditorScreen()
+                } label: {
+                    Label("Keys & Integrations", systemImage: "key")
+                }
+                .disabled(!agent.isActive)
+                NavigationLink {
+                    GatewayManagerScreen()
+                } label: {
+                    Label("Gateway & Channels", systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .disabled(!agent.isActive)
+                NavigationLink {
+                    SkillsScreen()
+                } label: {
+                    Label("Skills", systemImage: "book.closed")
+                }
+                .disabled(!agent.isActive)
+            }
+
+            Section {
+                Text("Changes on this screen apply only to \(agent.name). Other agents on this host remain isolated.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(agent.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: managedAgentName) {
+            if store.activeConnection?.resolvedHermesProfileName != managedAgentName {
+                await store.switchHermesProfile(to: managedAgentName)
+            }
+            await store.refreshProfiles()
+            await store.refreshGateway()
+        }
+        .onChange(of: store.activeConnection?.resolvedHermesProfileName) { previousName, activeName in
+            guard let activeName, previousName == managedAgentName else { return }
+            managedAgentName = activeName
+        }
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .rename(let agent):
+                AgentRenameSheet(agent: agent).environmentObject(store)
+            case .describe(let agent):
+                AgentDescriptionSheet(agent: agent).environmentObject(store)
+            case .soul(let agent):
+                AgentSoulSheet(agent: agent).environmentObject(store)
+            case .create:
+                AgentCreateSheet().environmentObject(store)
+            case .delete(let agent):
+                AgentDeleteSheet(agent: agent).environmentObject(store)
+            }
+        }
+    }
+
+    private var agent: HermesAgentSummary {
+        store.agentSummaries.first { $0.name == managedAgentName } ??
+            HermesAgentSummary(
+                name: managedAgentName,
+                path: "",
+                isDefault: managedAgentName == "default",
+                isActive: store.activeConnection?.resolvedHermesProfileName == managedAgentName,
+                gatewayRunning: false,
+                model: nil,
+                provider: nil,
+                hasEnvironment: false,
+                skillCount: 0,
+                description: nil,
+                descriptionIsAutomatic: false,
+                soul: nil
+            )
+    }
+}
+
+private struct AgentCreateSheet: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var description = ""
+    @State private var mode: AgentCreationMode = .cloneCurrent
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Agent") {
+                    TextField("Name", text: $name)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("What is this agent good at?", text: $description, axis: .vertical)
+                        .lineLimit(2 ... 5)
+                }
+                Section("Starting Point") {
+                    Picker("Create", selection: $mode) {
+                        ForEach(AgentCreationMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    Text(mode == .cloneCurrent
+                         ? "Copies the current agent’s configuration, keys, identity, and skills into an isolated profile."
+                         : "Creates a clean profile with Hermes’ bundled skills and default identity.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("New Agent")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        Task {
+                            if await store.createRemoteProfile(
+                                named: normalizedName,
+                                description: description,
+                                mode: mode
+                            ) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(!isValidName || store.isLoadingCompanion(.profiles))
+                }
+            }
+        }
+        .hermesKeyboardDismissal()
+    }
+
+    private var normalizedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var isValidName: Bool {
+        normalizedName.range(of: #"^[a-z0-9][a-z0-9_-]{0,63}$"#, options: .regularExpression) != nil &&
+            normalizedName != "default"
+    }
+}
+
+private struct AgentRenameSheet: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @Environment(\.dismiss) private var dismiss
+    let agent: HermesAgentSummary
+    @State private var name: String
+
+    init(agent: HermesAgentSummary) {
+        self.agent = agent
+        _name = State(initialValue: agent.name)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Agent name", text: $name)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Text("Renaming also updates the profile alias and stops its gateway before moving the profile.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .navigationTitle("Rename Agent")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Rename") {
+                        Task {
+                            if await store.renameRemoteProfile(named: agent.name, to: normalizedName) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(!isValidName || normalizedName == agent.name || store.isLoadingCompanion(.profiles))
+                }
+            }
+        }
+        .hermesKeyboardDismissal()
+    }
+
+    private var normalizedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var isValidName: Bool {
+        normalizedName.range(of: #"^[a-z0-9][a-z0-9_-]{0,63}$"#, options: .regularExpression) != nil &&
+            normalizedName != "default"
+    }
+}
+
+private struct AgentDescriptionSheet: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @Environment(\.dismiss) private var dismiss
+    let agent: HermesAgentSummary
+    @State private var description: String
+
+    init(agent: HermesAgentSummary) {
+        self.agent = agent
+        _description = State(initialValue: agent.description ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("What is this agent good at?", text: $description, axis: .vertical)
+                    .lineLimit(3 ... 8)
+                Text("Hermes uses this description when routing Kanban work between agents.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .navigationTitle("Agent Description")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task {
+                            if await store.updateRemoteProfileDescription(
+                                named: agent.name,
+                                description: description
+                            ) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(store.isLoadingCompanion(.profiles))
+                }
+            }
+        }
+        .hermesKeyboardDismissal()
+    }
+}
+
+private struct AgentSoulSheet: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @Environment(\.dismiss) private var dismiss
+    let agent: HermesAgentSummary
+    @State private var content: String
+
+    init(agent: HermesAgentSummary) {
+        self.agent = agent
+        _content = State(initialValue: agent.soul ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("SOUL.md defines this agent’s voice, temperament, and enduring identity.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $content)
+                    .font(.system(.body, design: .monospaced))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .padding(8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            }
+            .padding()
+            .navigationTitle("SOUL.md")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task {
+                            if await store.updateRemoteProfileSoul(named: agent.name, content: content) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(store.isLoadingCompanion(.profiles))
+                }
+            }
+        }
+        .hermesKeyboardDismissal()
+    }
+}
+
+private struct AgentDeleteSheet: View {
+    @EnvironmentObject private var store: HermesPhoneStore
+    @Environment(\.dismiss) private var dismiss
+    let agent: HermesAgentSummary
+    @State private var confirmation = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("This permanently removes \(agent.name)’s config, keys, memories, sessions, skills, cron jobs, alias, and managed gateway service.")
+                    TextField("Type \(agent.name)", text: $confirmation)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                Section {
+                    Button("Delete \(agent.name)", role: .destructive) {
+                        dismiss()
+                        Task { await store.deleteRemoteProfile(named: agent.name) }
+                    }
+                    .disabled(confirmation != agent.name)
+                }
+            }
+            .navigationTitle("Delete Agent")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+        .hermesKeyboardDismissal()
     }
 }
 

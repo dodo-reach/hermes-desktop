@@ -5,9 +5,12 @@ struct GatewaySnapshot: Codable, Hashable, Sendable {
     let cliAvailable: Bool
     let lifecycleAvailable: Bool
     let running: Bool?
+    let state: String?
+    let processID: Int?
     let manager: String?
     let serviceStatus: String?
     let lastError: String?
+    let updatedAt: String?
     let channels: [GatewayChannel]
 
     enum CodingKeys: String, CodingKey {
@@ -15,9 +18,12 @@ struct GatewaySnapshot: Codable, Hashable, Sendable {
         case cliAvailable = "cli_available"
         case lifecycleAvailable = "lifecycle_available"
         case running
+        case state
+        case processID = "process_id"
         case manager
         case serviceStatus = "service_status"
         case lastError = "last_error"
+        case updatedAt = "updated_at"
         case channels
     }
 }
@@ -25,8 +31,39 @@ struct GatewaySnapshot: Codable, Hashable, Sendable {
 struct GatewayChannel: Codable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
-    let enabled: Bool?
+    let description: String?
+    let enabled: Bool
     let configured: Bool
+    let state: String
+    let errorMessage: String?
+    let updatedAt: String?
+    let credentials: [GatewayChannelCredential]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, enabled, configured, state
+        case errorMessage = "error_message"
+        case updatedAt = "updated_at"
+        case credentials
+    }
+}
+
+struct GatewayChannelCredential: Codable, Identifiable, Hashable, Sendable {
+    let key: String
+    let prompt: String
+    let description: String?
+    let required: Bool
+    let isSet: Bool
+    let isPassword: Bool
+    let isAdvanced: Bool
+
+    var id: String { key }
+
+    enum CodingKeys: String, CodingKey {
+        case key, prompt, description, required
+        case isSet = "is_set"
+        case isPassword = "is_password"
+        case isAdvanced = "advanced"
+    }
 }
 
 enum GatewayLifecycleAction: String, CaseIterable, Identifiable, Sendable {
@@ -40,14 +77,59 @@ enum GatewayLifecycleAction: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct ProfileManagementSnapshot: Codable, Sendable {
-    let profiles: [RemoteHermesProfile]
-    let deleteCommandAvailable: Bool
-    let noninteractiveDeleteFlag: String?
+    let agents: [HermesAgentSummary]
+    let activeProfileName: String
+    let canCreate: Bool
+    let canRename: Bool
+    let canDelete: Bool
 
     enum CodingKeys: String, CodingKey {
-        case profiles
-        case deleteCommandAvailable = "delete_command_available"
-        case noninteractiveDeleteFlag = "noninteractive_delete_flag"
+        case agents
+        case activeProfileName = "active_profile_name"
+        case canCreate = "can_create"
+        case canRename = "can_rename"
+        case canDelete = "can_delete"
+    }
+}
+
+struct HermesAgentSummary: Codable, Identifiable, Hashable, Sendable {
+    let name: String
+    let path: String
+    let isDefault: Bool
+    let isActive: Bool
+    let gatewayRunning: Bool
+    let model: String?
+    let provider: String?
+    let hasEnvironment: Bool
+    let skillCount: Int
+    let description: String?
+    let descriptionIsAutomatic: Bool
+    let soul: String?
+
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name, path, model, provider, description, soul
+        case isDefault = "is_default"
+        case isActive = "is_active"
+        case gatewayRunning = "gateway_running"
+        case hasEnvironment = "has_environment"
+        case skillCount = "skill_count"
+        case descriptionIsAutomatic = "description_is_automatic"
+    }
+}
+
+enum AgentCreationMode: String, CaseIterable, Identifiable, Sendable {
+    case fresh
+    case cloneCurrent
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fresh: "Fresh Agent"
+        case .cloneCurrent: "Clone Current"
+        }
     }
 }
 

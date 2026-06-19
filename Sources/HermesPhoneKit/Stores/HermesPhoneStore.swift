@@ -148,6 +148,29 @@ final class HermesPhoneStore: ObservableObject {
         return (overview?.availableProfiles ?? []).filter { hidden.contains($0.name) }
     }
 
+    var agentSummaries: [HermesAgentSummary] {
+        if let agents = profileSnapshot?.agents, !agents.isEmpty {
+            return agents
+        }
+        let activeName = activeConnection?.resolvedHermesProfileName
+        return availableProfiles.map { profile in
+            HermesAgentSummary(
+                name: profile.name,
+                path: profile.path,
+                isDefault: profile.isDefault,
+                isActive: profile.name == activeName,
+                gatewayRunning: false,
+                model: nil,
+                provider: nil,
+                hasEnvironment: false,
+                skillCount: 0,
+                description: nil,
+                descriptionIsAutomatic: false,
+                soul: nil
+            )
+        }
+    }
+
     var selectedKanbanBoard: String {
         guard let workspace = activeWorkspaceScopeFingerprint else { return "default" }
         return selectedKanbanBoardByWorkspace[workspace] ?? "default"
@@ -799,6 +822,28 @@ final class HermesPhoneStore: ObservableObject {
         }
     }
 
+    func updateGatewayChannel(
+        id: String,
+        enabled: Bool,
+        values: [String: String],
+        clearKeys: [String]
+    ) async -> Bool {
+        var succeeded = false
+        if let value: GatewaySnapshot = await performCompanionLoad(scope: .gateway, { service, connection in
+            try await service.updateGatewayChannel(
+                id: id,
+                enabled: enabled,
+                values: values,
+                clearKeys: clearKeys,
+                connection: connection
+            )
+        }) {
+            gatewaySnapshot = value
+            succeeded = true
+        }
+        return succeeded
+    }
+
     func refreshProfiles() async {
         if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
             try await service.profileSnapshot(connection: connection)
@@ -876,16 +921,97 @@ final class HermesPhoneStore: ObservableObject {
         objectWillChange.send()
     }
 
+    func createRemoteProfile(
+        named name: String,
+        description: String,
+        mode: AgentCreationMode
+    ) async -> Bool {
+        guard let connection = activeConnection else { return false }
+        var succeeded = false
+        if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
+            try await service.createProfile(
+                named: name,
+                description: description,
+                mode: mode,
+                connection: connection
+            )
+        }) {
+            profileSnapshot = value
+            hiddenProfilesByHost[connection.hostConnectionFingerprint]?.remove(name)
+            succeeded = true
+        }
+        if succeeded {
+            await switchHermesProfile(to: name)
+            await refreshProfiles()
+        }
+        return succeeded
+    }
+
+    func renameRemoteProfile(named name: String, to newName: String) async -> Bool {
+        guard let connection = activeConnection else { return false }
+        let renamesActiveProfile = name == connection.resolvedHermesProfileName
+        var succeeded = false
+        if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
+            try await service.renameProfile(named: name, to: newName, connection: connection)
+        }) {
+            profileSnapshot = value
+            if var hidden = hiddenProfilesByHost[connection.hostConnectionFingerprint], hidden.remove(name) != nil {
+                hidden.insert(newName)
+                hiddenProfilesByHost[connection.hostConnectionFingerprint] = hidden
+            }
+            succeeded = true
+        }
+        if succeeded {
+            if renamesActiveProfile {
+                await switchHermesProfile(to: newName)
+            } else {
+                await refreshOverview()
+            }
+            await refreshProfiles()
+            persistConnections()
+        }
+        return succeeded
+    }
+
+    func updateRemoteProfileDescription(named name: String, description: String) async -> Bool {
+        var succeeded = false
+        if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
+            try await service.updateProfileDescription(
+                named: name,
+                description: description,
+                connection: connection
+            )
+        }) {
+            profileSnapshot = value
+            succeeded = true
+        }
+        return succeeded
+    }
+
+    func updateRemoteProfileSoul(named name: String, content: String) async -> Bool {
+        var succeeded = false
+        if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
+            try await service.updateProfileSoul(
+                named: name,
+                content: content,
+                connection: connection
+            )
+        }) {
+            profileSnapshot = value
+            succeeded = true
+        }
+        return succeeded
+    }
+
     func deleteRemoteProfile(named name: String) async {
         guard let connection = activeConnection,
               name != "default",
-              name != connection.resolvedHermesProfileName,
-              let flag = profileSnapshot?.noninteractiveDeleteFlag else {
-            present(MobileCompanionError.unsafeOperation("Switch away from the named profile and verify that the installed Hermes CLI exposes a noninteractive deletion flag."))
+              name != connection.resolvedHermesProfileName else {
+            present(MobileCompanionError.unsafeOperation("Switch away from this agent before deleting it. The default agent cannot be deleted."))
             return
         }
         if let value: ProfileManagementSnapshot = await performCompanionLoad(scope: .profiles, { service, connection in
-            try await service.deleteProfile(named: name, confirmationFlag: flag, connection: connection)
+            try await service.deleteProfile(named: name, connection: connection)
         }) {
             profileSnapshot = value
             hiddenProfilesByHost[connection.hostConnectionFingerprint]?.remove(name)

@@ -15,15 +15,90 @@ final class MobileCompanionService: @unchecked Sendable {
         try await execute(connection: connection, operation: "gateway_action", arguments: ["action": action.rawValue])
     }
 
+    func updateGatewayChannel(
+        id: String,
+        enabled: Bool,
+        values: [String: String],
+        clearKeys: [String],
+        connection: ConnectionProfile
+    ) async throws -> GatewaySnapshot {
+        try await execute(
+            connection: connection,
+            operation: "gateway_channel_update",
+            jsonArguments: [
+                "channel_id": .string(id),
+                "enabled": .bool(enabled),
+                "values": .object(values.mapValues(JSONValue.string)),
+                "clear_keys": .array(clearKeys.map(JSONValue.string)),
+            ]
+        )
+    }
+
     func profileSnapshot(connection: ConnectionProfile) async throws -> ProfileManagementSnapshot {
         try await execute(connection: connection, operation: "profile_snapshot")
     }
 
-    func deleteProfile(named name: String, confirmationFlag: String, connection: ConnectionProfile) async throws -> ProfileManagementSnapshot {
+    func createProfile(
+        named name: String,
+        description: String,
+        mode: AgentCreationMode,
+        connection: ConnectionProfile
+    ) async throws -> ProfileManagementSnapshot {
         try await execute(
             connection: connection,
-            operation: "delete_profile",
-            arguments: ["name": name, "confirmation_flag": confirmationFlag]
+            operation: "profile_create",
+            arguments: [
+                "name": name,
+                "description": description,
+                "mode": mode.rawValue,
+            ]
+        )
+    }
+
+    func renameProfile(
+        named name: String,
+        to newName: String,
+        connection: ConnectionProfile
+    ) async throws -> ProfileManagementSnapshot {
+        try await execute(
+            connection: connection,
+            operation: "profile_rename",
+            arguments: ["name": name, "new_name": newName]
+        )
+    }
+
+    func updateProfileDescription(
+        named name: String,
+        description: String,
+        connection: ConnectionProfile
+    ) async throws -> ProfileManagementSnapshot {
+        try await execute(
+            connection: connection,
+            operation: "profile_description",
+            arguments: ["name": name, "description": description]
+        )
+    }
+
+    func updateProfileSoul(
+        named name: String,
+        content: String,
+        connection: ConnectionProfile
+    ) async throws -> ProfileManagementSnapshot {
+        try await execute(
+            connection: connection,
+            operation: "profile_soul",
+            jsonArguments: [
+                "name": .string(name),
+                "content": .string(content),
+            ]
+        )
+    }
+
+    func deleteProfile(named name: String, connection: ConnectionProfile) async throws -> ProfileManagementSnapshot {
+        try await execute(
+            connection: connection,
+            operation: "profile_delete",
+            arguments: ["name": name]
         )
     }
 
@@ -114,7 +189,9 @@ import tempfile
 home = pathlib.Path.home()
 requested_home = pathlib.Path(os.path.expanduser(str(payload.get("hermes_home") or "~/.hermes")))
 profile_name = str(payload.get("profile_name") or "").strip()
-hermes = shutil.which("hermes")
+os.environ["HERMES_HOME"] = str(requested_home)
+os.environ["PATH"] = hermes_search_path(payload)
+hermes = find_hermes_binary(payload)
 
 def command_args(*parts):
     args = [hermes]
@@ -167,49 +244,269 @@ def gateway_snapshot():
     result = run("gateway", "status")
     output = cleaned((result.stdout or "") + "\n" + (result.stderr or ""))
     lower = output.lower()
-    running = None
-    if output:
-        running = not any(token in lower for token in ("not running", "stopped", "inactive", "no gateway"))
-        if any(token in lower for token in ("running", "active", "pid")):
-            running = True
     manager = next((name for name in ("systemd", "launchd", "s6", "manual", "termux", "docker") if name in lower), None)
-    config = read_yaml(requested_home / "config.yaml")
+
+    runtime = None
+    process_id = None
+    running = None
+    state = None
+    updated_at = None
+    exit_reason = None
+    try:
+        from gateway.status import get_running_pid, get_runtime_status_running_pid, read_runtime_status
+        runtime = read_runtime_status()
+        process_id = get_running_pid()
+        if process_id is None:
+            process_id = get_runtime_status_running_pid(runtime)
+        running = process_id is not None
+        if isinstance(runtime, dict):
+            state = runtime.get("gateway_state")
+            updated_at = runtime.get("updated_at")
+            exit_reason = runtime.get("exit_reason")
+        if running and state in (None, "stopped"):
+            state = "running"
+        elif not running and state not in ("startup_failed",):
+            state = "stopped"
+    except Exception:
+        running = None
+
     channels = []
-    channel_root = config.get("channels") if isinstance(config.get("channels"), dict) else {}
-    candidates = set(channel_root.keys())
-    candidates.update(key for key in config.keys() if str(key).lower() in {"telegram", "discord", "slack", "whatsapp", "signal", "matrix"})
-    for raw_name in sorted(candidates, key=lambda value: str(value).lower()):
-        name = str(raw_name)
-        value = channel_root.get(raw_name, config.get(raw_name))
-        mapping = value if isinstance(value, dict) else {}
-        configured = bool(mapping) and any(v not in (None, "", False, [], {}) for k, v in mapping.items() if "token" not in str(k).lower() and "secret" not in str(k).lower())
-        configured = configured or any("token" in str(k).lower() or "secret" in str(k).lower() for k in mapping)
-        channels.append({"id": name.lower(), "name": name.replace("_", " ").title(), "enabled": mapping.get("enabled"), "configured": configured})
-    error = output if result.returncode != 0 else None
+    try:
+        from hermes_cli.config import load_env
+        from hermes_cli.web_server import _messaging_platform_catalog, _messaging_platform_payload
+        env_on_disk = load_env()
+        for entry in _messaging_platform_catalog():
+            channel = _messaging_platform_payload(entry, env_on_disk, runtime)
+            channels.append({
+                "id": channel["id"],
+                "name": channel["name"],
+                "description": channel.get("description"),
+                "enabled": bool(channel.get("enabled")),
+                "configured": bool(channel.get("configured")),
+                "state": str(channel.get("state") or "unknown"),
+                "error_message": channel.get("error_message"),
+                "updated_at": channel.get("updated_at"),
+                "credentials": [
+                    {
+                        "key": field["key"],
+                        "prompt": field.get("prompt") or field["key"],
+                        "description": field.get("description"),
+                        "required": bool(field.get("required")),
+                        "is_set": bool(field.get("is_set")),
+                        "is_password": bool(field.get("is_password")),
+                        "advanced": bool(field.get("advanced")),
+                    }
+                    for field in channel.get("env_vars", [])
+                ],
+            })
+    except Exception:
+        try:
+            from gateway.config import Platform, load_gateway_config
+            gateway_config = load_gateway_config()
+            runtime_platforms = runtime.get("platforms", {}) if isinstance(runtime, dict) else {}
+            for platform in Platform:
+                if platform.value == "local":
+                    continue
+                platform_config = gateway_config.platforms.get(platform)
+                enabled = bool(platform_config and platform_config.enabled)
+                configured = bool(platform_config and gateway_config._is_platform_connected(platform, platform_config))
+                platform_runtime = runtime_platforms.get(platform.value, {}) if isinstance(runtime_platforms, dict) else {}
+                channel_state = platform_runtime.get("state") if isinstance(platform_runtime, dict) else None
+                if not enabled:
+                    channel_state = "disabled"
+                elif not configured:
+                    channel_state = "not_configured"
+                elif not running:
+                    channel_state = "gateway_stopped"
+                elif not channel_state:
+                    channel_state = "pending_restart"
+                channels.append({
+                    "id": platform.value,
+                    "name": platform.value.replace("_", " ").title(),
+                    "description": None,
+                    "enabled": enabled,
+                    "configured": configured,
+                    "state": channel_state,
+                    "error_message": platform_runtime.get("error_message") if isinstance(platform_runtime, dict) else None,
+                    "updated_at": platform_runtime.get("updated_at") if isinstance(platform_runtime, dict) else None,
+                    "credentials": [],
+                })
+        except Exception:
+            pass
+
+    error = exit_reason
+    if error is None and result.returncode != 0 and state not in ("stopped", None):
+        error = output
     return {
         "profile_name": profile_name or "default",
         "cli_available": hermes is not None,
         "lifecycle_available": lifecycle,
         "running": running,
+        "state": state,
+        "process_id": process_id,
         "manager": manager,
         "service_status": output[:800] or None,
         "last_error": error[:800] if error else None,
+        "updated_at": updated_at,
         "channels": channels,
     }
 
+def update_gateway_channel():
+    channel_id = str(payload.get("channel_id") or "").strip()
+    enabled = bool(payload.get("enabled"))
+    values = payload.get("values") or {}
+    clear_keys = payload.get("clear_keys") or []
+    try:
+        from hermes_cli.config import remove_env_value, save_env_value
+        from hermes_cli.web_server import _catalog_lookup, _write_platform_enabled
+        entry = _catalog_lookup(channel_id)
+        if not entry:
+            raise RuntimeError(f"Unknown messaging channel: {channel_id}")
+        allowed = set(entry.get("env_vars") or [])
+        for key in clear_keys:
+            if key not in allowed:
+                raise RuntimeError(f"{key} is not configurable for {entry['name']}.")
+            remove_env_value(key)
+        for key, value in values.items():
+            if key not in allowed:
+                raise RuntimeError(f"{key} is not configurable for {entry['name']}.")
+            text = str(value).strip()
+            if text:
+                save_env_value(key, text)
+        _write_platform_enabled(channel_id, enabled)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"This Hermes installation cannot safely configure channels: {exc}")
+    return gateway_snapshot()
+
 def profile_snapshot():
-    profiles = [{"name": "default", "path": "~/.hermes", "is_default": True, "exists": (home / ".hermes").exists()}]
-    profiles_dir = home / ".hermes" / "profiles"
-    if profiles_dir.exists():
-        for path in sorted((item for item in profiles_dir.iterdir() if item.is_dir()), key=lambda item: item.name.lower()):
-            profiles.append({"name": path.name, "path": "~/.hermes/profiles/" + path.name, "is_default": False, "exists": True})
-    result = run("profile", "--help")
-    if result.returncode != 0:
-        result = run("profiles", "--help")
-    text = cleaned((result.stdout or "") + "\n" + (result.stderr or ""))
-    delete_available = "delete" in text or "remove" in text
-    flag = next((candidate for candidate in ("--yes", "-y", "--force", "--no-input", "--non-interactive") if candidate in text), None)
-    return {"profiles": profiles, "delete_command_available": delete_available, "noninteractive_delete_flag": flag}
+    active_name = profile_name or "default"
+    agents = []
+    try:
+        from hermes_cli import profiles as profiles_module
+        for item in profiles_module.list_profiles():
+            soul = None
+            if item.name == active_name:
+                soul_path = pathlib.Path(item.path) / "SOUL.md"
+                if soul_path.is_file():
+                    try:
+                        soul = soul_path.read_text(encoding="utf-8")
+                    except Exception:
+                        soul = None
+            agents.append({
+                "name": item.name,
+                "path": str(item.path),
+                "is_default": bool(item.is_default),
+                "is_active": item.name == active_name,
+                "gateway_running": bool(item.gateway_running),
+                "model": item.model or None,
+                "provider": item.provider or None,
+                "has_environment": bool(item.has_env),
+                "skill_count": int(item.skill_count or 0),
+                "description": item.description or None,
+                "description_is_automatic": bool(item.description_auto),
+                "soul": soul,
+            })
+        return {
+            "agents": agents,
+            "active_profile_name": active_name,
+            "can_create": all(hasattr(profiles_module, name) for name in ("create_profile", "seed_profile_skills")),
+            "can_rename": hasattr(profiles_module, "rename_profile"),
+            "can_delete": hasattr(profiles_module, "delete_profile"),
+        }
+    except Exception:
+        fallback = [{"name": "default", "path": str(home / ".hermes"), "is_default": True}]
+        profiles_dir = home / ".hermes" / "profiles"
+        if profiles_dir.exists():
+            for path in sorted((item for item in profiles_dir.iterdir() if item.is_dir()), key=lambda item: item.name.lower()):
+                fallback.append({"name": path.name, "path": str(path), "is_default": False})
+        for item in fallback:
+            agents.append({
+                **item,
+                "is_active": item["name"] == active_name,
+                "gateway_running": False,
+                "model": None,
+                "provider": None,
+                "has_environment": (pathlib.Path(item["path"]) / ".env").exists(),
+                "skill_count": 0,
+                "description": None,
+                "description_is_automatic": False,
+                "soul": None,
+            })
+        return {
+            "agents": agents,
+            "active_profile_name": active_name,
+            "can_create": False,
+            "can_rename": False,
+            "can_delete": False,
+        }
+
+def profile_module():
+    from hermes_cli import profiles as profiles_module
+    return profiles_module
+
+def create_profile():
+    profiles_module = profile_module()
+    name = str(payload.get("name") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    mode = str(payload.get("mode") or "fresh")
+    clone_from = (profile_name or "default") if mode == "cloneCurrent" else None
+    profile_dir = profiles_module.create_profile(
+        name=name,
+        clone_from=clone_from,
+        clone_config=mode == "cloneCurrent",
+        description=description or None,
+    )
+    if mode != "cloneCurrent":
+        profiles_module.seed_profile_skills(profile_dir, quiet=True)
+    try:
+        collision = profiles_module.check_alias_collision(name)
+        if not collision:
+            profiles_module.create_wrapper_script(name)
+    except Exception:
+        pass
+    return profile_snapshot()
+
+def rename_profile():
+    profiles_module = profile_module()
+    name = str(payload.get("name") or "").strip()
+    new_name = str(payload.get("new_name") or "").strip()
+    if name in ("", "default"):
+        raise RuntimeError("The default profile cannot be renamed.")
+    profiles_module.rename_profile(name, new_name)
+    return profile_snapshot()
+
+def update_profile_description():
+    profiles_module = profile_module()
+    name = str(payload.get("name") or "").strip()
+    description = str(payload.get("description") or "").strip()
+    profile_dir = profiles_module.get_profile_dir(name)
+    profiles_module.write_profile_meta(
+        profile_dir,
+        description=description,
+        description_auto=False,
+    )
+    return profile_snapshot()
+
+def update_profile_soul():
+    profiles_module = profile_module()
+    name = str(payload.get("name") or "").strip()
+    content = str(payload.get("content") or "")
+    if name != (profile_name or "default"):
+        raise RuntimeError("Switch to this agent before editing its SOUL.md.")
+    profile_dir = profiles_module.get_profile_dir(name)
+    soul_path = profile_dir / "SOUL.md"
+    atomic_write(soul_path, content, 0o600)
+    return profile_snapshot()
+
+def delete_profile():
+    profiles_module = profile_module()
+    name = str(payload.get("name") or "").strip()
+    if name in ("", "default", profile_name):
+        raise RuntimeError("The default or currently managed profile cannot be deleted.")
+    profiles_module.delete_profile(name, yes=True)
+    return profile_snapshot()
 
 def kanban_path(board):
     if board and board != "default":
@@ -540,23 +837,20 @@ try:
         if action_result.returncode != 0:
             raise RuntimeError(cleaned(action_result.stderr or action_result.stdout) or f"Gateway {action} failed.")
         result = gateway_snapshot()
+    elif operation == "gateway_channel_update":
+        result = update_gateway_channel()
     elif operation == "profile_snapshot":
         result = profile_snapshot()
-    elif operation == "delete_profile":
-        name = str(payload.get("name") or "")
-        flag = str(payload.get("confirmation_flag") or "")
-        snapshot = profile_snapshot()
-        if name in ("", "default", profile_name):
-            raise RuntimeError("The default or currently active profile cannot be deleted.")
-        if flag != snapshot.get("noninteractive_delete_flag"):
-            raise RuntimeError("The installed Hermes CLI did not expose a verified noninteractive delete flag.")
-        command = "delete" if "delete" in cleaned(run("profile", "--help").stdout) else "remove"
-        deletion = run("profile", command, name, flag, timeout=90)
-        if deletion.returncode != 0:
-            deletion = run("profiles", command, name, flag, timeout=90)
-        if deletion.returncode != 0:
-            raise RuntimeError(cleaned(deletion.stderr or deletion.stdout) or "Profile deletion failed.")
-        result = profile_snapshot()
+    elif operation == "profile_create":
+        result = create_profile()
+    elif operation == "profile_rename":
+        result = rename_profile()
+    elif operation == "profile_description":
+        result = update_profile_description()
+    elif operation == "profile_soul":
+        result = update_profile_soul()
+    elif operation == "profile_delete":
+        result = delete_profile()
     elif operation == "kanban_snapshot":
         result = kanban_snapshot()
     elif operation == "kanban_update":
