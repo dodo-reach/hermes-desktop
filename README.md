@@ -78,6 +78,19 @@ host they already use, without adding another layer to trust.
 Use direct-local mode when Hermes is installed on this Mac. Use SSH mode for a
 Raspberry Pi, another Mac, a VPS, or a remote server.
 
+### Companion X/Twitter context
+
+When a Hermes workflow uses
+[Hermes Tweet](https://github.com/Xquik-dev/hermes-tweet) to collect X/Twitter
+account, post, or trend context, Hermes Desktop can keep the follow-up work in
+the same native loop: sessions, workspace files, editable skills, cron jobs,
+Kanban, usage, and terminal remain tied to the selected host and profile.
+
+Hermes Tweet is a third-party Hermes plugin from
+[Xquik](https://xquik.com), maintained by Xquik-dev and not by this repository.
+Xquik is an independent third-party service. Not affiliated with X Corp.
+"Twitter" and "X" are trademarks of X Corp.
+
 ## How the app is designed
 
 The app runs the same service commands either locally or over SSH. Sessions
@@ -324,7 +337,7 @@ It lets you choose the right one for the job.
 
 - Use `Chat` in `Sessions` when you want the real Hermes TUI embedded in the
   app, already scoped to the active connection and Hermes profile. The Chat
-  view is a hosted `hermes --tui` session — there is no separate Desktop
+  view is a hosted `hermes --tui` session - there is no separate Desktop
   conversation layer in front of it.
 - Use `Transcript` in `Sessions` when you want to inspect persisted history from
   the host without starting or resuming a live TUI.
