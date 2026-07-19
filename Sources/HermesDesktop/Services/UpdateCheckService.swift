@@ -59,8 +59,12 @@ struct UpdateCheckService: Sendable {
     }
 
     static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
-        let candidateComponents = numericVersionComponents(from: candidate)
-        let currentComponents = numericVersionComponents(from: current)
+        guard
+            let candidateComponents = numericVersionComponents(from: candidate),
+            let currentComponents = numericVersionComponents(from: current)
+        else {
+            return false
+        }
         let componentCount = max(candidateComponents.count, currentComponents.count)
 
         for index in 0..<componentCount {
@@ -87,10 +91,33 @@ struct UpdateCheckService: Sendable {
         return String(trimmed.dropFirst())
     }
 
-    private static func numericVersionComponents(from value: String) -> [Int] {
-        normalizedDisplayVersion(value)
-            .split { !$0.isNumber }
-            .compactMap { Int($0) }
+    private static func numericVersionComponents(from value: String) -> [Int]? {
+        let version = normalizedDisplayVersion(value)
+        let coreVersion = version.split(
+            whereSeparator: { $0 == "-" || $0 == "+" }
+        ).first ?? ""
+        let components = coreVersion.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+
+        guard !components.isEmpty else {
+            return nil
+        }
+
+        var numbers: [Int] = []
+        for component in components {
+            guard
+                !component.isEmpty,
+                component.allSatisfy(\.isNumber),
+                let number = Int(component)
+            else {
+                return nil
+            }
+            numbers.append(number)
+        }
+
+        return numbers
     }
 }
 

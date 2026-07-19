@@ -35,6 +35,14 @@ struct UpdateCheckServiceTests {
         #expect(UpdateCheckService.isVersion("v0.10.0", newerThan: "0.9.9"))
         #expect(!UpdateCheckService.isVersion("v0.6.1", newerThan: "0.6.1"))
         #expect(!UpdateCheckService.isVersion("v0.6.0", newerThan: "0.6.1"))
+        #expect(UpdateCheckService.isVersion("v0.6.2+19", newerThan: "0.6.1"))
+    }
+
+    @Test
+    func ignoresMalformedVersionStrings() {
+        #expect(!UpdateCheckService.isVersion("release-2026.07.20", newerThan: "1.2.0"))
+        #expect(!UpdateCheckService.isVersion("v1..3", newerThan: "1.2.0"))
+        #expect(!UpdateCheckService.isVersion("v1.3.0", newerThan: "current"))
     }
 
     @Test
